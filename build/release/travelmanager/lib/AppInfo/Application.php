@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\AppInfo;
 
+use OCA\TravelManager\Imap\HordeImapClient;
 use OCA\TravelManager\Imap\IImapClient;
-use OCA\TravelManager\Imap\StubImapClient;
 use OCA\TravelManager\Listener\TaskFailedListener;
 use OCA\TravelManager\Listener\TaskSuccessfulListener;
 use OCA\TravelManager\Llm\ILlmService;
@@ -29,9 +29,8 @@ class Application extends App implements IBootstrap {
 		// LLM access seam — single platform strategy for the MVP (V2).
 		$context->registerServiceAlias(ILlmService::class, TaskProcessingLlmService::class);
 
-		// IMAP seam — scaffold stub (no network I/O) until the Horde-backed
-		// client is wired in the ingestion implementation step (V3).
-		$context->registerServiceAlias(IImapClient::class, StubImapClient::class);
+		// IMAP seam — read-only Horde-backed client (V3).
+		$context->registerServiceAlias(IImapClient::class, HordeImapClient::class);
 
 		// Task Processing result delivery (V5).
 		$context->registerEventListener(TaskSuccessfulEvent::class, TaskSuccessfulListener::class);

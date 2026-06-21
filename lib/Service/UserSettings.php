@@ -8,6 +8,8 @@ namespace OCA\TravelManager\Service;
  * Immutable view of a single user's Travel Manager configuration.
  * The IMAP password is NOT carried here; it is read on demand from
  * ICredentialsManager by the ingestion layer.
+ *
+ * @psalm-import-type TravelManagerUserSettings from \OCA\TravelManager\ResponseDefinitions
  */
 class UserSettings implements \JsonSerializable {
 	public function __construct(
@@ -30,6 +32,9 @@ class UserSettings implements \JsonSerializable {
 			&& $this->hasPassword;
 	}
 
+	/**
+	 * @return TravelManagerUserSettings
+	 */
 	public function jsonSerialize(): array {
 		return [
 			'enabled' => $this->enabled,

@@ -4,12 +4,16 @@
 
 namespace Composer\Autoload;
 
-class ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c
+class ComposerStaticInit66ad8aeb493c11e2615490e9d18147a9
 {
     public static $prefixLengthsPsr4 = array (
         'O' => 
         array (
             'OCA\\TravelManager\\' => 18,
+        ),
+        'H' => 
+        array (
+            'Horde\\Socket\\' => 13,
         ),
         'B' => 
         array (
@@ -22,9 +26,79 @@ class ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c
         array (
             0 => __DIR__ . '/../..' . '/lib',
         ),
+        'Horde\\Socket\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/bytestream/horde-socket-client/lib/Horde/Socket',
+        ),
         'Bamarni\\Composer\\Bin\\' => 
         array (
             0 => __DIR__ . '/..' . '/bamarni/composer-bin-plugin/src',
+        ),
+    );
+
+    public static $prefixesPsr0 = array (
+        'H' => 
+        array (
+            'Horde_Translation' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-translation/lib',
+            ),
+            'Horde_Text_Flowed' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-text-flowed/lib',
+            ),
+            'Horde_Support' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-support/lib',
+            ),
+            'Horde_Stream_Wrapper' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-stream-wrapper/lib',
+            ),
+            'Horde_Stream_Filter' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib',
+            ),
+            'Horde_Stream' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-stream/lib',
+            ),
+            'Horde_Secret' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-secret/lib',
+            ),
+            'Horde_Mime' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-mime/lib',
+            ),
+            'Horde_Mail' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-mail/lib',
+            ),
+            'Horde_ListHeaders' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib',
+            ),
+            'Horde_Imap_Client' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib',
+            ),
+            'Horde_Idna' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-idna/lib',
+            ),
+            'Horde_Exception' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-exception/lib',
+            ),
+            'Horde_Crypt_Blowfish' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib',
+            ),
+            'Horde' => 
+            array (
+                0 => __DIR__ . '/..' . '/bytestream/horde-util/lib',
+            ),
         ),
     );
 
@@ -43,14 +117,243 @@ class ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c
         'Bamarni\\Composer\\Bin\\Logger' => __DIR__ . '/..' . '/bamarni/composer-bin-plugin/src/Logger.php',
         'Bamarni\\Composer\\Bin\\PublicIO' => __DIR__ . '/..' . '/bamarni/composer-bin-plugin/src/PublicIO.php',
         'Composer\\InstalledVersions' => __DIR__ . '/..' . '/composer/InstalledVersions.php',
+        'Horde\\Socket\\Client' => __DIR__ . '/..' . '/bytestream/horde-socket-client/lib/Horde/Socket/Client.php',
+        'Horde\\Socket\\Client\\Exception' => __DIR__ . '/..' . '/bytestream/horde-socket-client/lib/Horde/Socket/Client/Exception.php',
+        'Horde_Array' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/Array.php',
+        'Horde_Array_Sort_Helper' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/Array/Sort/Helper.php',
+        'Horde_Crypt_Blowfish' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish.php',
+        'Horde_Crypt_Blowfish_Base' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Base.php',
+        'Horde_Crypt_Blowfish_Exception' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Exception.php',
+        'Horde_Crypt_Blowfish_Mcrypt' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Mcrypt.php',
+        'Horde_Crypt_Blowfish_Openssl' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Openssl.php',
+        'Horde_Crypt_Blowfish_Pbkdf2' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Pbkdf2.php',
+        'Horde_Crypt_Blowfish_Php' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Php.php',
+        'Horde_Crypt_Blowfish_Php_Base' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Php/Base.php',
+        'Horde_Crypt_Blowfish_Php_Cbc' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Php/Cbc.php',
+        'Horde_Crypt_Blowfish_Php_Ecb' => __DIR__ . '/..' . '/bytestream/horde-crypt-blowfish/lib/Horde/Crypt/Blowfish/Php/Ecb.php',
+        'Horde_Domhtml' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/Domhtml.php',
+        'Horde_Exception' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception.php',
+        'Horde_Exception_LastError' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/LastError.php',
+        'Horde_Exception_NotFound' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/NotFound.php',
+        'Horde_Exception_Pear' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/Pear.php',
+        'Horde_Exception_PermissionDenied' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/PermissionDenied.php',
+        'Horde_Exception_Translation' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/Translation.php',
+        'Horde_Exception_Wrapped' => __DIR__ . '/..' . '/bytestream/horde-exception/lib/Horde/Exception/Wrapped.php',
+        'Horde_Idna' => __DIR__ . '/..' . '/bytestream/horde-idna/lib/Horde/Idna.php',
+        'Horde_Idna_Exception' => __DIR__ . '/..' . '/bytestream/horde-idna/lib/Horde/Idna/Exception.php',
+        'Horde_Idna_Punycode' => __DIR__ . '/..' . '/bytestream/horde-idna/lib/Horde/Idna/Punycode.php',
+        'Horde_Idna_Translation' => __DIR__ . '/..' . '/bytestream/horde-idna/lib/Horde/Idna/Translation.php',
+        'Horde_Imap_Client' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client.php',
+        'Horde_Imap_Client_Auth_DigestMD5' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Auth/DigestMD5.php',
+        'Horde_Imap_Client_Auth_Scram' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Auth/Scram.php',
+        'Horde_Imap_Client_Base' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base.php',
+        'Horde_Imap_Client_Base_Alerts' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base/Alerts.php',
+        'Horde_Imap_Client_Base_Debug' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base/Debug.php',
+        'Horde_Imap_Client_Base_Deprecated' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base/Deprecated.php',
+        'Horde_Imap_Client_Base_Mailbox' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base/Mailbox.php',
+        'Horde_Imap_Client_Base_Password' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Base/Password.php',
+        'Horde_Imap_Client_Cache' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache.php',
+        'Horde_Imap_Client_Cache_Backend' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend.php',
+        'Horde_Imap_Client_Cache_Backend_Cache' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend/Cache.php',
+        'Horde_Imap_Client_Cache_Backend_Db' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend/Db.php',
+        'Horde_Imap_Client_Cache_Backend_Hashtable' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend/Hashtable.php',
+        'Horde_Imap_Client_Cache_Backend_Mongo' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend/Mongo.php',
+        'Horde_Imap_Client_Cache_Backend_Null' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Cache/Backend/Null.php',
+        'Horde_Imap_Client_Data_Acl' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Acl.php',
+        'Horde_Imap_Client_Data_AclCommon' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/AclCommon.php',
+        'Horde_Imap_Client_Data_AclNegative' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/AclNegative.php',
+        'Horde_Imap_Client_Data_AclRights' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/AclRights.php',
+        'Horde_Imap_Client_Data_BaseSubject' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/BaseSubject.php',
+        'Horde_Imap_Client_Data_Capability' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Capability.php',
+        'Horde_Imap_Client_Data_Capability_Imap' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Capability/Imap.php',
+        'Horde_Imap_Client_Data_Envelope' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Envelope.php',
+        'Horde_Imap_Client_Data_Fetch' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Fetch.php',
+        'Horde_Imap_Client_Data_Fetch_Pop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Fetch/Pop3.php',
+        'Horde_Imap_Client_Data_Format' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format.php',
+        'Horde_Imap_Client_Data_Format_Astring' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Astring.php',
+        'Horde_Imap_Client_Data_Format_Astring_Nonascii' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Astring/Nonascii.php',
+        'Horde_Imap_Client_Data_Format_Atom' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Atom.php',
+        'Horde_Imap_Client_Data_Format_Date' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Date.php',
+        'Horde_Imap_Client_Data_Format_DateTime' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/DateTime.php',
+        'Horde_Imap_Client_Data_Format_Exception' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Exception.php',
+        'Horde_Imap_Client_Data_Format_Filter_Quote' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Filter/Quote.php',
+        'Horde_Imap_Client_Data_Format_Filter_String' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Filter/String.php',
+        'Horde_Imap_Client_Data_Format_List' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/List.php',
+        'Horde_Imap_Client_Data_Format_ListMailbox' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/ListMailbox.php',
+        'Horde_Imap_Client_Data_Format_ListMailbox_Utf8' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/ListMailbox/Utf8.php',
+        'Horde_Imap_Client_Data_Format_Mailbox' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Mailbox.php',
+        'Horde_Imap_Client_Data_Format_Mailbox_Utf8' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Mailbox/Utf8.php',
+        'Horde_Imap_Client_Data_Format_Nil' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Nil.php',
+        'Horde_Imap_Client_Data_Format_Nstring' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Nstring.php',
+        'Horde_Imap_Client_Data_Format_Nstring_Nonascii' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Nstring/Nonascii.php',
+        'Horde_Imap_Client_Data_Format_Number' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/Number.php',
+        'Horde_Imap_Client_Data_Format_String' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/String.php',
+        'Horde_Imap_Client_Data_Format_String_Nonascii' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/String/Nonascii.php',
+        'Horde_Imap_Client_Data_Format_String_Support_Nonascii' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Format/String/Support/Nonascii.php',
+        'Horde_Imap_Client_Data_Namespace' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Namespace.php',
+        'Horde_Imap_Client_Data_SearchCharset' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/SearchCharset.php',
+        'Horde_Imap_Client_Data_SearchCharset_Utf8' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/SearchCharset/Utf8.php',
+        'Horde_Imap_Client_Data_Sync' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Sync.php',
+        'Horde_Imap_Client_Data_Thread' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Data/Thread.php',
+        'Horde_Imap_Client_DateTime' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/DateTime.php',
+        'Horde_Imap_Client_Exception' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception.php',
+        'Horde_Imap_Client_Exception_NoSupportExtension' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception/NoSupportExtension.php',
+        'Horde_Imap_Client_Exception_NoSupportPop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception/NoSupportPop3.php',
+        'Horde_Imap_Client_Exception_SearchCharset' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception/SearchCharset.php',
+        'Horde_Imap_Client_Exception_ServerResponse' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception/ServerResponse.php',
+        'Horde_Imap_Client_Exception_Sync' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Exception/Sync.php',
+        'Horde_Imap_Client_Fetch_Query' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Fetch/Query.php',
+        'Horde_Imap_Client_Fetch_Results' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Fetch/Results.php',
+        'Horde_Imap_Client_Ids' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Ids.php',
+        'Horde_Imap_Client_Ids_Map' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Ids/Map.php',
+        'Horde_Imap_Client_Ids_Pop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Ids/Pop3.php',
+        'Horde_Imap_Client_Interaction_Client' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Client.php',
+        'Horde_Imap_Client_Interaction_Command' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Command.php',
+        'Horde_Imap_Client_Interaction_Command_Continuation' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Command/Continuation.php',
+        'Horde_Imap_Client_Interaction_Pipeline' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Pipeline.php',
+        'Horde_Imap_Client_Interaction_Server' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Server.php',
+        'Horde_Imap_Client_Interaction_Server_Continuation' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Server/Continuation.php',
+        'Horde_Imap_Client_Interaction_Server_Tagged' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Server/Tagged.php',
+        'Horde_Imap_Client_Interaction_Server_Untagged' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Interaction/Server/Untagged.php',
+        'Horde_Imap_Client_Mailbox' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Mailbox.php',
+        'Horde_Imap_Client_Mailbox_List' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Mailbox/List.php',
+        'Horde_Imap_Client_Namespace_List' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Namespace/List.php',
+        'Horde_Imap_Client_Password_Xoauth2' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Password/Xoauth2.php',
+        'Horde_Imap_Client_Search_Query' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Search/Query.php',
+        'Horde_Imap_Client_Socket' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket.php',
+        'Horde_Imap_Client_Socket_Catenate' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/Catenate.php',
+        'Horde_Imap_Client_Socket_ClientSort' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/ClientSort.php',
+        'Horde_Imap_Client_Socket_Connection_Base' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/Connection/Base.php',
+        'Horde_Imap_Client_Socket_Connection_Pop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/Connection/Pop3.php',
+        'Horde_Imap_Client_Socket_Connection_Socket' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/Connection/Socket.php',
+        'Horde_Imap_Client_Socket_Pop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Socket/Pop3.php',
+        'Horde_Imap_Client_Tokenize' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Tokenize.php',
+        'Horde_Imap_Client_Translation' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Translation.php',
+        'Horde_Imap_Client_Url' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Url.php',
+        'Horde_Imap_Client_Url_Base' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Url/Base.php',
+        'Horde_Imap_Client_Url_Imap' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Url/Imap.php',
+        'Horde_Imap_Client_Url_Imap_Relative' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Url/Imap/Relative.php',
+        'Horde_Imap_Client_Url_Pop3' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Url/Pop3.php',
+        'Horde_Imap_Client_Utf7imap' => __DIR__ . '/..' . '/bytestream/horde-imap-client/lib/Horde/Imap/Client/Utf7imap.php',
+        'Horde_ListHeaders' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders.php',
+        'Horde_ListHeaders_Base' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders/Base.php',
+        'Horde_ListHeaders_Id' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders/Id.php',
+        'Horde_ListHeaders_NoPost' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders/NoPost.php',
+        'Horde_ListHeaders_Object' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders/Object.php',
+        'Horde_ListHeaders_Translation' => __DIR__ . '/..' . '/bytestream/horde-listheaders/lib/Horde/ListHeaders/Translation.php',
+        'Horde_Mail_Exception' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Exception.php',
+        'Horde_Mail_Mbox_Parse' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Mbox/Parse.php',
+        'Horde_Mail_Rfc822' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822.php',
+        'Horde_Mail_Rfc822_Address' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/Address.php',
+        'Horde_Mail_Rfc822_Group' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/Group.php',
+        'Horde_Mail_Rfc822_GroupList' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/GroupList.php',
+        'Horde_Mail_Rfc822_Identification' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/Identification.php',
+        'Horde_Mail_Rfc822_List' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/List.php',
+        'Horde_Mail_Rfc822_Object' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Rfc822/Object.php',
+        'Horde_Mail_Translation' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Translation.php',
+        'Horde_Mail_Transport' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport.php',
+        'Horde_Mail_Transport_Lmtphorde' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Lmtphorde.php',
+        'Horde_Mail_Transport_Mail' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Mail.php',
+        'Horde_Mail_Transport_Mock' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Mock.php',
+        'Horde_Mail_Transport_Null' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Null.php',
+        'Horde_Mail_Transport_Sendmail' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Sendmail.php',
+        'Horde_Mail_Transport_Smtp' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Smtp.php',
+        'Horde_Mail_Transport_Smtphorde' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Smtphorde.php',
+        'Horde_Mail_Transport_Smtpmx' => __DIR__ . '/..' . '/bytestream/horde-mail/lib/Horde/Mail/Transport/Smtpmx.php',
+        'Horde_Mime' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime.php',
+        'Horde_Mime_ContentParam_Decode' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/ContentParam/Decode.php',
+        'Horde_Mime_Exception' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Exception.php',
+        'Horde_Mime_Filter_Encoding' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Filter/Encoding.php',
+        'Horde_Mime_Headers' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers.php',
+        'Horde_Mime_Headers_Addresses' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Addresses.php',
+        'Horde_Mime_Headers_AddressesMulti' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/AddressesMulti.php',
+        'Horde_Mime_Headers_ContentDescription' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentDescription.php',
+        'Horde_Mime_Headers_ContentId' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentId.php',
+        'Horde_Mime_Headers_ContentLanguage' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentLanguage.php',
+        'Horde_Mime_Headers_ContentParam' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentParam.php',
+        'Horde_Mime_Headers_ContentParam_ContentDisposition' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentParam/ContentDisposition.php',
+        'Horde_Mime_Headers_ContentParam_ContentType' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentParam/ContentType.php',
+        'Horde_Mime_Headers_ContentTransferEncoding' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/ContentTransferEncoding.php',
+        'Horde_Mime_Headers_Date' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Date.php',
+        'Horde_Mime_Headers_Deprecated' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Deprecated.php',
+        'Horde_Mime_Headers_Element' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Element.php',
+        'Horde_Mime_Headers_Element_Address' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Element/Address.php',
+        'Horde_Mime_Headers_Element_Multiple' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Element/Multiple.php',
+        'Horde_Mime_Headers_Element_Single' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Element/Single.php',
+        'Horde_Mime_Headers_Extension_Mime' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Extension/Mime.php',
+        'Horde_Mime_Headers_Identification' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Identification.php',
+        'Horde_Mime_Headers_MessageId' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/MessageId.php',
+        'Horde_Mime_Headers_Mime' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Mime.php',
+        'Horde_Mime_Headers_MimeVersion' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/MimeVersion.php',
+        'Horde_Mime_Headers_Received' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Received.php',
+        'Horde_Mime_Headers_Subject' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/Subject.php',
+        'Horde_Mime_Headers_UserAgent' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Headers/UserAgent.php',
+        'Horde_Mime_Id' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Id.php',
+        'Horde_Mime_Magic' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Magic.php',
+        'Horde_Mime_Mail' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Mail.php',
+        'Horde_Mime_Mdn' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Mdn.php',
+        'Horde_Mime_Part' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Part.php',
+        'Horde_Mime_Part_Iterator' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Part/Iterator.php',
+        'Horde_Mime_Part_Upgrade_V1' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Part/Upgrade/V1.php',
+        'Horde_Mime_QuotedPrintable' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/QuotedPrintable.php',
+        'Horde_Mime_Related' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Related.php',
+        'Horde_Mime_Translation' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Translation.php',
+        'Horde_Mime_Uudecode' => __DIR__ . '/..' . '/bytestream/horde-mime/lib/Horde/Mime/Uudecode.php',
+        'Horde_Secret' => __DIR__ . '/..' . '/bytestream/horde-secret/lib/Horde/Secret.php',
+        'Horde_Secret_Exception' => __DIR__ . '/..' . '/bytestream/horde-secret/lib/Horde/Secret/Exception.php',
+        'Horde_Stream' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream.php',
+        'Horde_Stream_Exception' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream/Exception.php',
+        'Horde_Stream_Existing' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream/Existing.php',
+        'Horde_Stream_Filter_Bin2hex' => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib/Horde/Stream/Filter/Bin2hex.php',
+        'Horde_Stream_Filter_Crc32' => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib/Horde/Stream/Filter/Crc32.php',
+        'Horde_Stream_Filter_Eol' => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib/Horde/Stream/Filter/Eol.php',
+        'Horde_Stream_Filter_Htmlspecialchars' => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib/Horde/Stream/Filter/Htmlspecialchars.php',
+        'Horde_Stream_Filter_Null' => __DIR__ . '/..' . '/bytestream/horde-stream-filter/lib/Horde/Stream/Filter/Null.php',
+        'Horde_Stream_String' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream/String.php',
+        'Horde_Stream_Temp' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream/Temp.php',
+        'Horde_Stream_TempString' => __DIR__ . '/..' . '/bytestream/horde-stream/lib/Horde/Stream/TempString.php',
+        'Horde_Stream_Wrapper_Combine' => __DIR__ . '/..' . '/bytestream/horde-stream-wrapper/lib/Horde/Stream/Wrapper/Combine.php',
+        'Horde_Stream_Wrapper_CombineStream' => __DIR__ . '/..' . '/bytestream/horde-stream-wrapper/lib/Horde/Stream/Wrapper/CombineStream.php',
+        'Horde_Stream_Wrapper_String' => __DIR__ . '/..' . '/bytestream/horde-stream-wrapper/lib/Horde/Stream/Wrapper/String.php',
+        'Horde_Stream_Wrapper_StringStream' => __DIR__ . '/..' . '/bytestream/horde-stream-wrapper/lib/Horde/Stream/Wrapper/StringStream.php',
+        'Horde_String' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/String.php',
+        'Horde_String_Transliterate' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/String/Transliterate.php',
+        'Horde_Support_Array' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Array.php',
+        'Horde_Support_Backtrace' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Backtrace.php',
+        'Horde_Support_CaseInsensitiveArray' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/CaseInsensitiveArray.php',
+        'Horde_Support_CombineStream' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/CombineStream.php',
+        'Horde_Support_ConsistentHash' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/ConsistentHash.php',
+        'Horde_Support_Guid' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Guid.php',
+        'Horde_Support_Inflector' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Inflector.php',
+        'Horde_Support_Memory' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Memory.php',
+        'Horde_Support_Numerizer' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Numerizer.php',
+        'Horde_Support_Numerizer_Locale_Base' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Numerizer/Locale/Base.php',
+        'Horde_Support_Numerizer_Locale_De' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Numerizer/Locale/De.php',
+        'Horde_Support_Numerizer_Locale_Pt' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Numerizer/Locale/Pt.php',
+        'Horde_Support_ObjectStub' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/ObjectStub.php',
+        'Horde_Support_Randomid' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Randomid.php',
+        'Horde_Support_Stack' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Stack.php',
+        'Horde_Support_StringStream' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/StringStream.php',
+        'Horde_Support_Stub' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Stub.php',
+        'Horde_Support_Timer' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Timer.php',
+        'Horde_Support_Uuid' => __DIR__ . '/..' . '/bytestream/horde-support/lib/Horde/Support/Uuid.php',
+        'Horde_Text_Flowed' => __DIR__ . '/..' . '/bytestream/horde-text-flowed/lib/Horde/Text/Flowed.php',
+        'Horde_Translation' => __DIR__ . '/..' . '/bytestream/horde-translation/lib/Horde/Translation.php',
+        'Horde_Translation_Autodetect' => __DIR__ . '/..' . '/bytestream/horde-translation/lib/Horde/Translation/Autodetect.php',
+        'Horde_Translation_Exception' => __DIR__ . '/..' . '/bytestream/horde-translation/lib/Horde/Translation/Exception.php',
+        'Horde_Translation_Handler' => __DIR__ . '/..' . '/bytestream/horde-translation/lib/Horde/Translation/Handler.php',
+        'Horde_Translation_Handler_Gettext' => __DIR__ . '/..' . '/bytestream/horde-translation/lib/Horde/Translation/Handler/Gettext.php',
+        'Horde_Util' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/Util.php',
+        'Horde_Variables' => __DIR__ . '/..' . '/bytestream/horde-util/lib/Horde/Variables.php',
     );
 
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c::$prefixDirsPsr4;
-            $loader->classMap = ComposerStaticInit3c0227cdba18fe91dcc0262d7275c91c::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInit66ad8aeb493c11e2615490e9d18147a9::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInit66ad8aeb493c11e2615490e9d18147a9::$prefixDirsPsr4;
+            $loader->prefixesPsr0 = ComposerStaticInit66ad8aeb493c11e2615490e9d18147a9::$prefixesPsr0;
+            $loader->classMap = ComposerStaticInit66ad8aeb493c11e2615490e9d18147a9::$classMap;
 
         }, null, ClassLoader::class);
     }

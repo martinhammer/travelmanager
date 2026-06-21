@@ -7,5 +7,6 @@ $baseDir = dirname($vendorDir);
 
 return array(
     'OCA\\TravelManager\\' => array($baseDir . '/lib'),
+    'Horde\\Socket\\' => array($vendorDir . '/bytestream/horde-socket-client/lib/Horde/Socket'),
     'Bamarni\\Composer\\Bin\\' => array($vendorDir . '/bamarni/composer-bin-plugin/src'),
 );

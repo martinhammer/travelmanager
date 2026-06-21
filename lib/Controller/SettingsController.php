@@ -8,6 +8,7 @@ use OCA\TravelManager\Exception\ImapException;
 use OCA\TravelManager\Imap\IImapClient;
 use OCA\TravelManager\Imap\ImapConnection;
 use OCA\TravelManager\Service\ConfigService;
+use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\PasswordConfirmationRequired;
@@ -18,6 +19,9 @@ use OCP\IRequest;
 /**
  * Reads/writes the current user's Travel Manager settings. The IMAP password is
  * write-only over the API (stored via ICredentialsManager, never returned).
+ *
+ * @psalm-import-type TravelManagerUserSettings from \OCA\TravelManager\ResponseDefinitions
+ * @psalm-import-type TravelManagerConnectionTest from \OCA\TravelManager\ResponseDefinitions
  *
  * @psalm-suppress UnusedClass
  */
@@ -32,12 +36,34 @@ class SettingsController extends OCSController {
 		parent::__construct($appName, $request);
 	}
 
+	/**
+	 * Get the current user's Travel Manager settings
+	 *
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerUserSettings, array{}>
+	 *
+	 * 200: Settings returned
+	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'GET', url: '/api/settings')]
 	public function show(): DataResponse {
 		return new DataResponse($this->configService->getUserSettings($this->uid())->jsonSerialize());
 	}
 
+	/**
+	 * Update the current user's Travel Manager settings
+	 *
+	 * @param bool|null $enabled Whether automatic extraction is enabled for this user
+	 * @param string|null $imapHost IMAP host
+	 * @param int|null $imapPort IMAP port
+	 * @param string|null $imapSecurity Connection encryption (ssl, tls or none)
+	 * @param string|null $imapUser IMAP account / username
+	 * @param string|null $mailbox Mailbox / folder to read
+	 * @param int|null $intervalMinutes Check interval in minutes
+	 * @param string|null $imapPassword IMAP app password (write-only; blank keeps the current one)
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerUserSettings, array{}>
+	 *
+	 * 200: Updated settings returned
+	 */
 	#[NoAdminRequired]
 	#[PasswordConfirmationRequired]
 	#[ApiRoute(verb: 'PUT', url: '/api/settings')]
@@ -59,7 +85,7 @@ class SettingsController extends OCSController {
 			'imapUser' => $imapUser,
 			'mailbox' => $mailbox,
 			'intervalMinutes' => $intervalMinutes,
-		], static fn ($v) => $v !== null);
+		], static fn ($v): bool => $v !== null);
 		$this->configService->setUserSettings($uid, $values);
 
 		if ($imapPassword !== null && $imapPassword !== '') {
@@ -73,8 +99,11 @@ class SettingsController extends OCSController {
 	}
 
 	/**
-	 * Verify the stored credentials can open the mailbox. No-op until the
-	 * Horde-backed IMAP client replaces the scaffold stub.
+	 * Test the stored IMAP credentials against the configured mailbox
+	 *
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerConnectionTest, array{}>
+	 *
+	 * 200: Connection test result returned
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'POST', url: '/api/settings/test')]
@@ -95,7 +124,7 @@ class SettingsController extends OCSController {
 		);
 		try {
 			$this->imapClient->verify($connection);
-			return new DataResponse(['ok' => true]);
+			return new DataResponse(['ok' => true, 'error' => '']);
 		} catch (ImapException $e) {
 			return new DataResponse(['ok' => false, 'error' => $e->getMessage()]);
 		}

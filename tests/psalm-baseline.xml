@@ -69,20 +69,12 @@
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
   </file>
-  <file src="lib/Imap/ImapConnection.php">
-    <PossiblyUnusedProperty>
-      <code><![CDATA[$host]]></code>
-      <code><![CDATA[$mailbox]]></code>
-      <code><![CDATA[$password]]></code>
-      <code><![CDATA[$port]]></code>
-      <code><![CDATA[$security]]></code>
-      <code><![CDATA[$user]]></code>
-    </PossiblyUnusedProperty>
-  </file>
-  <file src="lib/Imap/ImapMessage.php">
+  <file src="lib/Imap/HordeImapClient.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Imap/ImapMessage.php">
     <PossiblyUnusedProperty>
       <code><![CDATA[$date]]></code>
     </PossiblyUnusedProperty>

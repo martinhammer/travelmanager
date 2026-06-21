@@ -34,6 +34,8 @@ use OCP\AppFramework\Db\Entity;
  * @method \DateTime|null getConfirmedAt()
  * @method void setConfirmedAt(?\DateTime $confirmedAt)
  *
+ * @psalm-import-type TravelManagerBooking from \OCA\TravelManager\ResponseDefinitions
+ *
  * @psalm-suppress PropertyNotSetInConstructor
  */
 class Booking extends Entity implements \JsonSerializable {
@@ -68,6 +70,9 @@ class Booking extends Entity implements \JsonSerializable {
 		$this->addType('confirmedAt', 'datetime');
 	}
 
+	/**
+	 * @return TravelManagerBooking
+	 */
 	public function jsonSerialize(): array {
 		return [
 			'id' => $this->id,

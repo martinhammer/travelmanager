@@ -42,6 +42,8 @@ use OCP\AppFramework\Db\Entity;
  * @method float|null getConfidence()
  * @method void setConfidence(?float $confidence)
  *
+ * @psalm-import-type TravelManagerSegment from \OCA\TravelManager\ResponseDefinitions
+ *
  * @psalm-suppress PropertyNotSetInConstructor
  */
 class Segment extends Entity implements \JsonSerializable {
@@ -71,6 +73,9 @@ class Segment extends Entity implements \JsonSerializable {
 		$this->addType('confidence', 'float');
 	}
 
+	/**
+	 * @return TravelManagerSegment
+	 */
 	public function jsonSerialize(): array {
 		return [
 			'id' => $this->id,

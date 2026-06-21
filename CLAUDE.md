@@ -39,7 +39,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   repair + validation. This is the most-tested unit.
 - `Service/IngestionService`, `Service/ExtractionResultHandler`, `Service/BookingService`, `Service/ConfigService`.
 - `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy).
-- `Imap/IImapClient` → `StubImapClient` (**stub — no network I/O yet**).
+- `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
+  `Imap/Html` is the pure HTML→text helper for HTML-only bodies.
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
 - `Listener/TaskSuccessfulListener`, `Listener/TaskFailedListener`.
 - `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date20260621000000`.
@@ -101,14 +102,17 @@ code follows the overrides.
 - ✅ Migration, entities, mappers, services, jobs, listeners, controllers,
   settings panels, Vue UI, DI wiring (`Application.php` + `info.xml`).
 - ✅ Psalm clean (errorLevel 1); php-cs-fixer clean; `php -l` clean.
-- ✅ `ExtractionServiceTest` — 12 tests pass standalone.
-- ⏳ `IImapClient` is `StubImapClient` (throws). **Next step:** vendor
-  `Horde_Imap_Client`, implement the real read-only client, swap the binding in
-  `Application::register()`, run flights end-to-end for one user, then enable
-  multi-user.
+- ✅ `ExtractionServiceTest` (12) + `HtmlTest` (7) pass standalone.
+- ✅ **Real IMAP**: `HordeImapClient` (read-only, `Horde_Imap_Client` vendored)
+  is bound as `IImapClient`; smoke-tested install/UI working in a live instance.
+- ⏳ **Next step:** run flights **end-to-end** for one user against a live
+  mailbox + Task Processing provider (the path is all wired — ingestion →
+  schedule → listener → draft), tune the extraction prompt on real emails, then
+  enable multi-user fan-out. PDF e-ticket attachments and Calendar/Notes
+  projection remain deferred.
 
-Build/implement order from here: IMAP ingestion + dedup → flight extraction
-end-to-end (single user) → draft/confirm UI polish → multi-user fan-out.
+Build/implement order from here: end-to-end flight extraction (single user) →
+prompt tuning on real emails → draft/confirm UI polish → multi-user fan-out.
 
 ## 5. Prerequisites (runtime)
 
@@ -174,6 +178,19 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
 - **Settings registration** is via `info.xml` `<settings>` (admin/admin-section/
   personal/personal-section) and `<background-jobs>`. **Bump the app version** when
   adding settings so Nextcloud re-registers them.
+- **Every routed controller method needs full OpenAPI docblocks** or
+  `composer openapi` (and the `openapi.yml` CI / `make openapi`) fails. Required:
+  a one-line summary (no trailing period), a `@param` for each parameter, a typed
+  `@return DataResponse<Http::STATUS_…, T, array{}>`, a `@throws OCS…Exception`
+  for each error path (mapped: NotFound→404, BadRequest→400, Forbidden→403), and
+  matching `NNN: description` status lines. Shared response shapes live as
+  `@psalm-type` in `lib/ResponseDefinitions.php` and are pulled in with
+  `@psalm-import-type … from \OCA\TravelManager\ResponseDefinitions`; the matching
+  entity/DTO `jsonSerialize()` carries the same `@return` shape so psalm stays
+  green. `array_map` over a list is `array<array-key,…>`, not `list<…>` — wrap in
+  `array_values(...)` when the spec type is `list<…>`. Mark internal-only
+  controllers `#[OpenAPI(OpenAPI::SCOPE_IGNORE)]` instead (as `PageController` does).
+  Regenerate and commit `openapi.json` whenever an endpoint changes.
 - **Frontend entries:** `vite.config.ts` entry keys map to output names
   `travelmanager-<key>`; PHP `Util::addScript('travelmanager', 'travelmanager-<key>')`
   must match. (The skeleton shipped `vite.config.ts` pointing at a non-existent
@@ -216,6 +233,15 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   commit the updated lockfile.
 - **DB identifier length:** keep index names short (`tm_*`) — Nextcloud enforces a
   ~30-char limit (Oracle); table names also stay well under it.
+- **IMAP / Horde.** `bytestream/horde-imap-client` is a **runtime** dep (in
+  `require`, not `require-dev`) so it ships in the `--no-dev` prod build. It is
+  **untyped**, so `HordeImapClient` carries blanket `@psalm-suppress Mixed*`
+  (adapter-over-untyped-lib) — keep all parsing/decoding logic that *can* be
+  typed (e.g. `Imap/Html`) out of that class so it stays analysable and testable.
+  Read-only discipline (V6) is enforced two ways: open the mailbox
+  `OPEN_READONLY` (EXAMINE) **and** fetch body parts with `['peek' => true]` so
+  the `\Seen` flag is never set. Dedup key is the envelope `message_id` (with a
+  synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
 - **Security:** the original brief contained a live **OpenRouter API key** — it is
   **exposed/compromised, must be rotated, and is not used anywhere** (the app
   routes through Nextcloud Task Processing, never a hard-coded provider). Never add

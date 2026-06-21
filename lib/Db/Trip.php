@@ -22,6 +22,8 @@ use OCP\AppFramework\Db\Entity;
  * @method \DateTime|null getUpdatedAt()
  * @method void setUpdatedAt(?\DateTime $updatedAt)
  *
+ * @psalm-import-type TravelManagerTrip from \OCA\TravelManager\ResponseDefinitions
+ *
  * @psalm-suppress PropertyNotSetInConstructor
  */
 class Trip extends Entity implements \JsonSerializable {
@@ -40,6 +42,9 @@ class Trip extends Entity implements \JsonSerializable {
 		$this->addType('updatedAt', 'datetime');
 	}
 
+	/**
+	 * @return TravelManagerTrip
+	 */
 	public function jsonSerialize(): array {
 		return [
 			'id' => $this->id,
