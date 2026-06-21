@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<files psalm-version="5.26.1@d747f6500b38ac4f7dfc5edbcae6e4b637d7add0">
+  <file src="lib/BackgroundJob/DispatcherJob.php">
+    <UnusedClass>
+      <code><![CDATA[DispatcherJob]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/BackgroundJob/UserIngestionJob.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Db/Booking.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$extractionJson]]></code>
+      <code><![CDATA[$sourceMessageId]]></code>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/BookingMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Db/ProcessedMessage.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$imapUid]]></code>
+      <code><![CDATA[$uidValidity]]></code>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/ProcessedMessageMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Db/Segment.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$extraJson]]></code>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/SegmentMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Db/TaskMap.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$createdAt]]></code>
+      <code><![CDATA[$messageId]]></code>
+      <code><![CDATA[$status]]></code>
+      <code><![CDATA[$taskId]]></code>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/TaskMapMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Db/Trip.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/TripMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Imap/ImapConnection.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$host]]></code>
+      <code><![CDATA[$mailbox]]></code>
+      <code><![CDATA[$password]]></code>
+      <code><![CDATA[$port]]></code>
+      <code><![CDATA[$security]]></code>
+      <code><![CDATA[$user]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Imap/ImapMessage.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$date]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Listener/TaskFailedListener.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Listener/TaskSuccessfulListener.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Llm/TaskProcessingLlmService.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Migration/Version1000Date20260621000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1000Date20260621000000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Service/BookingService.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+    <PossiblyUnusedReturnValue>
+      <code><![CDATA[Booking]]></code>
+      <code><![CDATA[Booking]]></code>
+      <code><![CDATA[Booking]]></code>
+    </PossiblyUnusedReturnValue>
+  </file>
+  <file src="lib/Service/ConfigService.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+      <code><![CDATA[deleteImapPassword]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Service/ExtractionResultHandler.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Service/IngestionService.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Settings/AdminSection.php">
+    <UnusedClass>
+      <code><![CDATA[AdminSection]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Settings/AdminSettings.php">
+    <UnusedClass>
+      <code><![CDATA[AdminSettings]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Settings/PersonalSection.php">
+    <UnusedClass>
+      <code><![CDATA[PersonalSection]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Settings/PersonalSettings.php">
+    <UnusedClass>
+      <code><![CDATA[PersonalSettings]]></code>
+    </UnusedClass>
+  </file>
+</files>
