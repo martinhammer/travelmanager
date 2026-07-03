@@ -235,8 +235,14 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   browser too:
   - `NcButton` styling prop is **`variant`** (`primary`/`secondary`/`tertiary`/…),
     **not** `type` (now the native button type). *(type error — caught by vue-tsc)*
-  - **No `.sync`** in Vue 3 — use `v-model:propName` (e.g. `v-model:value` on
-    `NcTextField`). *(eslint)*
+  - **No `.sync`** in Vue 3 — use `v-model`/`v-model:propName`. **Field
+    components take plain `v-model`, NOT `v-model:value`.** In v9
+    `NcTextField`/`NcInputField`/`NcPasswordField` emit **`update:modelValue`**
+    (standard `v-model`); they keep a deprecated `value` prop for compat, so
+    `v-model:value` *type-checks* but binds the wrong prop and listens for
+    `update:value`, which **never fires** — the input neither shows the reactive
+    state nor writes back to it, so forms silently submit stale/empty values.
+    Use `v-model="form.field"`. **Runtime-only failure — not caught by vue-tsc.**
   - `NcCheckboxRadioSwitch` migrated from `:checked` + `@update:checked` to
     **`v-model`** (`modelValue`/`update:modelValue`). The old `:checked` still
     binds the initial state so it *looks* fine, but `@update:checked` never fires
@@ -245,7 +251,25 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
     `node_modules/@nextcloud/vue/dist/chunks/Nc*.mjs`.
 - **`@nextcloud/dialogs` must be ^7** (v6 pins a `@nextcloud/vue ^8` peer that
   conflicts with v9 and blocks `npm install`). v7 dropped the `@nextcloud/vue`
-  peer.
+  peer. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5
+  pins Vue 2 / `@nextcloud/vue ^8`; v6 dropped the peers and is Vue-3 clean).
+- **OCS URL helper must not encode path slashes.** `generateOcsUrl(url, params)`
+  runs `encodeURIComponent` on every `{param}` (option `escape` defaults to
+  `true`), so passing a multi-segment path as one param —
+  `generateOcsUrl('apps/travelmanager/api/{path}', { path: 'dev/logs' })` — yields
+  `dev%2Flogs` and the route 404s. Only single-segment paths survive. Interpolate
+  the sub-path straight into the template instead:
+  `generateOcsUrl(\`apps/travelmanager/api/${path}\`)` (all our paths are
+  app-controlled with numeric ids, so no escaping is needed). See `base()` in
+  `src/api.ts`.
+- **`#[PasswordConfirmationRequired]` needs a frontend confirm step.** A method
+  marked `PasswordConfirmationRequired` (we use it on `SettingsController::update`,
+  which writes the IMAP app password) returns **403** unless the user re-confirmed
+  their password within the sudo window (~30 min; login counts, so it passes right
+  after sign-in then starts failing). Call **`await confirmPassword()`** from
+  `@nextcloud/password-confirmation` before the request (it only prompts when
+  needed; treat a rejection as the user cancelling). See `onSave()` in
+  `src/PersonalSettings.vue`.
 - **Native UI, not browser dialogs.** `@nextcloud/dialogs` is for **toasts only**
   (`showError`/`showSuccess`). For prompts/confirms use the **`NcDialog`**
   component (with `NcTextField`/`NcButton` in the `#actions` slot) controlled by a
@@ -278,6 +302,28 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   `OPEN_READONLY` (EXAMINE) **and** fetch body parts with `['peek' => true]` so
   the `\Seen` flag is never set. Dedup key is the envelope `message_id` (with a
   synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
+- **Fetch the last N by sequence number, not SEARCH/SORT.** `fetchRecent` reads
+  the mailbox `MESSAGES` count and fetches the trailing sequence range
+  `max-N+1:max` (new mail arrives last), then `array_reverse`s to newest-first.
+  The earlier approach (`search()` with an empty `Search_Query` + a `SORT
+  (REVERSE ARRIVAL)` option) is fragile: some servers (e.g. Purelymail) reject the
+  resulting `UID SORT … ` with no search key as **`UID failed. Illegal
+  arguments.`**, and SORT isn't universally supported. Sequence fetch needs only
+  base IMAP. Surface real Horde errors via the exception's public `$details`
+  (raw server response) — `getMessage()` alone is the generic "IMAP error
+  reported by server." (see `HordeImapClient::describe()`).
+- **Loading the bundled Composer autoloader.** Nextcloud only auto-includes an
+  app's **`<app>/composer/autoload.php`** (`OC_App::registerAutoloading`), **not
+  `<app>/vendor/autoload.php`**. Our build ships the autoloader under `vendor/`,
+  so Horde's PSR-0 classes (`Horde_Imap_Client_Socket`, non-`OCA\` namespace, thus
+  invisible to NC's own loader) are *not registered* on a web request even though
+  the files are on disk — you get `Class "Horde_Imap_Client_Socket" not found`
+  from `HordeImapClient` while `php -r "require '<app>/vendor/autoload.php'; …"`
+  succeeds (that CLI test only proves the files exist, not that NC loaded them).
+  Fix: `Application::__construct()` `require_once`s `__DIR__/../../vendor/autoload.php`
+  itself (idempotent via Composer's static guard). Note the `-o` (not `-a`) build
+  keeps PSR-0 filesystem fallback, so this is purely a *registration* problem, not
+  a stale-classmap/opcache one.
 - **Security:** the original brief contained a live **OpenRouter API key** — it is
   **exposed/compromised, must be rotated, and is not used anywhere** (the app
   routes through Nextcloud Task Processing, never a hard-coded provider). Never add

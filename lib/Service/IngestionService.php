@@ -41,9 +41,13 @@ class IngestionService {
 	 */
 	public function ingestForUser(string $userId): int {
 		$settings = $this->configService->getUserSettings($userId);
-		if (!$settings->isConfigured()) {
-			$this->logger->debug('Travel Manager: user ' . $userId . ' not fully configured, skipping');
-			$this->activityLog->warning($userId, IngestionLog::STEP_CONNECT, 'Mailbox is not fully configured — nothing to do');
+		if (!$settings->isConnectable()) {
+			$this->logger->debug('Travel Manager: user ' . $userId . ' has no usable IMAP connection, skipping');
+			$this->activityLog->warning(
+				$userId,
+				IngestionLog::STEP_CONNECT,
+				'Mailbox connection is not fully configured — set the IMAP host, username, app password and a mailbox/folder (e.g. INBOX), then save',
+			);
 			return 0;
 		}
 

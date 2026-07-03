@@ -24,12 +24,21 @@ class UserSettings implements \JsonSerializable {
 	) {
 	}
 
-	public function isConfigured(): bool {
-		return $this->enabled
-			&& $this->imapHost !== ''
+	/**
+	 * Whether we have everything needed to open the IMAP connection. Does NOT
+	 * consider the per-user enabled flag, so the manual "read mailbox now" dev
+	 * trigger can run before the pipeline is switched on.
+	 */
+	public function isConnectable(): bool {
+		return $this->imapHost !== ''
 			&& $this->imapUser !== ''
 			&& $this->mailbox !== ''
 			&& $this->hasPassword;
+	}
+
+	/** Whether the background pipeline should process this user: connectable AND enabled. */
+	public function isConfigured(): bool {
+		return $this->enabled && $this->isConnectable();
 	}
 
 	/**

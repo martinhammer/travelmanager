@@ -145,7 +145,7 @@ onMounted(reload)
 		<NcDialog v-model:open="newTripOpen"
 			:name="t('travelmanager', 'New trip')"
 			size="small">
-			<NcTextField v-model:value="newTripName"
+			<NcTextField v-model="newTripName"
 				:label="t('travelmanager', 'Trip name')"
 				@keydown.enter="submitNewTrip" />
 			<template #actions>

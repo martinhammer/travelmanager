@@ -33,10 +33,10 @@ const onSave = async () => {
 			{{ t('travelmanager', 'Enable the Travel Manager extraction pipeline') }}
 		</NcCheckboxRadioSwitch>
 
-		<NcTextField v-model:value="form.rateLimitPerRun"
+		<NcTextField v-model="form.rateLimitPerRun"
 			type="number"
 			:label="t('travelmanager', 'Max messages processed per user per run')" />
-		<NcTextField v-model:value="form.localConcurrency"
+		<NcTextField v-model="form.localConcurrency"
 			type="number"
 			:label="t('travelmanager', 'Max concurrent local-model extractions')" />
 

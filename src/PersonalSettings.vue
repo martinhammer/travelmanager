@@ -10,6 +10,8 @@ import NcSettingsSection from '@nextcloud/vue/components/NcSettingsSection'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { loadState } from '@nextcloud/initial-state'
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { confirmPassword } from '@nextcloud/password-confirmation'
+import '@nextcloud/password-confirmation/style.css'
 import { t } from '@nextcloud/l10n'
 import {
 	type LogEntry,
@@ -40,6 +42,16 @@ const securityOptions = ['ssl', 'tls', 'none']
 const saving = ref(false)
 
 const onSave = async () => {
+	// The update endpoint is PasswordConfirmationRequired (it writes the IMAP
+	// app password), so re-confirm the account password first — Nextcloud only
+	// prompts if the sudo window has lapsed. A rejection means the user
+	// dismissed the dialog, so just abort silently.
+	try {
+		await confirmPassword()
+	} catch (e) {
+		return
+	}
+
 	saving.value = true
 	try {
 		const payload = { ...form }
@@ -145,17 +157,17 @@ onMounted(refreshLogs)
 			{{ t('travelmanager', 'Enable automatic extraction for my mailbox') }}
 		</NcCheckboxRadioSwitch>
 
-		<NcTextField v-model:value="form.imapHost" :label="t('travelmanager', 'IMAP host')" />
-		<NcTextField v-model:value="form.imapPort" type="number" :label="t('travelmanager', 'IMAP port')" />
+		<NcTextField v-model="form.imapHost" :label="t('travelmanager', 'IMAP host')" />
+		<NcTextField v-model="form.imapPort" type="number" :label="t('travelmanager', 'IMAP port')" />
 		<div :class="$style.field">
 			<label>{{ t('travelmanager', 'Encryption') }}</label>
 			<NcSelect v-model="form.imapSecurity" :options="securityOptions" :clearable="false" />
 		</div>
-		<NcTextField v-model:value="form.imapUser" :label="t('travelmanager', 'Account / username')" />
-		<NcPasswordField v-model:value="form.imapPassword"
+		<NcTextField v-model="form.imapUser" :label="t('travelmanager', 'Account / username')" />
+		<NcPasswordField v-model="form.imapPassword"
 			:label="hasPassword ? t('travelmanager', 'App password (leave blank to keep current)') : t('travelmanager', 'App password')" />
-		<NcTextField v-model:value="form.mailbox" :label="t('travelmanager', 'Mailbox / folder')" />
-		<NcTextField v-model:value="form.intervalMinutes" type="number" :label="t('travelmanager', 'Check interval (minutes)')" />
+		<NcTextField v-model="form.mailbox" :label="t('travelmanager', 'Mailbox / folder')" />
+		<NcTextField v-model="form.intervalMinutes" type="number" :label="t('travelmanager', 'Check interval (minutes)')" />
 
 		<div :class="$style.actions">
 			<NcButton variant="primary" :disabled="saving" @click="onSave">

@@ -1,7 +1,12 @@
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
 
-const base = (path: string): string => generateOcsUrl('apps/travelmanager/api/{path}', { path })
+// NB: interpolate the path directly rather than passing it as a {param}, because
+// generateOcsUrl runs encodeURIComponent on params (escape defaults to true),
+// which would turn the slash in multi-segment paths (e.g. "dev/logs") into
+// "%2F" and break route matching. All callers pass app-controlled paths with
+// numeric ids, so no escaping is needed here.
+const base = (path: string): string => generateOcsUrl(`apps/travelmanager/api/${path}`)
 
 export interface Segment {
 	id: number

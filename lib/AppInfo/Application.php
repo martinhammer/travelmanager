@@ -22,6 +22,18 @@ class Application extends App implements IBootstrap {
 
 	/** @psalm-suppress PossiblyUnusedMethod */
 	public function __construct() {
+		// Load our bundled Composer autoloader for the read-only Horde IMAP
+		// client. Nextcloud only auto-includes an app's `composer/autoload.php`
+		// (see OC_App::registerAutoloading), but the build ships the autoloader
+		// under `vendor/`, so Horde's PSR-0 classes (e.g. Horde_Imap_Client_Socket)
+		// would otherwise be unknown at request time. require_once + Composer's
+		// own static guard make this idempotent.
+		$autoloader = __DIR__ . '/../../vendor/autoload.php';
+		if (file_exists($autoloader)) {
+			/** @psalm-suppress UnresolvableInclude */
+			require_once $autoloader;
+		}
+
 		parent::__construct(self::APP_ID);
 	}
 

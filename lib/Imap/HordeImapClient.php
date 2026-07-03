@@ -8,7 +8,6 @@ use Horde_Imap_Client;
 use Horde_Imap_Client_Exception;
 use Horde_Imap_Client_Fetch_Query;
 use Horde_Imap_Client_Ids;
-use Horde_Imap_Client_Search_Query;
 use Horde_Imap_Client_Socket;
 use OCA\TravelManager\Exception\ImapException;
 use Psr\Log\LoggerInterface;
@@ -49,7 +48,7 @@ class HordeImapClient implements IImapClient {
 			// Opening read-only confirms the mailbox exists and is selectable.
 			$client->openMailbox($connection->mailbox, Horde_Imap_Client::OPEN_READONLY);
 		} catch (Horde_Imap_Client_Exception $e) {
-			throw new ImapException('IMAP verification failed: ' . $e->getMessage(), 0, $e);
+			throw new ImapException('IMAP verification failed: ' . $this->describe($e), 0, $e);
 		} finally {
 			$this->logout($client);
 		}
@@ -64,35 +63,66 @@ class HordeImapClient implements IImapClient {
 		try {
 			$client->openMailbox($mailbox, Horde_Imap_Client::OPEN_READONLY);
 
-			$status = $client->status($mailbox, Horde_Imap_Client::STATUS_UIDVALIDITY);
+			$status = $client->status(
+				$mailbox,
+				Horde_Imap_Client::STATUS_UIDVALIDITY | Horde_Imap_Client::STATUS_MESSAGES,
+			);
 			$uidValidity = (int)($status['uidvalidity'] ?? 0);
-
-			// All messages, newest first by arrival.
-			$searchResult = $client->search($mailbox, new Horde_Imap_Client_Search_Query(), [
-				'sort' => [Horde_Imap_Client::SORT_REVERSE, Horde_Imap_Client::SORT_ARRIVAL],
-			]);
-			$uids = $this->idsToArray($searchResult['match'] ?? null);
-			$uids = array_slice($uids, 0, $limit);
-			if ($uids === []) {
+			$total = (int)($status['messages'] ?? 0);
+			if ($total === 0) {
 				return [];
 			}
+
+			// Take the last $limit messages by sequence number (new mail arrives
+			// last). This deliberately avoids server-side SEARCH/SORT, which not
+			// every IMAP server supports (some reject `UID SORT … ALL` with
+			// "Illegal arguments").
+			$start = max(1, $total - $limit + 1);
+			$ids = new Horde_Imap_Client_Ids($start . ':' . $total, true);
 
 			$query = new Horde_Imap_Client_Fetch_Query();
 			$query->uid();
 			$query->envelope();
 			$query->structure();
-			$fetched = $client->fetch($mailbox, $query, ['ids' => new Horde_Imap_Client_Ids($uids)]);
+			$fetched = $client->fetch($mailbox, $query, ['ids' => $ids]);
 
 			$messages = [];
 			foreach ($fetched as $data) {
 				$messages[] = $this->buildMessage($client, $mailbox, $data, $uidValidity);
 			}
-			return $messages;
+			// Sequence order is oldest→newest; hand back newest first.
+			return array_reverse($messages);
 		} catch (Horde_Imap_Client_Exception $e) {
-			throw new ImapException('IMAP fetch failed: ' . $e->getMessage(), 0, $e);
+			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
 		} finally {
 			$this->logout($client);
 		}
+	}
+
+	/**
+	 * Build a useful message from a Horde IMAP exception. Horde's own
+	 * getMessage() is often a generic translated string ("IMAP error reported by
+	 * server."); the actual server response text is carried on the public
+	 * `$details` property (e.g. the raw tagged NO/BAD response). Surface both.
+	 *
+	 * `$details` is declared `public $details;` (nullable at runtime) despite
+	 * Horde's docblock typing it as string, hence the null-guard + suppressions.
+	 *
+	 * @psalm-suppress RedundantCastGivenDocblockType
+	 * @psalm-suppress RedundantConditionGivenDocblockType
+	 * @psalm-suppress DocblockTypeContradiction
+	 */
+	private function describe(Horde_Imap_Client_Exception $e): string {
+		$message = $e->getMessage();
+		$details = trim((string)($e->details ?? ''));
+		if ($details !== '' && stripos($message, $details) === false) {
+			$message .= ' — server said: ' . $details;
+		}
+		$code = $e->getCode();
+		if ($code !== 0) {
+			$message .= ' [code ' . $code . ']';
+		}
+		return $message;
 	}
 
 	private function createSocket(ImapConnection $connection): Horde_Imap_Client_Socket {
@@ -218,19 +248,5 @@ class HordeImapClient implements IImapClient {
 		} catch (\Throwable) {
 			return null;
 		}
-	}
-
-	/**
-	 * @return list<int>
-	 */
-	private function idsToArray(mixed $ids): array {
-		if ($ids === null) {
-			return [];
-		}
-		$out = [];
-		foreach ($ids as $id) {
-			$out[] = (int)$id;
-		}
-		return $out;
 	}
 }
