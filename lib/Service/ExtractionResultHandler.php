@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Service;
 
+use OCA\TravelManager\Db\IngestionLog;
 use OCA\TravelManager\Db\ProcessedMessage;
 use OCA\TravelManager\Db\ProcessedMessageMapper;
 use OCA\TravelManager\Db\TaskMap;
@@ -27,6 +28,7 @@ class ExtractionResultHandler {
 		private BookingService $bookingService,
 		private ILlmService $llmService,
 		private LoggerInterface $logger,
+		private IngestionLogger $activityLog,
 	) {
 	}
 
@@ -39,25 +41,40 @@ class ExtractionResultHandler {
 			return; // Not one of our tasks.
 		}
 
+		$userId = $map->getUserId();
 		$text = $this->llmService->readOutputText($output);
-		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
+		$message = $this->processedMessageMapper->findByMessageId($userId, $map->getMessageId());
+
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_LLM_RESPONSE,
+			'Model response received for task #' . $taskId . ' (' . ($text === null ? 'empty' : mb_strlen($text) . ' chars') . ')',
+			$text,
+		);
 
 		try {
 			if ($text === null) {
 				throw new ExtractionException('Task output contained no text');
 			}
 			$bookings = $this->extractionService->parseAndValidate($text);
-			$count = $this->bookingService->applyExtraction($map->getUserId(), $map->getMessageId(), $bookings);
+			$count = $this->bookingService->applyExtraction($userId, $map->getMessageId(), $bookings);
 			$this->setMessageStatus(
 				$message,
 				$count > 0 ? ProcessedMessage::STATUS_PROCESSED : ProcessedMessage::STATUS_NO_BOOKING,
 				null,
 			);
+			if ($count > 0) {
+				$this->activityLog->info($userId, IngestionLog::STEP_PERSIST, 'Saved ' . $count . ' draft booking(s) from task #' . $taskId);
+			} else {
+				$this->activityLog->info($userId, IngestionLog::STEP_PERSIST, 'No travel booking found in task #' . $taskId . ' — nothing saved');
+			}
 		} catch (ExtractionException $e) {
 			$this->logger->info('Travel Manager: extraction validation failed for task ' . $taskId . ': ' . $e->getMessage());
+			$this->activityLog->warning($userId, IngestionLog::STEP_PERSIST, 'Could not parse model output for task #' . $taskId . ': ' . $e->getMessage());
 			$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $e->getMessage());
 		} catch (\Throwable $e) {
 			$this->logger->error('Travel Manager: failed to persist extraction for task ' . $taskId . ': ' . $e->getMessage());
+			$this->activityLog->error($userId, IngestionLog::STEP_PERSIST, 'Failed to save extraction for task #' . $taskId . ': ' . $e->getMessage());
 			$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $e->getMessage());
 		}
 
@@ -70,6 +87,7 @@ class ExtractionResultHandler {
 			return;
 		}
 		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
+		$this->activityLog->error($map->getUserId(), IngestionLog::STEP_LLM_RESPONSE, 'Extraction task #' . $taskId . ' failed: ' . $error);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $error);
 		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}

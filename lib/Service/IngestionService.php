@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Service;
 
+use OCA\TravelManager\Db\IngestionLog;
 use OCA\TravelManager\Db\ProcessedMessage;
 use OCA\TravelManager\Db\ProcessedMessageMapper;
 use OCA\TravelManager\Db\TaskMap;
@@ -31,6 +32,7 @@ class IngestionService {
 		private TaskMapMapper $taskMapMapper,
 		private ITimeFactory $timeFactory,
 		private LoggerInterface $logger,
+		private IngestionLogger $activityLog,
 	) {
 	}
 
@@ -41,11 +43,13 @@ class IngestionService {
 		$settings = $this->configService->getUserSettings($userId);
 		if (!$settings->isConfigured()) {
 			$this->logger->debug('Travel Manager: user ' . $userId . ' not fully configured, skipping');
+			$this->activityLog->warning($userId, IngestionLog::STEP_CONNECT, 'Mailbox is not fully configured — nothing to do');
 			return 0;
 		}
 
 		$password = $this->configService->getImapPassword($userId);
 		if ($password === null) {
+			$this->activityLog->warning($userId, IngestionLog::STEP_CONNECT, 'No IMAP password stored — cannot connect');
 			return 0;
 		}
 
@@ -58,17 +62,46 @@ class IngestionService {
 			$settings->mailbox,
 		);
 
-		$messages = $this->imapClient->fetchRecent($connection, $this->configService->getRateLimitPerRun());
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_CONNECT,
+			'Connecting to ' . $settings->imapUser . '@' . $settings->imapHost . ':' . $settings->imapPort
+				. ' (' . $settings->imapSecurity . ') mailbox "' . $settings->mailbox . '"',
+		);
+
+		try {
+			$messages = $this->imapClient->fetchRecent($connection, $this->configService->getRateLimitPerRun());
+		} catch (\Throwable $e) {
+			$this->activityLog->error($userId, IngestionLog::STEP_FETCH, 'Failed to read mailbox: ' . $e->getMessage());
+			throw $e;
+		}
+
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_FETCH,
+			'Fetched ' . count($messages) . ' recent message(s) from the mailbox',
+		);
 
 		$enqueued = 0;
 		foreach ($messages as $message) {
 			if ($this->processedMessageMapper->isProcessed($userId, $message->messageId)) {
+				$this->activityLog->info(
+					$userId,
+					IngestionLog::STEP_DEDUP,
+					'Skipping already-processed message: ' . $this->describe($message),
+				);
 				continue;
 			}
 			if ($this->enqueue($userId, $settings->mailbox, $message)) {
 				$enqueued++;
 			}
 		}
+
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_SCHEDULE,
+			'Scheduled ' . $enqueued . ' new message(s) for extraction; awaiting LLM response(s)',
+		);
 		return $enqueued;
 	}
 
@@ -92,11 +125,23 @@ class IngestionService {
 			$taskId = $this->llmService->scheduleText2Text($prompt, $userId, $message->messageId);
 		} catch (\Throwable $e) {
 			$this->logger->warning('Travel Manager: failed to schedule extraction for ' . $userId . ': ' . $e->getMessage());
+			$this->activityLog->error(
+				$userId,
+				IngestionLog::STEP_SCHEDULE,
+				'Failed to schedule extraction for ' . $this->describe($message) . ': ' . $e->getMessage(),
+			);
 			$record->setStatus(ProcessedMessage::STATUS_FAILED);
 			$record->setError($e->getMessage());
 			$this->processedMessageMapper->update($record);
 			return false;
 		}
+
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_SCHEDULE,
+			'Passing message to the model (task #' . $taskId . '): ' . $this->describe($message),
+			$prompt,
+		);
 
 		$map = new TaskMap();
 		$map->setTaskId($taskId);
@@ -107,5 +152,11 @@ class IngestionService {
 		$this->taskMapMapper->insert($map);
 
 		return true;
+	}
+
+	/** Short human-readable identification of a message for the activity log. */
+	private function describe(ImapMessage $message): string {
+		$subject = $message->subject === '' ? '(no subject)' : $message->subject;
+		return '"' . $subject . '" ' . $message->messageId;
 	}
 }

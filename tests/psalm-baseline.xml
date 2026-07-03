@@ -22,6 +22,16 @@
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
   </file>
+  <file src="lib/Db/IngestionLog.php">
+    <PossiblyUnusedProperty>
+      <code><![CDATA[$userId]]></code>
+    </PossiblyUnusedProperty>
+  </file>
+  <file src="lib/Db/IngestionLogMapper.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
   <file src="lib/Db/ProcessedMessage.php">
     <PossiblyUnusedProperty>
       <code><![CDATA[$imapUid]]></code>
@@ -99,6 +109,11 @@
       <code><![CDATA[Version1000Date20260621000000]]></code>
     </UnusedClass>
   </file>
+  <file src="lib/Migration/Version1000Date20260703000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1000Date20260703000000]]></code>
+    </UnusedClass>
+  </file>
   <file src="lib/Service/BookingService.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>
@@ -120,7 +135,17 @@
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
   </file>
+  <file src="lib/Service/IngestionLogger.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
   <file src="lib/Service/IngestionService.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
+  <file src="lib/Service/MaintenanceService.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>

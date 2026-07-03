@@ -32,6 +32,17 @@ class ProcessedMessageMapper extends QBMapper {
 		return $found;
 	}
 
+	/**
+	 * Forget every processed-message record for a user so the same mailbox
+	 * messages will be reprocessed on the next run (developer wipe).
+	 */
+	public function deleteAllForUser(string $userId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$qb->executeStatement();
+	}
+
 	public function findByMessageId(string $userId, string $messageId): ?ProcessedMessage {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')

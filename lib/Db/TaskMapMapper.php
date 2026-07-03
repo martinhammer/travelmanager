@@ -31,4 +31,14 @@ class TaskMapMapper extends QBMapper {
 			return null;
 		}
 	}
+
+	/**
+	 * Delete every task correlation row for a user (developer wipe / reprocess).
+	 */
+	public function deleteAllForUser(string $userId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$qb->executeStatement();
+	}
 }

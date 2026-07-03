@@ -341,6 +341,10 @@
             "description": "Admin-only settings: global feature flag and LLM throttling."
         },
         {
+            "name": "dev",
+            "description": "Developer/debugging endpoints for the current user: trigger a mailbox read on demand (no waiting for cron), inspect the step-by-step activity log, and wipe the derived data so the same messages can be reprocessed from scratch."
+        },
+        {
             "name": "settings",
             "description": "Reads/writes the current user's Travel Manager settings. The IMAP password is write-only over the API (stored via ICredentialsManager, never returned)."
         }

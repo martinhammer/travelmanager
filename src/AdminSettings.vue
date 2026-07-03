@@ -29,7 +29,7 @@ const onSave = async () => {
 <template>
 	<NcSettingsSection :name="t('travelmanager', 'Travel Manager')"
 		:description="t('travelmanager', 'Controls the travel-booking email extraction pipeline. Extraction uses the AI text-processing provider configured in the Nextcloud AI admin settings.')">
-		<NcCheckboxRadioSwitch :checked="form.enabled" @update:checked="form.enabled = $event">
+		<NcCheckboxRadioSwitch v-model="form.enabled">
 			{{ t('travelmanager', 'Enable the Travel Manager extraction pipeline') }}
 		</NcCheckboxRadioSwitch>
 

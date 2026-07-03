@@ -43,10 +43,13 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `Imap/Html` is the pure HTML→text helper for HTML-only bodies.
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
 - `Listener/TaskSuccessfulListener`, `Listener/TaskFailedListener`.
-- `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date20260621000000`.
-- `Controller/{Booking,Trip,Settings,Admin}Controller`; `Settings/*`.
+- `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date2026062100…`
+  (initial schema) + `Version1000Date2026070300…` (adds the `logs` table).
+- `Controller/{Booking,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
+- `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
+  (per-user data wipe) — see §9 (dev/debug tooling).
 
-### Data model (5 tables, prefix `travelmanager_`)
+### Data model (6 tables, prefix `travelmanager_`)
 - `messages` — IMAP dedup + ingestion audit; unique `(user_id, message_id)`.
 - `trips` — user-defined grouping.
 - `bookings` — one canonical booking per confirmation; natural key
@@ -54,6 +57,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `trip_id` links to a trip; `status` = draft/confirmed/cancelled/superseded.
 - `segments` — dated items (flight leg / hotel stay / rental period).
 - `tasks` — Task Processing `task_id` → `(user_id, message_id)` correlation.
+- `logs` — per-user pipeline activity log (dev/debug); `(level, step, message,
+  context, created_at)`, capped at newest 1000 rows per user.
 
 ### Extraction JSON contract
 `core:text2text` returns **raw text only** (no JSON/function-calling mode), so
@@ -86,6 +91,26 @@ code follows the overrides.
 - Secrets (IMAP app password) only via `ICredentialsManager`, encrypted, keyed by
   uid — never in app/user config, never logged.
 
+### Dev/debug tooling (Personal settings → "Developer & debugging")
+`DevController` (`/api/dev/*`, all `NoAdminRequired`, current-user-scoped) backs a
+debug panel for iterating without waiting for cron:
+- **Read mailbox now** — `POST /api/dev/ingest` runs `IngestionService::ingestForUser`
+  synchronously for the current user (bypasses the dispatcher/enabled fan-out;
+  still requires the mailbox to be *configured*). It schedules the async
+  extraction tasks; **model responses still arrive later** via the task-event
+  listeners, so the UI hint says to refresh the log after a moment.
+- **Activity log** — `IngestionLogger` writes a per-user, step-by-step row
+  (`connect`/`fetch`/`dedup`/`schedule`/`llm_response`/`persist`/`wipe`) to the
+  `logs` table as the pipeline runs; `IngestionService` and
+  `ExtractionResultHandler` are instrumented. The prompt sent to the model and the
+  raw model response are stored (truncated to 8000 chars) in the row's `context`.
+  Logging is best-effort and never throws into the pipeline. `GET/DELETE
+  /api/dev/logs` read/clear it.
+- **Wipe my data** — `DELETE /api/dev/data` → `MaintenanceService::wipeUserData`
+  deletes the user's bookings, segments, `messages` (dedup ledger) and `tasks` in
+  one transaction so the *same* mailbox emails are reprocessed from scratch. Trips
+  (manual groupings) and the activity log are **kept**. Confirmed via `NcDialog`.
+
 ### Verified NC 33 API facts
 - `OCP\TaskProcessing\IManager::scheduleTask(Task)`; `Task(taskTypeId, input,
   appId, ?userId, customId='')`; results via `TaskSuccessfulEvent`/`TaskFailedEvent`
@@ -105,11 +130,14 @@ code follows the overrides.
 - ✅ `ExtractionServiceTest` (12) + `HtmlTest` (7) pass standalone.
 - ✅ **Real IMAP**: `HordeImapClient` (read-only, `Horde_Imap_Client` vendored)
   is bound as `IImapClient`; smoke-tested install/UI working in a live instance.
+- ✅ **Dev/debug tooling** (Personal settings): manual "Read mailbox now" trigger,
+  per-user step-by-step activity log, and a data-wipe for reprocessing (see §3).
+  Version bumped 1.0.0 → 1.1.0 so the `logs`-table migration runs on upgrade.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
-  schedule → listener → draft), tune the extraction prompt on real emails, then
-  enable multi-user fan-out. PDF e-ticket attachments and Calendar/Notes
-  projection remain deferred.
+  schedule → listener → draft; use "Read mailbox now" + the activity log to watch
+  each step), tune the extraction prompt on real emails, then enable multi-user
+  fan-out. PDF e-ticket attachments and Calendar/Notes projection remain deferred.
 
 Build/implement order from here: end-to-end flight extraction (single user) →
 prompt tuning on real emails → draft/confirm UI polish → multi-user fan-out.
@@ -202,11 +230,19 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   `@nextcloud/stylelint-config` (extending the transitive
   `stylelint-config-recommended-vue` yields "No rules found"). eslint is v8
   (legacy `.eslintrc`, not flat config).
-- **`@nextcloud/vue` 9 API drift** — caught by `vue-tsc`/eslint, not at runtime:
-  `NcButton` styling prop is **`variant`** (`primary`/`secondary`/`tertiary`/…),
-  **not** `type` (which is now the native button type). **No `.sync`** in Vue 3 —
-  use `v-model:propName` (e.g. `v-model:value` on `NcTextField`). Always run
-  `npm run type-check` after touching `.vue` files.
+- **`@nextcloud/vue` 9 API drift** — some of this is **runtime-only** (type-check
+  and eslint pass, the component just silently doesn't work), so test in the
+  browser too:
+  - `NcButton` styling prop is **`variant`** (`primary`/`secondary`/`tertiary`/…),
+    **not** `type` (now the native button type). *(type error — caught by vue-tsc)*
+  - **No `.sync`** in Vue 3 — use `v-model:propName` (e.g. `v-model:value` on
+    `NcTextField`). *(eslint)*
+  - `NcCheckboxRadioSwitch` migrated from `:checked` + `@update:checked` to
+    **`v-model`** (`modelValue`/`update:modelValue`). The old `:checked` still
+    binds the initial state so it *looks* fine, but `@update:checked` never fires
+    → the control won't toggle. **Runtime-only failure — not caught by vue-tsc.**
+  - When in doubt, check the component's `update:*` emit in
+    `node_modules/@nextcloud/vue/dist/chunks/Nc*.mjs`.
 - **`@nextcloud/dialogs` must be ^7** (v6 pins a `@nextcloud/vue ^8` peer that
   conflicts with v9 and blocks `npm install`). v7 dropped the `@nextcloud/vue`
   peer.

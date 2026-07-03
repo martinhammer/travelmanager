@@ -63,6 +63,16 @@ class BookingMapper extends QBMapper {
 	}
 
 	/**
+	 * Delete every booking belonging to a user (developer wipe / reprocess).
+	 */
+	public function deleteAllForUser(string $userId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$qb->executeStatement();
+	}
+
+	/**
 	 * Find an existing booking to update/cancel based on its natural key
 	 * (type + provider + reference). Used for update/cancellation idempotency (V6).
 	 */

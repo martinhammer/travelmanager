@@ -78,6 +78,15 @@ namespace OCA\TravelManager;
  *     error: string,
  * }
  *
+ * @psalm-type TravelManagerLog = array{
+ *     id: int,
+ *     level: string,
+ *     step: string,
+ *     message: string,
+ *     context: string|null,
+ *     createdAt: string|null,
+ * }
+ *
  * @psalm-suppress UnusedClass
  */
 class ResponseDefinitions {

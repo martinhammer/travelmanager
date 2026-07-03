@@ -36,4 +36,14 @@ class SegmentMapper extends QBMapper {
 			->andWhere($qb->expr()->eq('booking_id', $qb->createNamedParameter($bookingId, IQueryBuilder::PARAM_INT)));
 		$qb->executeStatement();
 	}
+
+	/**
+	 * Delete every segment belonging to a user (developer wipe / reprocess).
+	 */
+	public function deleteAllForUser(string $userId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$qb->executeStatement();
+	}
 }

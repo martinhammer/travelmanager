@@ -13,6 +13,7 @@ use OCA\TravelManager\Imap\ImapMessage;
 use OCA\TravelManager\Llm\ILlmService;
 use OCA\TravelManager\Service\ConfigService;
 use OCA\TravelManager\Service\ExtractionService;
+use OCA\TravelManager\Service\IngestionLogger;
 use OCA\TravelManager\Service\IngestionService;
 use OCA\TravelManager\Service\UserSettings;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -47,6 +48,7 @@ final class IngestionServiceTest extends TestCase {
 			$this->taskMapMapper,
 			$time,
 			$this->createMock(LoggerInterface::class),
+			$this->createMock(IngestionLogger::class),
 		);
 	}
 

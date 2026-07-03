@@ -121,3 +121,32 @@ export const saveAdminSettings = async (settings: Partial<AdminSettings>): Promi
 	const res = await axios.put(base('admin/settings'), settings)
 	return unwrap(res.data)
 }
+
+/* -------------------------------------------------- developer / debug tools */
+
+export interface LogEntry {
+	id: number
+	level: string
+	step: string
+	message: string
+	context: string | null
+	createdAt: string | null
+}
+
+export const runIngestNow = async (): Promise<{ enqueued: number }> => {
+	const res = await axios.post(base('dev/ingest'), {})
+	return unwrap(res.data)
+}
+
+export const fetchLogs = async (): Promise<LogEntry[]> => {
+	const res = await axios.get(base('dev/logs'))
+	return unwrap(res.data)
+}
+
+export const clearLogs = async (): Promise<void> => {
+	await axios.delete(base('dev/logs'))
+}
+
+export const wipeData = async (): Promise<void> => {
+	await axios.delete(base('dev/data'))
+}
