@@ -17,7 +17,7 @@ Travel Manager automatically extracts relevant information from emails using LLM
 	<website>https://github.com/martinhammer/travelmanager</website>
 	<bugs>https://github.com/martinhammer/travelmanager</bugs>
 	<dependencies>
-		<nextcloud min-version="33" max-version="34"/>
+		<nextcloud min-version="33" max-version="35"/>
 	</dependencies>
 	<background-jobs>
 		<job>OCA\TravelManager\BackgroundJob\DispatcherJob</job>
