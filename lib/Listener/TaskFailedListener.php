@@ -30,10 +30,9 @@ class TaskFailedListener implements IEventListener {
 		if ($task->getAppId() !== Application::APP_ID) {
 			return;
 		}
-		$taskId = $task->getId();
-		if ($taskId === null) {
+		if ($task->getId() === null) {
 			return;
 		}
-		$this->handler->handleFailure($taskId, $event->getErrorMessage());
+		$this->handler->handleFailure($task, $event->getErrorMessage());
 	}
 }

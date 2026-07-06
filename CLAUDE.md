@@ -29,7 +29,7 @@ DispatcherJob (TimedJob, ~15min, no parallel runs)
 TaskSuccessfulEvent / TaskFailedEvent
   └─ ExtractionResultHandler  (correlates by task_id → TaskMap → user+message)
        ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
-       └─ BookingService.applyExtraction()      # writes DRAFT bookings + segments
+       └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
 UI (Vue, OCS API)
   └─ list drafts → confirm / edit / discard ; group bookings into trips
 ```
@@ -44,30 +44,46 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
 - `Listener/TaskSuccessfulListener`, `Listener/TaskFailedListener`.
 - `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date2026062100…`
-  (initial schema) + `Version1000Date2026070300…` (adds the `logs` table).
+  (initial schema) + `Version1000Date2026070300…` (adds the `logs` table) +
+  `Version1200Date2026070600…` (drops `segments`, moves type-specific data into a
+  per-type `details` JSON column on `bookings`, adds `confirmation_number` +
+  `start_date`/`end_date`).
 - `Controller/{Booking,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
 
-### Data model (6 tables, prefix `travelmanager_`)
+### Data model (5 tables, prefix `travelmanager_`)
 - `messages` — IMAP dedup + ingestion audit; unique `(user_id, message_id)`.
 - `trips` — user-defined grouping.
 - `bookings` — one canonical booking per confirmation; natural key
   `(user_id, type, provider, booking_reference)` drives update/cancel idempotency;
   `trip_id` links to a trip; `status` = draft/confirmed/cancelled/superseded.
-- `segments` — dated items (flight leg / hotel stay / rental period).
+  Cross-type header only (`type, provider, booking_reference,
+  confirmation_number, title, status, confidence, start_date, end_date`); **all
+  type-specific structure lives in the `details` JSON column** (see below).
+  `start_date`/`end_date` are a denormalised span derived from `details` for list
+  ordering.
 - `tasks` — Task Processing `task_id` → `(user_id, message_id)` correlation.
 - `logs` — per-user pipeline activity log (dev/debug); `(level, step, message,
   context, created_at)`, capped at newest 1000 rows per user.
 
+There is **no `segments` table** — flights/car rentals/hotels have genuinely
+different shapes, so each type's structure (flight legs + passengers, car
+supplier/features/pickup/dropoff, hotel stay/guests) is stored as validated JSON
+in `bookings.details`. The shape can evolve from the prompt + `ExtractionService`
+without a DB migration (that is the whole point of the JSON approach).
+
 ### Extraction JSON contract
 `core:text2text` returns **raw text only** (no JSON/function-calling mode), so
 every response goes through `ExtractionService`: strip fences → extract first
-balanced `{…}` → `json_decode` → validate (`type` in allowlist, ≥1 segment with a
-parseable `start_local`; bookings with no dated segment are dropped as
-anti-hallucination). Output shape: `{ "bookings": [ { type, provider,
-booking_reference, status, title, confidence, segments:[ { start_local,
-start_timezone, end_local, ..., flight_number, carrier, ... } ] } ] }`.
+balanced `{…}` → `json_decode` → **classify** each booking (`type` in allowlist)
+→ validate the per-type `details` (normalise the anchoring date(s), pass unknown
+fields through). Anti-hallucination: a booking without its anchoring date is
+dropped — flight ⇒ ≥1 segment with a valid `departureLocal`; car_rental ⇒ valid
+`pickup.local`; accommodation ⇒ valid `checkIn.local`. Output shape:
+`{ "bookings": [ { type, provider, booking_reference, confirmation_number,
+status, title, confidence, details: { …type-specific… } } ] }` — see
+`ExtractionService::buildPrompt` for each type's `details` schema.
 
 ## 3. Decisions (settled — build to these)
 
@@ -103,12 +119,15 @@ debug panel for iterating without waiting for cron:
   (`connect`/`fetch`/`dedup`/`schedule`/`llm_response`/`persist`/`wipe`) to the
   `logs` table as the pipeline runs; `IngestionService` and
   `ExtractionResultHandler` are instrumented. The prompt sent to the model and the
-  raw model response are stored (truncated to 8000 chars) in the row's `context`.
+  raw model response are stored (truncated to 20000 chars) in the row's `context`.
+  On a task failure the `context` is a self-contained troubleshooting block
+  (provider error + task metadata + the exact prompt sent + any partial output);
+  on a parse failure it pairs the validation error with the raw model response.
   Logging is best-effort and never throws into the pipeline. `GET/DELETE
   /api/dev/logs` read/clear it.
 - **Wipe my data** — `DELETE /api/dev/data` → `MaintenanceService::wipeUserData`
-  deletes the user's bookings, segments, `messages` (dedup ledger) and `tasks` in
-  one transaction so the *same* mailbox emails are reprocessed from scratch. Trips
+  deletes the user's bookings, `messages` (dedup ledger) and `tasks` in one
+  transaction so the *same* mailbox emails are reprocessed from scratch. Trips
   (manual groupings) and the activity log are **kept**. Confirmed via `NcDialog`.
 
 ### Verified NC 33 API facts
@@ -127,7 +146,7 @@ debug panel for iterating without waiting for cron:
 - ✅ Migration, entities, mappers, services, jobs, listeners, controllers,
   settings panels, Vue UI, DI wiring (`Application.php` + `info.xml`).
 - ✅ Psalm clean (errorLevel 1); php-cs-fixer clean; `php -l` clean.
-- ✅ `ExtractionServiceTest` (12) + `HtmlTest` (7) pass standalone.
+- ✅ `ExtractionServiceTest` (19) + `HtmlTest` (7) pass standalone.
 - ✅ **Real IMAP**: `HordeImapClient` (read-only, `Horde_Imap_Client` vendored)
   is bound as `IImapClient`; smoke-tested install/UI working in a live instance.
 - ✅ **Dev/debug tooling** (Personal settings): manual "Read mailbox now" trigger,

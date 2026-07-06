@@ -139,6 +139,16 @@ const confirmWipe = async () => {
 
 const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocaleString() : '')
 
+const copyDetails = async (entry: LogEntry) => {
+	const text = `[${entry.level}] ${entry.step} — ${entry.message}\n\n${entry.context ?? ''}`
+	try {
+		await navigator.clipboard.writeText(text)
+		showSuccess(t('travelmanager', 'Copied to clipboard'))
+	} catch (e) {
+		showError(t('travelmanager', 'Could not copy to clipboard'))
+	}
+}
+
 onMounted(refreshLogs)
 </script>
 
@@ -153,21 +163,28 @@ onMounted(refreshLogs)
 			{{ t('travelmanager', 'Email content is sent to the AI text-processing provider configured for this Nextcloud instance. Depending on the administrator’s choice, this may be a local model or an external third-party API.') }}
 		</NcNoteCard>
 
-		<NcCheckboxRadioSwitch v-model="form.enabled">
+		<NcCheckboxRadioSwitch v-model="form.enabled" :class="$style.field">
 			{{ t('travelmanager', 'Enable automatic extraction for my mailbox') }}
 		</NcCheckboxRadioSwitch>
 
-		<NcTextField v-model="form.imapHost" :label="t('travelmanager', 'IMAP host')" />
-		<NcTextField v-model="form.imapPort" type="number" :label="t('travelmanager', 'IMAP port')" />
-		<div :class="$style.field">
+		<NcTextField v-model="form.imapHost" :class="$style.field" :label="t('travelmanager', 'IMAP host')" />
+		<NcTextField v-model="form.imapPort"
+			:class="$style.field"
+			type="number"
+			:label="t('travelmanager', 'IMAP port')" />
+		<div :class="[$style.field, $style.selectField]">
 			<label>{{ t('travelmanager', 'Encryption') }}</label>
 			<NcSelect v-model="form.imapSecurity" :options="securityOptions" :clearable="false" />
 		</div>
-		<NcTextField v-model="form.imapUser" :label="t('travelmanager', 'Account / username')" />
+		<NcTextField v-model="form.imapUser" :class="$style.field" :label="t('travelmanager', 'Account / username')" />
 		<NcPasswordField v-model="form.imapPassword"
+			:class="$style.field"
 			:label="hasPassword ? t('travelmanager', 'App password (leave blank to keep current)') : t('travelmanager', 'App password')" />
-		<NcTextField v-model="form.mailbox" :label="t('travelmanager', 'Mailbox / folder')" />
-		<NcTextField v-model="form.intervalMinutes" type="number" :label="t('travelmanager', 'Check interval (minutes)')" />
+		<NcTextField v-model="form.mailbox" :class="$style.field" :label="t('travelmanager', 'Mailbox / folder')" />
+		<NcTextField v-model="form.intervalMinutes"
+			:class="$style.field"
+			type="number"
+			:label="t('travelmanager', 'Check interval (minutes)')" />
 
 		<div :class="$style.actions">
 			<NcButton variant="primary" :disabled="saving" @click="onSave">
@@ -216,8 +233,13 @@ onMounted(refreshLogs)
 				<div :class="$style.message">
 					{{ entry.message }}
 				</div>
-				<details v-if="entry.context" :class="$style.context">
+				<details v-if="entry.context" :class="$style.context" :open="entry.level !== 'info'">
 					<summary>{{ t('travelmanager', 'Details') }}</summary>
+					<div :class="$style.contextActions">
+						<NcButton variant="tertiary" @click="copyDetails(entry)">
+							{{ t('travelmanager', 'Copy') }}
+						</NcButton>
+					</div>
 					<pre>{{ entry.context }}</pre>
 				</details>
 			</li>
@@ -240,8 +262,16 @@ onMounted(refreshLogs)
 </template>
 
 <style module>
+/* Give each form control breathing room; without it the outset field labels
+   overlap the control above (NcTextField draws its label on the top border). */
 .field {
-	margin: 8px 0;
+	margin-block-end: 14px;
+}
+
+.selectField {
+	display: flex;
+	align-items: center;
+	gap: 8px;
 }
 
 .actions {
@@ -322,10 +352,16 @@ onMounted(refreshLogs)
 	margin-top: 4px;
 }
 
+.contextActions {
+	display: flex;
+	justify-content: flex-end;
+	margin: 4px 0;
+}
+
 .context pre {
 	white-space: pre-wrap;
 	overflow-wrap: break-word;
-	max-height: 240px;
+	max-height: 480px;
 	overflow-y: auto;
 	background-color: var(--color-background-dark);
 	border-radius: var(--border-radius);

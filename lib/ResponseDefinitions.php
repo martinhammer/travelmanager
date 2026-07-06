@@ -13,36 +13,16 @@ namespace OCA\TravelManager;
  *     type: string,
  *     provider: string|null,
  *     bookingReference: string|null,
+ *     confirmationNumber: string|null,
  *     title: string|null,
  *     status: string,
  *     confidence: float|null,
+ *     details: array<string, mixed>,
+ *     startDate: string|null,
+ *     endDate: string|null,
  *     createdAt: string|null,
  *     updatedAt: string|null,
  *     confirmedAt: string|null,
- * }
- *
- * @psalm-type TravelManagerSegment = array{
- *     id: int,
- *     bookingId: int,
- *     sequence: int,
- *     startLocal: string|null,
- *     startTimezone: string|null,
- *     endLocal: string|null,
- *     endTimezone: string|null,
- *     origin: string|null,
- *     destination: string|null,
- *     location: string|null,
- *     flightNumber: string|null,
- *     carrier: string|null,
- *     seat: string|null,
- *     terminal: string|null,
- *     gate: string|null,
- *     confidence: float|null,
- * }
- *
- * @psalm-type TravelManagerBookingDetails = array{
- *     booking: TravelManagerBooking,
- *     segments: list<TravelManagerSegment>,
  * }
  *
  * @psalm-type TravelManagerTrip = array{

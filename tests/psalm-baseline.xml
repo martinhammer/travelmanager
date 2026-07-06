@@ -12,7 +12,6 @@
   </file>
   <file src="lib/Db/Booking.php">
     <PossiblyUnusedProperty>
-      <code><![CDATA[$extractionJson]]></code>
       <code><![CDATA[$sourceMessageId]]></code>
       <code><![CDATA[$userId]]></code>
     </PossiblyUnusedProperty>
@@ -40,17 +39,6 @@
     </PossiblyUnusedProperty>
   </file>
   <file src="lib/Db/ProcessedMessageMapper.php">
-    <PossiblyUnusedMethod>
-      <code><![CDATA[__construct]]></code>
-    </PossiblyUnusedMethod>
-  </file>
-  <file src="lib/Db/Segment.php">
-    <PossiblyUnusedProperty>
-      <code><![CDATA[$extraJson]]></code>
-      <code><![CDATA[$userId]]></code>
-    </PossiblyUnusedProperty>
-  </file>
-  <file src="lib/Db/SegmentMapper.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
@@ -112,6 +100,11 @@
   <file src="lib/Migration/Version1000Date20260703000000.php">
     <UnusedClass>
       <code><![CDATA[Version1000Date20260703000000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Migration/Version1200Date20260706000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1200Date20260706000000]]></code>
     </UnusedClass>
   </file>
   <file src="lib/Service/BookingService.php">

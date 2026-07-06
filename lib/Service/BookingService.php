@@ -6,8 +6,6 @@ namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
-use OCA\TravelManager\Db\Segment;
-use OCA\TravelManager\Db\SegmentMapper;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
@@ -16,14 +14,14 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IDBConnection;
 
 /**
- * Canonical store operations for bookings, segments and trips. Every method is
- * scoped by user id. Persists LLM extractions as drafts, applying update /
- * cancellation idempotency keyed on (type, provider, reference) — see V6.
+ * Canonical store operations for bookings and trips. Every method is scoped by
+ * user id. Persists LLM extractions as drafts, applying update / cancellation
+ * idempotency keyed on (type, provider, reference) — see V6. Type-specific
+ * structure is stored verbatim as JSON in the booking's `details` column.
  */
 class BookingService {
 	public function __construct(
 		private BookingMapper $bookingMapper,
-		private SegmentMapper $segmentMapper,
 		private TripMapper $tripMapper,
 		private IDBConnection $db,
 		private ITimeFactory $timeFactory,
@@ -77,10 +75,14 @@ class BookingService {
 
 		$booking->setProvider($extracted->provider);
 		$booking->setBookingReference($extracted->bookingReference);
+		$booking->setConfirmationNumber($extracted->confirmationNumber);
 		$booking->setTitle($extracted->title);
 		$booking->setSourceMessageId($messageId);
 		$booking->setConfidence($extracted->confidence);
-		$booking->setExtractionJson(json_encode($this->dumpExtraction($extracted)));
+		$encodedDetails = json_encode($extracted->details);
+		$booking->setDetails($encodedDetails === false ? null : $encodedDetails);
+		$booking->setStartDate($this->toDateTime($extracted->startDate));
+		$booking->setEndDate($this->toDateTime($extracted->endDate));
 
 		if ($extracted->status === 'cancelled') {
 			$booking->setStatus(Booking::STATUS_CANCELLED);
@@ -89,33 +91,9 @@ class BookingService {
 		}
 
 		if ($existing !== null) {
-			$booking = $this->bookingMapper->update($booking);
-			$this->segmentMapper->deleteForBooking($userId, $booking->getId());
+			$this->bookingMapper->update($booking);
 		} else {
-			$booking = $this->bookingMapper->insert($booking);
-		}
-
-		$sequence = 0;
-		foreach ($extracted->segments as $extractedSegment) {
-			$segment = new Segment();
-			$segment->setUserId($userId);
-			$segment->setBookingId($booking->getId());
-			$segment->setSequence($sequence++);
-			$segment->setStartLocal($this->toDateTime($extractedSegment->startLocal));
-			$segment->setStartTimezone($extractedSegment->startTimezone);
-			$segment->setEndLocal($this->toDateTime($extractedSegment->endLocal));
-			$segment->setEndTimezone($extractedSegment->endTimezone);
-			$segment->setOrigin($extractedSegment->origin);
-			$segment->setDestination($extractedSegment->destination);
-			$segment->setLocation($extractedSegment->location);
-			$segment->setFlightNumber($extractedSegment->flightNumber);
-			$segment->setCarrier($extractedSegment->carrier);
-			$segment->setSeat($extractedSegment->seat);
-			$segment->setTerminal($extractedSegment->terminal);
-			$segment->setGate($extractedSegment->gate);
-			$segment->setExtraJson($extractedSegment->extra === [] ? null : json_encode($extractedSegment->extra));
-			$segment->setConfidence($extractedSegment->confidence);
-			$this->segmentMapper->insert($segment);
+			$this->bookingMapper->insert($booking);
 		}
 	}
 
@@ -129,13 +107,6 @@ class BookingService {
 			return $this->bookingMapper->findByStatus($userId, $status);
 		}
 		return $this->bookingMapper->findAllForUser($userId);
-	}
-
-	/**
-	 * @return Segment[]
-	 */
-	public function listSegments(string $userId, int $bookingId): array {
-		return $this->segmentMapper->findForBooking($userId, $bookingId);
 	}
 
 	public function getBooking(string $userId, int $bookingId): Booking {
@@ -153,14 +124,13 @@ class BookingService {
 
 	public function discard(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
-		$this->segmentMapper->deleteForBooking($userId, $bookingId);
 		$this->bookingMapper->delete($booking);
 	}
 
 	/**
 	 * Apply user edits to a draft booking's own fields.
 	 *
-	 * @param array{title?:string,provider?:string,bookingReference?:string} $values
+	 * @param array{title?:string,provider?:string,bookingReference?:string,confirmationNumber?:string} $values
 	 */
 	public function updateBookingFields(string $userId, int $bookingId, array $values): Booking {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
@@ -172,6 +142,9 @@ class BookingService {
 		}
 		if (array_key_exists('bookingReference', $values)) {
 			$booking->setBookingReference($values['bookingReference']);
+		}
+		if (array_key_exists('confirmationNumber', $values)) {
+			$booking->setConfirmationNumber($values['confirmationNumber']);
 		}
 		$booking->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->bookingMapper->update($booking);
@@ -246,32 +219,5 @@ class BookingService {
 		}
 		$dt = \DateTime::createFromFormat('Y-m-d\TH:i:s', $value);
 		return $dt === false ? null : $dt;
-	}
-
-	private function dumpExtraction(ExtractedBooking $booking): array {
-		return [
-			'type' => $booking->type,
-			'provider' => $booking->provider,
-			'booking_reference' => $booking->bookingReference,
-			'status' => $booking->status,
-			'title' => $booking->title,
-			'confidence' => $booking->confidence,
-			'segments' => array_map(static fn ($s) => [
-				'start_local' => $s->startLocal,
-				'start_timezone' => $s->startTimezone,
-				'end_local' => $s->endLocal,
-				'end_timezone' => $s->endTimezone,
-				'origin' => $s->origin,
-				'destination' => $s->destination,
-				'location' => $s->location,
-				'flight_number' => $s->flightNumber,
-				'carrier' => $s->carrier,
-				'seat' => $s->seat,
-				'terminal' => $s->terminal,
-				'gate' => $s->gate,
-				'extra' => $s->extra,
-				'confidence' => $s->confidence,
-			], $booking->segments),
-		];
 	}
 }

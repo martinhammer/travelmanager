@@ -29,14 +29,16 @@ const onSave = async () => {
 <template>
 	<NcSettingsSection :name="t('travelmanager', 'Travel Manager')"
 		:description="t('travelmanager', 'Controls the travel-booking email extraction pipeline. Extraction uses the AI text-processing provider configured in the Nextcloud AI admin settings.')">
-		<NcCheckboxRadioSwitch v-model="form.enabled">
+		<NcCheckboxRadioSwitch v-model="form.enabled" :class="$style.field">
 			{{ t('travelmanager', 'Enable the Travel Manager extraction pipeline') }}
 		</NcCheckboxRadioSwitch>
 
 		<NcTextField v-model="form.rateLimitPerRun"
+			:class="$style.field"
 			type="number"
 			:label="t('travelmanager', 'Max messages processed per user per run')" />
 		<NcTextField v-model="form.localConcurrency"
+			:class="$style.field"
 			type="number"
 			:label="t('travelmanager', 'Max concurrent local-model extractions')" />
 
@@ -49,6 +51,12 @@ const onSave = async () => {
 </template>
 
 <style module>
+/* Give each form control breathing room; without it the outset field labels
+   overlap the control above (NcTextField draws its label on the top border). */
+.field {
+	margin-block-end: 14px;
+}
+
 .actions {
 	margin-top: 16px;
 }

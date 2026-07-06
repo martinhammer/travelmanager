@@ -8,24 +8,62 @@ import { generateOcsUrl } from '@nextcloud/router'
 // numeric ids, so no escaping is needed here.
 const base = (path: string): string => generateOcsUrl(`apps/travelmanager/api/${path}`)
 
-export interface Segment {
-	id: number
-	bookingId: number
-	sequence: number
-	startLocal: string | null
-	startTimezone: string | null
-	endLocal: string | null
-	endTimezone: string | null
-	origin: string | null
-	destination: string | null
-	location: string | null
-	flightNumber: string | null
-	carrier: string | null
-	seat: string | null
-	terminal: string | null
-	gate: string | null
-	confidence: number | null
+/** A local wall-clock instant + informational place/timezone (no tz conversion, V8). */
+export interface WhenWhere {
+	local?: string | null
+	location?: string | null
+	timezone?: string | null
 }
+
+export interface Passenger {
+	name?: string | null
+	frequentFlyer?: string | null
+	baggage?: string | null
+}
+
+export interface FlightSegment {
+	carrier?: string | null
+	operatingCarrier?: string | null
+	flightNumber?: string | null
+	origin?: string | null
+	destination?: string | null
+	departureLocal?: string | null
+	departureTimezone?: string | null
+	arrivalLocal?: string | null
+	arrivalTimezone?: string | null
+	cabinClass?: string | null
+	seat?: string | null
+	terminal?: string | null
+	gate?: string | null
+}
+
+export interface FlightDetails {
+	passengers?: Passenger[]
+	segments?: FlightSegment[]
+}
+
+export interface CarDetails {
+	supplier?: string | null
+	rentalCompany?: string | null
+	carType?: string | null
+	carFeatures?: string[]
+	driver?: { name?: string | null }
+	pickup?: WhenWhere
+	dropoff?: WhenWhere
+}
+
+export interface HotelDetails {
+	propertyName?: string | null
+	address?: string | null
+	checkIn?: WhenWhere
+	checkOut?: WhenWhere
+	roomType?: string | null
+	board?: string | null
+	numberOfRooms?: number | null
+	guests?: { name?: string | null }[]
+}
+
+export type BookingDetails = FlightDetails & CarDetails & HotelDetails & Record<string, unknown>
 
 export interface Booking {
 	id: number
@@ -33,17 +71,16 @@ export interface Booking {
 	type: string
 	provider: string | null
 	bookingReference: string | null
+	confirmationNumber: string | null
 	title: string | null
 	status: string
 	confidence: number | null
+	details: BookingDetails
+	startDate: string | null
+	endDate: string | null
 	createdAt: string | null
 	updatedAt: string | null
 	confirmedAt: string | null
-}
-
-export interface BookingWithSegments {
-	booking: Booking
-	segments: Segment[]
 }
 
 export interface Trip {
@@ -56,17 +93,17 @@ export interface Trip {
 
 const unwrap = <T>(data: { ocs: { data: T } }): T => data.ocs.data
 
-export const listBookings = async (status?: string): Promise<BookingWithSegments[]> => {
+export const listBookings = async (status?: string): Promise<Booking[]> => {
 	const res = await axios.get(base('bookings'), { params: status ? { status } : {} })
 	return unwrap(res.data)
 }
 
-export const updateBooking = async (id: number, fields: Partial<Pick<Booking, 'title' | 'provider' | 'bookingReference'>>): Promise<BookingWithSegments> => {
+export const updateBooking = async (id: number, fields: Partial<Pick<Booking, 'title' | 'provider' | 'bookingReference' | 'confirmationNumber'>>): Promise<Booking> => {
 	const res = await axios.put(base(`bookings/${id}`), fields)
 	return unwrap(res.data)
 }
 
-export const confirmBooking = async (id: number): Promise<BookingWithSegments> => {
+export const confirmBooking = async (id: number): Promise<Booking> => {
 	const res = await axios.post(base(`bookings/${id}/confirm`), {})
 	return unwrap(res.data)
 }
@@ -75,7 +112,7 @@ export const discardBooking = async (id: number): Promise<void> => {
 	await axios.delete(base(`bookings/${id}`))
 }
 
-export const assignBookingToTrip = async (id: number, tripId: number | null): Promise<BookingWithSegments> => {
+export const assignBookingToTrip = async (id: number, tripId: number | null): Promise<Booking> => {
 	const res = await axios.post(base(`bookings/${id}/trip`), { tripId })
 	return unwrap(res.data)
 }

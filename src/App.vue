@@ -11,26 +11,49 @@ import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import {
-	type BookingWithSegments,
+	type Booking,
 	type Trip,
+	assignBookingToTrip,
 	confirmBooking,
 	createTrip,
+	deleteTrip,
 	discardBooking,
 	listBookings,
 	listTrips,
 } from './api'
-import { draftCount as countDrafts, filterByStatus } from './bookings'
+import {
+	bookingHeaderFields,
+	bookingsForTrip,
+	carFields,
+	draftCount as countDrafts,
+	filterByStatus,
+	flightSegmentFields,
+	hotelFields,
+	passengerLines,
+	unassignedBookings,
+} from './bookings'
 
-const bookings = ref<BookingWithSegments[]>([])
+const bookings = ref<Booking[]>([])
 const trips = ref<Trip[]>([])
 const filter = ref<string>('draft')
 const loading = ref(true)
 const newTripOpen = ref(false)
 const newTripName = ref('')
 
+// Trip-linking dialog state.
+const linkOpen = ref(false)
+const linkTarget = ref<Trip | null>(null)
+// Trip-deletion confirmation state.
+const deleteTripOpen = ref(false)
+const deleteTripTarget = ref<Trip | null>(null)
+
 const filtered = computed(() => filterByStatus(bookings.value, filter.value))
 
 const draftCount = computed(() => countDrafts(bookings.value))
+
+const unassigned = computed(() => unassignedBookings(bookings.value))
+
+const bookingLabel = (item: Booking): string => item.title || item.type
 
 const reload = async () => {
 	loading.value = true
@@ -82,6 +105,52 @@ const submitNewTrip = async () => {
 	}
 }
 
+const openLink = (trip: Trip) => {
+	linkTarget.value = trip
+	linkOpen.value = true
+}
+
+const onLink = async (bookingId: number) => {
+	if (linkTarget.value === null) {
+		return
+	}
+	try {
+		await assignBookingToTrip(bookingId, linkTarget.value.id)
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not link the booking'))
+	}
+}
+
+const onUnlink = async (bookingId: number) => {
+	try {
+		await assignBookingToTrip(bookingId, null)
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not unlink the booking'))
+	}
+}
+
+const askDeleteTrip = (trip: Trip) => {
+	deleteTripTarget.value = trip
+	deleteTripOpen.value = true
+}
+
+const confirmDeleteTrip = async () => {
+	if (deleteTripTarget.value === null) {
+		return
+	}
+	try {
+		await deleteTrip(deleteTripTarget.value.id)
+		showSuccess(t('travelmanager', 'Trip deleted'))
+		deleteTripOpen.value = false
+		deleteTripTarget.value = null
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not delete the trip'))
+	}
+}
+
 onMounted(reload)
 </script>
 
@@ -102,39 +171,123 @@ onMounted(reload)
 				<NcAppNavigationItem :name="t('travelmanager', 'All bookings')"
 					:active="filter === 'all'"
 					@click="filter = 'all'" />
-				<NcAppNavigationItem :name="t('travelmanager', 'New trip')"
-					@click="onNewTrip" />
+				<NcAppNavigationItem :name="t('travelmanager', 'Trips')"
+					:active="filter === 'trips'"
+					@click="filter = 'trips'">
+					<template #counter>
+						{{ trips.length }}
+					</template>
+				</NcAppNavigationItem>
 			</template>
 		</NcAppNavigation>
 		<NcAppContent>
-			<div :class="$style.content">
+			<div v-if="filter === 'trips'" :class="$style.content">
+				<div :class="$style.tripsToolbar">
+					<h2 :class="$style.tripsHeading">
+						{{ t('travelmanager', 'Trips') }}
+					</h2>
+					<NcButton variant="primary" @click="onNewTrip">
+						{{ t('travelmanager', 'Create trip') }}
+					</NcButton>
+				</div>
+				<NcEmptyContent v-if="!loading && trips.length === 0"
+					:name="t('travelmanager', 'No trips yet')"
+					:description="t('travelmanager', 'Create a trip, then group your bookings under it.')" />
+				<details v-for="trip in trips" :key="trip.id" :class="$style.tripCard">
+					<summary :class="$style.tripSummary">
+						<strong>{{ trip.name }}</strong>
+						<span :class="$style.badge">
+							{{ t('travelmanager', '{n} booking(s)', { n: bookingsForTrip(bookings, trip.id).length }) }}
+						</span>
+					</summary>
+					<div :class="$style.tripBody">
+						<ul v-if="bookingsForTrip(bookings, trip.id).length > 0" :class="$style.tripBookings">
+							<li v-for="item in bookingsForTrip(bookings, trip.id)"
+								:key="item.id"
+								:class="$style.tripBooking">
+								<div :class="$style.tripBookingInfo">
+									<strong>{{ bookingLabel(item) }}</strong>
+									<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.status }}</span>
+								</div>
+								<NcButton variant="tertiary" @click="onUnlink(item.id)">
+									{{ t('travelmanager', 'Unlink') }}
+								</NcButton>
+							</li>
+						</ul>
+						<p v-else :class="$style.tripEmpty">
+							{{ t('travelmanager', 'No bookings linked to this trip yet.') }}
+						</p>
+						<div :class="$style.actions">
+							<NcButton variant="secondary" @click="openLink(trip)">
+								{{ t('travelmanager', 'Link booking') }}
+							</NcButton>
+							<NcButton variant="tertiary" @click="askDeleteTrip(trip)">
+								{{ t('travelmanager', 'Delete trip') }}
+							</NcButton>
+						</div>
+					</div>
+				</details>
+			</div>
+			<div v-else :class="$style.content">
 				<NcEmptyContent v-if="!loading && filtered.length === 0"
 					:name="t('travelmanager', 'Nothing here yet')"
 					:description="t('travelmanager', 'Travel bookings extracted from your mailbox will appear here as drafts.')" />
-				<div v-for="item in filtered" :key="item.booking.id" :class="$style.card">
+				<div v-for="item in filtered" :key="item.id" :class="$style.card">
 					<div :class="$style.cardHeader">
-						<strong>{{ item.booking.title || item.booking.type }}</strong>
-						<span :class="$style.badge">{{ item.booking.status }}</span>
+						<strong>{{ item.title || item.type }}</strong>
+						<span :class="$style.badge">{{ item.status }}</span>
 					</div>
-					<div :class="$style.meta">
-						<span>{{ item.booking.type }}</span>
-						<span v-if="item.booking.provider">· {{ item.booking.provider }}</span>
-						<span v-if="item.booking.bookingReference">· {{ item.booking.bookingReference }}</span>
+					<div :class="[$style.fields, $style.meta]">
+						<template v-for="field in bookingHeaderFields(item)" :key="field.label">
+							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+							<span :class="$style.fieldValue">{{ field.value }}</span>
+						</template>
 					</div>
-					<ul :class="$style.segments">
-						<li v-for="seg in item.segments" :key="seg.id">
-							<span v-if="seg.flightNumber">{{ seg.flightNumber }} </span>
-							<span v-if="seg.origin">{{ seg.origin }}</span>
-							<span v-if="seg.destination"> → {{ seg.destination }}</span>
-							<span v-if="seg.location">{{ seg.location }}</span>
-							<span :class="$style.time">{{ seg.startLocal }}<span v-if="seg.startTimezone"> ({{ seg.startTimezone }})</span></span>
-						</li>
-					</ul>
-					<div v-if="item.booking.status === 'draft'" :class="$style.actions">
-						<NcButton variant="primary" @click="onConfirm(item.booking.id)">
+
+					<!-- Flight: passengers + one row per leg -->
+					<template v-if="item.type === 'flight'">
+						<div v-if="passengerLines(item.details).length > 0" :class="$style.fields">
+							<span :class="$style.fieldLabel">{{ t('travelmanager', 'Passengers') }}</span>
+							<span :class="$style.fieldValue">
+								<span v-for="(line, i) in passengerLines(item.details)" :key="i" :class="$style.passenger">
+									{{ line }}
+								</span>
+							</span>
+						</div>
+						<ul :class="$style.segments">
+							<li v-for="(seg, i) in (item.details.segments ?? [])" :key="i" :class="$style.segment">
+								<span v-if="(item.details.segments ?? []).length > 1" :class="$style.segmentIndex">
+									{{ t('travelmanager', 'Leg {n}', { n: i + 1 }) }}
+								</span>
+								<div :class="$style.fields">
+									<template v-for="field in flightSegmentFields(seg)" :key="field.label">
+										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+										<span :class="$style.fieldValue">{{ field.value }}</span>
+									</template>
+								</div>
+							</li>
+						</ul>
+					</template>
+
+					<!-- Car rental / accommodation: a single labelled detail block -->
+					<div v-else-if="item.type === 'car_rental'" :class="[$style.fields, $style.typeFields]">
+						<template v-for="field in carFields(item.details)" :key="field.label">
+							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+							<span :class="$style.fieldValue">{{ field.value }}</span>
+						</template>
+					</div>
+					<div v-else-if="item.type === 'accommodation'" :class="[$style.fields, $style.typeFields]">
+						<template v-for="field in hotelFields(item.details)" :key="field.label">
+							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+							<span :class="$style.fieldValue">{{ field.value }}</span>
+						</template>
+					</div>
+
+					<div v-if="item.status === 'draft'" :class="$style.actions">
+						<NcButton variant="primary" @click="onConfirm(item.id)">
 							{{ t('travelmanager', 'Confirm') }}
 						</NcButton>
-						<NcButton variant="tertiary" @click="onDiscard(item.booking.id)">
+						<NcButton variant="tertiary" @click="onDiscard(item.id)">
 							{{ t('travelmanager', 'Discard') }}
 						</NcButton>
 					</div>
@@ -156,6 +309,44 @@ onMounted(reload)
 					:disabled="!newTripName.trim()"
 					@click="submitNewTrip">
 					{{ t('travelmanager', 'Create') }}
+				</NcButton>
+			</template>
+		</NcDialog>
+
+		<NcDialog v-model:open="linkOpen"
+			:name="linkTarget ? t('travelmanager', 'Link a booking to “{trip}”', { trip: linkTarget.name }) : t('travelmanager', 'Link a booking')"
+			size="normal">
+			<p v-if="unassigned.length === 0" :class="$style.tripEmpty">
+				{{ t('travelmanager', 'Every booking is already linked to a trip.') }}
+			</p>
+			<ul v-else :class="$style.tripBookings">
+				<li v-for="item in unassigned" :key="item.id" :class="$style.tripBooking">
+					<div :class="$style.tripBookingInfo">
+						<strong>{{ bookingLabel(item) }}</strong>
+						<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.status }}</span>
+					</div>
+					<NcButton variant="secondary" @click="onLink(item.id)">
+						{{ t('travelmanager', 'Link') }}
+					</NcButton>
+				</li>
+			</ul>
+			<template #actions>
+				<NcButton variant="primary" @click="linkOpen = false">
+					{{ t('travelmanager', 'Done') }}
+				</NcButton>
+			</template>
+		</NcDialog>
+
+		<NcDialog v-model:open="deleteTripOpen"
+			:name="t('travelmanager', 'Delete trip?')"
+			size="small">
+			{{ t('travelmanager', 'This deletes the trip. Its bookings are kept and simply unlinked, so you can re-group them later. This cannot be undone.') }}
+			<template #actions>
+				<NcButton variant="tertiary" @click="deleteTripOpen = false">
+					{{ t('travelmanager', 'Cancel') }}
+				</NcButton>
+				<NcButton variant="error" @click="confirmDeleteTrip">
+					{{ t('travelmanager', 'Delete trip') }}
 				</NcButton>
 			</template>
 		</NcDialog>
@@ -189,27 +380,126 @@ onMounted(reload)
 }
 
 .meta {
-	color: var(--color-text-maxcontrast);
-	font-size: 0.9em;
-	margin: 4px 0;
+	margin: 8px 0;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.typeFields {
+	margin-top: 4px;
+}
+
+.passenger {
+	display: block;
 }
 
 .segments {
-	margin: 8px 0;
+	margin: 8px 0 0;
+	padding: 0;
+	list-style: none;
 }
 
-.segments li {
-	padding: 2px 0;
+.segment {
+	padding: 8px 0;
+	border-top: 1px solid var(--color-border);
 }
 
-.time {
+.segment:first-child {
+	border-top: none;
+	padding-top: 4px;
+}
+
+.segmentIndex {
+	display: block;
+	font-size: 0.85em;
+	font-weight: bold;
 	color: var(--color-text-maxcontrast);
-	margin-inline-start: 8px;
+	margin-bottom: 4px;
+}
+
+.fields {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 1px 12px;
+	align-items: baseline;
+	margin: 0;
+	line-height: 1.4;
+}
+
+.fieldLabel {
+	color: var(--color-text-maxcontrast);
+	text-align: start;
+}
+
+.fieldValue {
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 .actions {
 	display: flex;
 	gap: 8px;
 	margin-top: 8px;
+}
+
+.tripsToolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.tripsHeading {
+	margin: 0;
+}
+
+.tripCard {
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large);
+	margin-bottom: 12px;
+}
+
+.tripSummary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 16px;
+	cursor: pointer;
+}
+
+.tripBody {
+	padding: 0 16px 12px;
+}
+
+.tripBookings {
+	list-style: none;
+	margin: 0 0 8px;
+	padding: 0;
+}
+
+.tripBooking {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 0;
+	border-top: 1px solid var(--color-border);
+}
+
+.tripBookingInfo {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.tripBookingMeta {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+}
+
+.tripEmpty {
+	color: var(--color-text-maxcontrast);
+	margin: 8px 0;
 }
 </style>

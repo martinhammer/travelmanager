@@ -15,7 +15,7 @@ use OCP\AppFramework\OCSController;
 use OCP\IRequest;
 
 /**
- * @psalm-import-type TravelManagerBookingDetails from \OCA\TravelManager\ResponseDefinitions
+ * @psalm-import-type TravelManagerBooking from \OCA\TravelManager\ResponseDefinitions
  *
  * @psalm-suppress UnusedClass
  */
@@ -30,10 +30,10 @@ class BookingController extends OCSController {
 	}
 
 	/**
-	 * List the current user's bookings, each with its segments
+	 * List the current user's bookings, each with its type-specific details
 	 *
 	 * @param string|null $status Only return bookings with this status (draft, confirmed, cancelled, superseded)
-	 * @return DataResponse<Http::STATUS_OK, list<TravelManagerBookingDetails>, array{}>
+	 * @return DataResponse<Http::STATUS_OK, list<TravelManagerBooking>, array{}>
 	 *
 	 * 200: Bookings returned
 	 */
@@ -41,15 +41,15 @@ class BookingController extends OCSController {
 	#[ApiRoute(verb: 'GET', url: '/api/bookings')]
 	public function index(?string $status = null): DataResponse {
 		$bookings = $this->bookingService->listBookings($this->uid(), $status);
-		$out = array_values(array_map(fn ($b): array => $this->serialize($b->getId()), $bookings));
+		$out = array_values(array_map(static fn ($b): array => $b->jsonSerialize(), $bookings));
 		return new DataResponse($out);
 	}
 
 	/**
-	 * Get a single booking with its segments
+	 * Get a single booking with its type-specific details
 	 *
 	 * @param int $id Id of the booking
-	 * @return DataResponse<Http::STATUS_OK, TravelManagerBookingDetails, array{}>
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
 	 *
 	 * 200: Booking returned
@@ -72,7 +72,8 @@ class BookingController extends OCSController {
 	 * @param string|null $title New title
 	 * @param string|null $provider New provider
 	 * @param string|null $bookingReference New booking reference
-	 * @return DataResponse<Http::STATUS_OK, TravelManagerBookingDetails, array{}>
+	 * @param string|null $confirmationNumber New confirmation number
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
 	 *
 	 * 200: Booking updated
@@ -80,11 +81,12 @@ class BookingController extends OCSController {
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'PUT', url: '/api/bookings/{id}')]
-	public function update(int $id, ?string $title = null, ?string $provider = null, ?string $bookingReference = null): DataResponse {
+	public function update(int $id, ?string $title = null, ?string $provider = null, ?string $bookingReference = null, ?string $confirmationNumber = null): DataResponse {
 		$values = array_filter([
 			'title' => $title,
 			'provider' => $provider,
 			'bookingReference' => $bookingReference,
+			'confirmationNumber' => $confirmationNumber,
 		], static fn ($v): bool => $v !== null);
 		try {
 			$this->bookingService->updateBookingFields($this->uid(), $id, $values);
@@ -98,7 +100,7 @@ class BookingController extends OCSController {
 	 * Confirm a draft booking
 	 *
 	 * @param int $id Id of the booking
-	 * @return DataResponse<Http::STATUS_OK, TravelManagerBookingDetails, array{}>
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
 	 *
 	 * 200: Booking confirmed
@@ -116,7 +118,7 @@ class BookingController extends OCSController {
 	}
 
 	/**
-	 * Discard (delete) a booking and its segments
+	 * Discard (delete) a booking
 	 *
 	 * @param int $id Id of the booking
 	 * @return DataResponse<Http::STATUS_OK, array{success: bool}, array{}>
@@ -141,7 +143,7 @@ class BookingController extends OCSController {
 	 *
 	 * @param int $id Id of the booking
 	 * @param int|null $tripId Id of the trip to link, or null to unlink
-	 * @return DataResponse<Http::STATUS_OK, TravelManagerBookingDetails, array{}>
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking or trip not found
 	 *
 	 * 200: Booking linked
@@ -159,17 +161,11 @@ class BookingController extends OCSController {
 	}
 
 	/**
-	 * @return TravelManagerBookingDetails
+	 * @return TravelManagerBooking
 	 * @throws DoesNotExistException
 	 */
 	private function serialize(int $bookingId): array {
-		$uid = $this->uid();
-		$booking = $this->bookingService->getBooking($uid, $bookingId);
-		$segments = $this->bookingService->listSegments($uid, $bookingId);
-		return [
-			'booking' => $booking->jsonSerialize(),
-			'segments' => array_values(array_map(static fn ($s): array => $s->jsonSerialize(), $segments)),
-		];
+		return $this->bookingService->getBooking($this->uid(), $bookingId)->jsonSerialize();
 	}
 
 	private function uid(): string {

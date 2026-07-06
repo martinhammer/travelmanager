@@ -18,8 +18,12 @@ use Psr\Log\LoggerInterface;
  * its own failures.
  */
 class IngestionLogger {
-	/** Long text (prompt / raw LLM response) is truncated before storage. */
-	private const MAX_CONTEXT = 8000;
+	/**
+	 * Long troubleshooting context (prompt + raw LLM response + task metadata)
+	 * is truncated before storage so a single row can't grow unbounded, but the
+	 * cap is generous enough to keep the whole prompt and response for debugging.
+	 */
+	private const MAX_CONTEXT = 20000;
 
 	public function __construct(
 		private IngestionLogMapper $mapper,
