@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\AppInfo\Application;
+use OCP\Config\IUserConfig;
 use OCP\IAppConfig;
-use OCP\IConfig;
 use OCP\IUserManager;
 use OCP\Security\ICredentialsManager;
 
@@ -15,8 +15,10 @@ use OCP\Security\ICredentialsManager;
  * encrypted IMAP credential. Secrets only ever live in ICredentialsManager,
  * never in app/user config (see brief §6).
  *
- * Uses the long-stable OCP\IConfig surface so the signatures are identical
- * across NC 30–34; getUsersForUserValue() gives us the enrolled-user fan-out.
+ * Per-user values go through OCP\Config\IUserConfig (NC 33+ replaced the now
+ * deprecated OCP\IConfig::*UserValue methods); values are stored as strings to
+ * keep the wire-format stable. searchUsersByValueString() gives us the
+ * enrolled-user fan-out.
  */
 class ConfigService {
 	private const CREDENTIAL_KEY = Application::APP_ID . '_imap_password';
@@ -39,7 +41,7 @@ class ConfigService {
 
 	public function __construct(
 		private IAppConfig $appConfig,
-		private IConfig $config,
+		private IUserConfig $userConfig,
 		private IUserManager $userManager,
 		private ICredentialsManager $credentialsManager,
 	) {
@@ -77,19 +79,19 @@ class ConfigService {
 
 	public function getUserSettings(string $userId): UserSettings {
 		return new UserSettings(
-			$this->config->getUserValue($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1',
-			$this->config->getUserValue($userId, Application::APP_ID, self::USER_IMAP_HOST, ''),
-			(int)$this->config->getUserValue($userId, Application::APP_ID, self::USER_IMAP_PORT, '993'),
-			$this->config->getUserValue($userId, Application::APP_ID, self::USER_IMAP_SECURITY, 'ssl'),
-			$this->config->getUserValue($userId, Application::APP_ID, self::USER_IMAP_USER, ''),
-			$this->config->getUserValue($userId, Application::APP_ID, self::USER_MAILBOX, 'INBOX'),
-			(int)$this->config->getUserValue($userId, Application::APP_ID, self::USER_INTERVAL, (string)self::DEFAULT_INTERVAL_MINUTES),
+			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1',
+			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, ''),
+			(int)$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, '993'),
+			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, 'ssl'),
+			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_USER, ''),
+			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_MAILBOX, 'INBOX'),
+			(int)$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_INTERVAL, (string)self::DEFAULT_INTERVAL_MINUTES),
 			$this->hasImapPassword($userId),
 		);
 	}
 
 	public function setUserEnabled(string $userId, bool $enabled): void {
-		$this->config->setUserValue($userId, Application::APP_ID, self::USER_ENABLED, $enabled ? '1' : '0');
+		$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_ENABLED, $enabled ? '1' : '0');
 	}
 
 	/**
@@ -99,22 +101,22 @@ class ConfigService {
 	 */
 	public function setUserSettings(string $userId, array $values): void {
 		if (isset($values['imapHost'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_IMAP_HOST, (string)$values['imapHost']);
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, (string)$values['imapHost']);
 		}
 		if (isset($values['imapPort'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_IMAP_PORT, (string)(int)$values['imapPort']);
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, (string)(int)$values['imapPort']);
 		}
 		if (isset($values['imapSecurity'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_IMAP_SECURITY, (string)$values['imapSecurity']);
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, (string)$values['imapSecurity']);
 		}
 		if (isset($values['imapUser'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_IMAP_USER, (string)$values['imapUser']);
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_USER, (string)$values['imapUser']);
 		}
 		if (isset($values['mailbox'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_MAILBOX, (string)$values['mailbox']);
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_MAILBOX, (string)$values['mailbox']);
 		}
 		if (isset($values['intervalMinutes'])) {
-			$this->config->setUserValue($userId, Application::APP_ID, self::USER_INTERVAL, (string)max(5, (int)$values['intervalMinutes']));
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_INTERVAL, (string)max(5, (int)$values['intervalMinutes']));
 		}
 	}
 
@@ -125,7 +127,10 @@ class ConfigService {
 	 * @return string[] user ids
 	 */
 	public function getEnabledUserIds(): array {
-		return $this->config->getUsersForUserValue(Application::APP_ID, self::USER_ENABLED, '1');
+		return iterator_to_array(
+			$this->userConfig->searchUsersByValueString(Application::APP_ID, self::USER_ENABLED, '1'),
+			false,
+		);
 	}
 
 	/* ----------------------------------------------------------- credential */

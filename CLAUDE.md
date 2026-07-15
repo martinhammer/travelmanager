@@ -217,8 +217,12 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   `Doctrine\DBAL\Schema\Table` type that `ISchemaWrapper` returns in migrations.
 - **App config:** use `IAppConfig` (`getValueBool/Int`, `setValue…`) —
   `IConfig::getAppValue/setAppValue` are **deprecated** and Psalm flags them.
-  User config still goes through `IConfig` (`getUserValue`, `setUserValue`, and
-  `getUsersForUserValue` for the enrolled-user fan-out — these are not deprecated).
+  **User config uses `OCP\Config\IUserConfig`** (`getValueString/Int/Bool`,
+  `setValueString/…`, and `searchUsersByValueString` for the enrolled-user
+  fan-out). As of **NC 33** the old `IConfig::{get,set}UserValue` /
+  `getUsersForUserValue` are **deprecated** (Psalm errorLevel 1 flags them) — do
+  not reintroduce them. `ConfigService` stores per-user values as **strings** to
+  keep the wire-format stable (so the `'1'` enabled-flag fan-out keeps matching).
 - **Task Processing:** use `getAvailableTaskTypes()` (long-standing) to probe for
   a provider. `getAvailableTaskTypeIds()` is a recent addition (server PR #54848)
   and may not exist on NC 33.
