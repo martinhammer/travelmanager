@@ -35,6 +35,7 @@ class Version1000Date20260703000000 extends SimpleMigrationStep {
 			$table->addColumn('message', Types::TEXT, ['notnull' => true, 'default' => '']);
 			$table->addColumn('context', Types::TEXT, ['notnull' => false]);
 			$table->addColumn('created_at', Types::DATETIME, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addIndex(['user_id', 'id'], 'tm_log_user_id');
 		}
