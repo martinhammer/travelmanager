@@ -39,6 +39,7 @@ class Version1000Date20260621000000 extends SimpleMigrationStep {
 			$table->addColumn('status', Types::STRING, ['notnull' => true, 'length' => 32, 'default' => 'processed']);
 			$table->addColumn('error', Types::TEXT, ['notnull' => false]);
 			$table->addColumn('processed_at', Types::DATETIME, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addUniqueIndex(['user_id', 'message_id'], 'tm_msg_user_msgid');
 			$table->addIndex(['user_id', 'status'], 'tm_msg_user_status');
@@ -54,6 +55,7 @@ class Version1000Date20260621000000 extends SimpleMigrationStep {
 			$table->addColumn('notes', Types::TEXT, ['notnull' => false]);
 			$table->addColumn('created_at', Types::DATETIME, ['notnull' => false]);
 			$table->addColumn('updated_at', Types::DATETIME, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addIndex(['user_id'], 'tm_trip_user');
 		}
@@ -74,6 +76,7 @@ class Version1000Date20260621000000 extends SimpleMigrationStep {
 			$table->addColumn('created_at', Types::DATETIME, ['notnull' => false]);
 			$table->addColumn('updated_at', Types::DATETIME, ['notnull' => false]);
 			$table->addColumn('confirmed_at', Types::DATETIME, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addIndex(['user_id', 'status'], 'tm_book_user_status');
 			$table->addIndex(['user_id', 'trip_id'], 'tm_book_user_trip');
@@ -100,6 +103,7 @@ class Version1000Date20260621000000 extends SimpleMigrationStep {
 			$table->addColumn('gate', Types::STRING, ['notnull' => false, 'length' => 64]);
 			$table->addColumn('extra_json', Types::TEXT, ['notnull' => false]);
 			$table->addColumn('confidence', Types::FLOAT, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addIndex(['user_id', 'booking_id'], 'tm_seg_user_booking');
 		}
@@ -112,6 +116,7 @@ class Version1000Date20260621000000 extends SimpleMigrationStep {
 			$table->addColumn('message_id', Types::STRING, ['notnull' => true, 'length' => 255]);
 			$table->addColumn('status', Types::STRING, ['notnull' => true, 'length' => 32, 'default' => 'pending']);
 			$table->addColumn('created_at', Types::DATETIME, ['notnull' => false]);
+			/** @psalm-suppress DeprecatedMethod Canonical Nextcloud migration API; the runtime Table is Nextcloud's own dbal, doctrine/dbal is a dev-only type stub. */
 			$table->setPrimaryKey(['id']);
 			$table->addUniqueIndex(['task_id'], 'tm_task_taskid');
 			$table->addIndex(['user_id', 'status'], 'tm_task_user_status');
