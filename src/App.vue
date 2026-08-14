@@ -20,17 +20,19 @@ import {
 	discardBooking,
 	listBookings,
 	listTrips,
+	updateTrip,
 } from './api'
 import {
 	bookingHeaderFields,
 	bookingsForTrip,
 	carFields,
+	decodeHtmlEntities,
 	draftCount as countDrafts,
 	filterByStatus,
 	flightSegmentFields,
 	hotelFields,
+	linkDialogBookings,
 	passengerLines,
-	unassignedBookings,
 } from './bookings'
 
 const bookings = ref<Booking[]>([])
@@ -39,6 +41,8 @@ const filter = ref<string>('draft')
 const loading = ref(true)
 const newTripOpen = ref(false)
 const newTripName = ref('')
+// When set, the trip dialog edits this trip instead of creating a new one.
+const editTripTarget = ref<Trip | null>(null)
 
 // Trip-linking dialog state.
 const linkOpen = ref(false)
@@ -51,9 +55,11 @@ const filtered = computed(() => filterByStatus(bookings.value, filter.value))
 
 const draftCount = computed(() => countDrafts(bookings.value))
 
-const unassigned = computed(() => unassignedBookings(bookings.value))
+const linkCandidates = computed(() => linkTarget.value ? linkDialogBookings(bookings.value, linkTarget.value.id) : [])
 
-const bookingLabel = (item: Booking): string => item.title || item.type
+const bookingLabel = (item: Booking): string => decodeHtmlEntities(item.title || item.type)
+
+const tripLabel = (trip: Trip): string => decodeHtmlEntities(trip.name)
 
 const reload = async () => {
 	loading.value = true
@@ -86,7 +92,15 @@ const onDiscard = async (id: number) => {
 }
 
 const onNewTrip = () => {
+	editTripTarget.value = null
 	newTripName.value = ''
+	newTripOpen.value = true
+}
+
+const onEditTrip = (trip: Trip) => {
+	editTripTarget.value = trip
+	// Decoded so a leftover entity (see decodeHtmlEntities) gets cleaned up on save.
+	newTripName.value = decodeHtmlEntities(trip.name)
 	newTripOpen.value = true
 }
 
@@ -96,12 +110,17 @@ const submitNewTrip = async () => {
 		return
 	}
 	try {
-		await createTrip(name)
+		if (editTripTarget.value !== null) {
+			await updateTrip(editTripTarget.value.id, { name })
+		} else {
+			await createTrip(name)
+		}
 		newTripOpen.value = false
 		newTripName.value = ''
+		editTripTarget.value = null
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not create trip'))
+		showError(editTripTarget.value !== null ? t('travelmanager', 'Could not update trip') : t('travelmanager', 'Could not create trip'))
 	}
 }
 
@@ -195,7 +214,7 @@ onMounted(reload)
 					:description="t('travelmanager', 'Create a trip, then group your bookings under it.')" />
 				<details v-for="trip in trips" :key="trip.id" :class="$style.tripCard">
 					<summary :class="$style.tripSummary">
-						<strong>{{ trip.name }}</strong>
+						<strong>{{ tripLabel(trip) }}</strong>
 						<span :class="$style.badge">
 							{{ t('travelmanager', '{n} booking(s)', { n: bookingsForTrip(bookings, trip.id).length }) }}
 						</span>
@@ -221,7 +240,10 @@ onMounted(reload)
 							<NcButton variant="secondary" @click="openLink(trip)">
 								{{ t('travelmanager', 'Link booking') }}
 							</NcButton>
-							<NcButton variant="tertiary" @click="askDeleteTrip(trip)">
+							<NcButton variant="secondary" @click="onEditTrip(trip)">
+								{{ t('travelmanager', 'Edit trip') }}
+							</NcButton>
+							<NcButton variant="error" @click="askDeleteTrip(trip)">
 								{{ t('travelmanager', 'Delete trip') }}
 							</NcButton>
 						</div>
@@ -296,36 +318,42 @@ onMounted(reload)
 		</NcAppContent>
 
 		<NcDialog v-model:open="newTripOpen"
-			:name="t('travelmanager', 'New trip')"
+			:name="editTripTarget ? t('travelmanager', 'Edit trip') : t('travelmanager', 'New trip')"
 			size="small">
 			<NcTextField v-model="newTripName"
 				:label="t('travelmanager', 'Trip name')"
 				@keydown.enter="submitNewTrip" />
 			<template #actions>
-				<NcButton variant="tertiary" @click="newTripOpen = false">
+				<NcButton variant="tertiary" @click="newTripOpen = false; editTripTarget = null">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
 				<NcButton variant="primary"
 					:disabled="!newTripName.trim()"
 					@click="submitNewTrip">
-					{{ t('travelmanager', 'Create') }}
+					{{ editTripTarget ? t('travelmanager', 'Save') : t('travelmanager', 'Create') }}
 				</NcButton>
 			</template>
 		</NcDialog>
 
 		<NcDialog v-model:open="linkOpen"
-			:name="linkTarget ? t('travelmanager', 'Link a booking to “{trip}”', { trip: linkTarget.name }) : t('travelmanager', 'Link a booking')"
+			:name="t('travelmanager', 'Link a booking')"
 			size="normal">
-			<p v-if="unassigned.length === 0" :class="$style.tripEmpty">
-				{{ t('travelmanager', 'Every booking is already linked to a trip.') }}
+			<p v-if="linkTarget" :class="$style.tripEmpty">
+				{{ t('travelmanager', 'Linking to') }} “<strong>{{ tripLabel(linkTarget) }}</strong>”.
+			</p>
+			<p v-if="linkCandidates.length === 0" :class="$style.tripEmpty">
+				{{ t('travelmanager', 'No bookings to show here.') }}
 			</p>
 			<ul v-else :class="$style.tripBookings">
-				<li v-for="item in unassigned" :key="item.id" :class="$style.tripBooking">
+				<li v-for="item in linkCandidates" :key="item.id" :class="$style.tripBooking">
 					<div :class="$style.tripBookingInfo">
 						<strong>{{ bookingLabel(item) }}</strong>
 						<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.status }}</span>
 					</div>
-					<NcButton variant="secondary" @click="onLink(item.id)">
+					<NcButton v-if="item.tripId === linkTarget?.id" variant="tertiary" @click="onUnlink(item.id)">
+						{{ t('travelmanager', 'Unlink') }}
+					</NcButton>
+					<NcButton v-else variant="secondary" @click="onLink(item.id)">
 						{{ t('travelmanager', 'Link') }}
 					</NcButton>
 				</li>

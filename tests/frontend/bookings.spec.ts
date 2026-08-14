@@ -4,11 +4,13 @@ import {
 	bookingHeaderFields,
 	bookingsForTrip,
 	carFields,
+	decodeHtmlEntities,
 	draftCount,
 	filterByStatus,
 	flightSegmentFields,
 	formatDateTime,
 	hotelFields,
+	linkDialogBookings,
 	passengerLines,
 	unassignedBookings,
 } from '../../src/bookings'
@@ -78,6 +80,11 @@ describe('trip grouping', () => {
 
 	it('collects only the unassigned bookings', () => {
 		expect(unassignedBookings(pool).map((i) => i.id)).toEqual([2, 5])
+	})
+
+	it('the link dialog shows unassigned bookings plus the trip\'s own members', () => {
+		expect(linkDialogBookings(pool, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
+		expect(linkDialogBookings(pool, 9).map((i) => i.id)).toEqual([2, 4, 5])
 	})
 })
 
@@ -194,5 +201,25 @@ describe('passengerLines', () => {
 
 	it('is empty when there are no passengers', () => {
 		expect(passengerLines({})).toEqual([])
+	})
+})
+
+describe('decodeHtmlEntities', () => {
+	it('decodes named entities', () => {
+		expect(decodeHtmlEntities('Smith &amp; Co &mdash; Sebie&apos;s birthday')).toBe('Smith & Co — Sebie\'s birthday')
+	})
+
+	it('decodes decimal and hex numeric refs', () => {
+		expect(decodeHtmlEntities('Sebie&#39;s birthday')).toBe('Sebie\'s birthday')
+		expect(decodeHtmlEntities('Sebie&#x27;s birthday')).toBe('Sebie\'s birthday')
+	})
+
+	it('leaves plain text and unknown refs untouched', () => {
+		expect(decodeHtmlEntities('August Norway trip')).toBe('August Norway trip')
+		expect(decodeHtmlEntities('Rock &amp; Roll &unknown; test')).toBe('Rock & Roll &unknown; test')
+	})
+
+	it('resolves double-encoded entities (e.g. "&amp;#39;")', () => {
+		expect(decodeHtmlEntities('August Norway Sebie&amp;#39;s birthday')).toBe('August Norway Sebie\'s birthday')
 	})
 })

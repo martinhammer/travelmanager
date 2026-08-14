@@ -7,6 +7,56 @@ import type {
 	WhenWhere,
 } from './api'
 
+// Common named entities plus numeric/hex refs (&#39; &#x27; …). Source emails
+// occasionally ship a plain-text part that was naively tag-stripped upstream
+// without decoding entities, so titles/names extracted from it can carry
+// literal "&#39;" etc. through to booking titles and (via copy/paste or
+// pre-filled trip names) trip names. Decode defensively wherever such text is
+// displayed, so a leftover entity reads as a normal character instead of
+// literal markup.
+const NAMED_ENTITIES: Record<string, string> = {
+	amp: '&',
+	lt: '<',
+	gt: '>',
+	quot: '"',
+	apos: '\'',
+	nbsp: ' ',
+	mdash: '—',
+	ndash: '–',
+	hellip: '…',
+}
+
+const decodeOnce = (value: string): string => {
+	return value.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (match, ref: string): string => {
+		if (ref[0] === '#') {
+			const codePoint = ref[1]?.toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10)
+			return Number.isNaN(codePoint) ? match : String.fromCodePoint(codePoint)
+		}
+		const decoded = NAMED_ENTITIES[ref.toLowerCase()]
+		return decoded ?? match
+	})
+}
+
+/**
+ * Decode common HTML entities in plain text pulled from email content.
+ * Some source emails are double-encoded (e.g. "&amp;#39;"): a single pass
+ * only turns that into "&#39;", since the newly-formed entity isn't
+ * re-scanned within the same replace(). Loop until stable (capped) to fully
+ * resolve those.
+ * @param value the raw text, possibly containing HTML entities
+ */
+export const decodeHtmlEntities = (value: string): string => {
+	let decoded = value
+	for (let i = 0; i < 3; i++) {
+		const next = decodeOnce(decoded)
+		if (next === decoded) {
+			break
+		}
+		decoded = next
+	}
+	return decoded
+}
+
 /** A single labelled field ready to render as "Label: value". */
 export interface SegmentField {
 	label: string
@@ -164,3 +214,13 @@ export const bookingsForTrip = (items: Booking[], tripId: number): Booking[] =>
  */
 export const unassignedBookings = (items: Booking[]): Booking[] =>
 	items.filter((item) => item.tripId === null)
+
+/**
+ * The bookings shown in the "Link a booking" dialog for a given trip: those
+ * already linked to it (so they stay visible with an Unlink action instead of
+ * disappearing once linked) plus the still-unassigned pool.
+ * @param items the bookings to filter
+ * @param tripId the trip being linked to
+ */
+export const linkDialogBookings = (items: Booking[], tripId: number): Booking[] =>
+	items.filter((item) => item.tripId === null || item.tripId === tripId)

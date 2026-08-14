@@ -127,6 +127,11 @@ export const createTrip = async (name: string): Promise<Trip> => {
 	return unwrap(res.data)
 }
 
+export const updateTrip = async (id: number, fields: Partial<Pick<Trip, 'name' | 'notes'>>): Promise<Trip> => {
+	const res = await axios.put(base(`trips/${id}`), fields)
+	return unwrap(res.data)
+}
+
 export const deleteTrip = async (id: number): Promise<void> => {
 	await axios.delete(base(`trips/${id}`))
 }
