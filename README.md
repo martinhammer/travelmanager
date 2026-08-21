@@ -11,6 +11,11 @@ Dependencies and prerequisites:
 * [Nextcloud Assistant](https://apps.nextcloud.com/apps/assistant) 
 * [OpenAI and LocalAI integration](https://apps.nextcloud.com/apps/integration_openai) - properly configured in the Assistant settings
 
+Know limitations and issues:
+* The app is under heavy iterative development. Whilst migration scripts are being used to move "seamlessly" between versions, there is a lot of churn and the app is not yet suitable for production use.
+* Currently there is 1:N relationship between email and bookings. In other words, a later email will not update an existing booking (it might create a duplicate or fail to do anything).
+* The full booking and trip lifecycle is not yet 100% nailed down, and neither is the full relationship between the objects (message/booking/trip).
+* Limited testing on a small sample of bookings till date.
 
 ### Motivation
 

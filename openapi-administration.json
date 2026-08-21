@@ -345,6 +345,10 @@
             "description": "Developer/debugging endpoints for the current user: trigger a mailbox read on demand (no waiting for cron), inspect the step-by-step activity log, and wipe the derived data so the same messages can be reprocessed from scratch."
         },
         {
+            "name": "message",
+            "description": "The ingestion ledger as a first-class view: what was read from the mailbox, what became of it, and a way to re-run the ones that went wrong."
+        },
+        {
             "name": "settings",
             "description": "Reads/writes the current user's Travel Manager settings. The IMAP password is write-only over the API (stored via ICredentialsManager, never returned)."
         }

@@ -72,11 +72,6 @@
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
   </file>
-  <file src="lib/Imap/ImapMessage.php">
-    <PossiblyUnusedProperty>
-      <code><![CDATA[$date]]></code>
-    </PossiblyUnusedProperty>
-  </file>
   <file src="lib/Listener/TaskFailedListener.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>
@@ -105,6 +100,21 @@
   <file src="lib/Migration/Version1200Date20260706000000.php">
     <UnusedClass>
       <code><![CDATA[Version1200Date20260706000000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Migration/Version1300Date20260814000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1300Date20260814000000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Migration/Version1400Date20260814100000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1400Date20260814100000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Migration/Version1500Date20260814110000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1500Date20260814110000]]></code>
     </UnusedClass>
   </file>
   <file src="lib/Service/BookingService.php">

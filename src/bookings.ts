@@ -4,6 +4,7 @@ import type {
 	FlightDetails,
 	FlightSegment,
 	HotelDetails,
+	ReviewState,
 	WhenWhere,
 } from './api'
 
@@ -185,20 +186,126 @@ export const passengerLines = (details: FlightDetails): string[] =>
 		.filter((line) => line.trim() !== '')
 
 /**
- * Filter bookings by status. The sentinel 'all' returns everything.
+ * Filter bookings by review state. The sentinel 'all' returns everything,
+ * including discarded and archived bookings — those are soft states, so the
+ * rows survive and stay visible rather than disappearing.
  * Pure and free of Nextcloud imports so it is unit-testable in isolation.
  * @param items the bookings to filter
- * @param status the status to keep, or 'all' for no filtering
+ * @param reviewState the review state to keep, or 'all' for no filtering
  */
-export const filterByStatus = (items: Booking[], status: string): Booking[] =>
-	status === 'all' ? items : items.filter((item) => item.status === status)
+export const filterByReviewState = (items: Booking[], reviewState: string): Booking[] =>
+	reviewState === 'all' ? items : items.filter((item) => item.reviewState === reviewState)
+
+/** How the bookings list is ordered. */
+export type BookingSort = 'upcoming' | 'added' | 'updated'
+
+// Sorts a nullable ISO-ish string descending, with nulls always last.
+const byDateDesc = (a: string | null, b: string | null): number => {
+	if (a === b) {
+		return 0
+	}
+	if (!a) {
+		return 1
+	}
+	if (!b) {
+		return -1
+	}
+	return a < b ? 1 : -1
+}
+
+/**
+ * Order bookings for display.
+ *
+ * 'upcoming' is the default and the only one specific to travel: the next trip
+ * first, then further-off ones, with past travel below in reverse order and
+ * undated bookings last. Plain ascending by date would bury what is coming up
+ * under everything that already happened.
+ * @param items the bookings to order (not mutated)
+ * @param sort the ordering to apply
+ * @param now reference point for "past"; injectable so tests do not depend on today
+ */
+export const sortBookings = (items: Booking[], sort: BookingSort, now: Date = new Date()): Booking[] => {
+	const copy = [...items]
+	if (sort === 'added') {
+		return copy.sort((a, b) => byDateDesc(a.createdAt, b.createdAt))
+	}
+	if (sort === 'updated') {
+		return copy.sort((a, b) => byDateDesc(a.updatedAt, b.updatedAt))
+	}
+
+	// Compare against local wall-clock (V8: booking times carry no offset).
+	const today = now.toISOString().slice(0, 19)
+	const rank = (item: Booking): number => {
+		if (!item.startDate) {
+			return 2
+		}
+		return item.startDate >= today ? 0 : 1
+	}
+	return copy.sort((a, b) => {
+		const ra = rank(a)
+		const rb = rank(b)
+		if (ra !== rb) {
+			return ra - rb
+		}
+		if (ra === 2) {
+			return byDateDesc(a.createdAt, b.createdAt)
+		}
+		// Upcoming ascending (soonest first); past descending (most recent first).
+		return ra === 0
+			? (a.startDate! < b.startDate! ? -1 : 1)
+			: byDateDesc(a.startDate, b.startDate)
+	})
+}
+
+/**
+ * The booking types actually present in a set, so the type filter only offers
+ * values that would return something.
+ * @param items the bookings to inspect
+ */
+export const bookingTypes = (items: Booking[]): string[] =>
+	[...new Set(items.map((item) => item.type))].sort()
+
+/**
+ * Apply the Bookings view's filters. Both accept the sentinel 'all'.
+ * @param items the bookings to filter
+ * @param reviewState review state to keep, or 'all'
+ * @param type booking type to keep, or 'all'
+ */
+export const filterBookings = (items: Booking[], reviewState: string, type: string): Booking[] =>
+	filterByReviewState(items, reviewState).filter((item) => type === 'all' || item.type === type)
 
 /**
  * Number of bookings still awaiting confirmation.
  * @param items the bookings to count drafts in
  */
 export const draftCount = (items: Booking[]): number =>
-	items.filter((item) => item.status === 'draft').length
+	items.filter((item) => item.reviewState === 'draft').length
+
+/**
+ * Where "Restore" should put a booking: back to confirmed if it had already
+ * been confirmed before it was discarded/archived, otherwise back to the
+ * draft queue for review.
+ * @param item the booking being restored
+ */
+export const restoreTarget = (item: Booking): ReviewState =>
+	item.confirmedAt !== null ? 'confirmed' : 'draft'
+
+/**
+ * The review states a booking can be moved to from where it is now, in the
+ * order they should be offered. Drives the per-card action buttons.
+ * @param item the booking to offer actions for
+ */
+export const reviewActions = (item: Booking): ReviewState[] => {
+	switch (item.reviewState) {
+	case 'draft':
+		return ['confirmed', 'discarded']
+	case 'confirmed':
+		return ['archived', 'discarded']
+	// Discarded and archived are undo-able; the only way out is back.
+	default:
+		return [restoreTarget(item)]
+	}
+}
 
 /**
  * The bookings linked to a given trip.
@@ -218,9 +325,13 @@ export const unassignedBookings = (items: Booking[]): Booking[] =>
 /**
  * The bookings shown in the "Link a booking" dialog for a given trip: those
  * already linked to it (so they stay visible with an Unlink action instead of
- * disappearing once linked) plus the still-unassigned pool.
+ * disappearing once linked) plus the still-unassigned pool. Discarded and
+ * archived bookings are left out — they survive as rows now, but they are not
+ * things you want to group into a trip.
  * @param items the bookings to filter
  * @param tripId the trip being linked to
  */
 export const linkDialogBookings = (items: Booking[], tripId: number): Booking[] =>
-	items.filter((item) => item.tripId === null || item.tripId === tripId)
+	items.filter((item) => (item.tripId === null || item.tripId === tripId)
+		&& item.reviewState !== 'discarded'
+		&& item.reviewState !== 'archived')

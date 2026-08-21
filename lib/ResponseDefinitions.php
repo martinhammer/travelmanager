@@ -16,6 +16,7 @@ namespace OCA\TravelManager;
  *     confirmationNumber: string|null,
  *     title: string|null,
  *     status: string,
+ *     reviewState: string,
  *     confidence: float|null,
  *     details: array<string, mixed>,
  *     startDate: string|null,
@@ -23,6 +24,21 @@ namespace OCA\TravelManager;
  *     createdAt: string|null,
  *     updatedAt: string|null,
  *     confirmedAt: string|null,
+ * }
+ *
+ * @psalm-type TravelManagerMessage = array{
+ *     id: int,
+ *     mailbox: string,
+ *     messageId: string,
+ *     subject: string|null,
+ *     status: string,
+ *     failureKind: string|null,
+ *     error: string|null,
+ *     lastResponse: string|null,
+ *     attempts: int,
+ *     canRetry: bool,
+ *     sentAt: string|null,
+ *     processedAt: string|null,
  * }
  *
  * @psalm-type TravelManagerTrip = array{

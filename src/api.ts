@@ -65,6 +65,9 @@ export interface HotelDetails {
 
 export type BookingDetails = FlightDetails & CarDetails & HotelDetails & Record<string, unknown>
 
+/** The user's decision about a booking, orthogonal to its provider-side status. */
+export type ReviewState = 'draft' | 'confirmed' | 'discarded' | 'archived'
+
 export interface Booking {
 	id: number
 	tripId: number | null
@@ -73,7 +76,10 @@ export interface Booking {
 	bookingReference: string | null
 	confirmationNumber: string | null
 	title: string | null
+	/** What the provider did: active, cancelled or superseded. */
 	status: string
+	/** What the user decided: draft, confirmed, discarded or archived. */
+	reviewState: ReviewState
 	confidence: number | null
 	details: BookingDetails
 	startDate: string | null
@@ -81,6 +87,24 @@ export interface Booking {
 	createdAt: string | null
 	updatedAt: string | null
 	confirmedAt: string | null
+}
+
+/** One row of the ingestion ledger: an email that was read from the mailbox. */
+export interface Message {
+	id: number
+	mailbox: string
+	messageId: string
+	subject: string | null
+	status: string
+	failureKind: string | null
+	error: string | null
+	/** Raw model output from the last attempt (truncated server-side). */
+	lastResponse: string | null
+	attempts: number
+	/** False once the retained body has been dropped — no re-extraction possible. */
+	canRetry: boolean
+	sentAt: string | null
+	processedAt: string | null
 }
 
 export interface Trip {
@@ -93,8 +117,8 @@ export interface Trip {
 
 const unwrap = <T>(data: { ocs: { data: T } }): T => data.ocs.data
 
-export const listBookings = async (status?: string): Promise<Booking[]> => {
-	const res = await axios.get(base('bookings'), { params: status ? { status } : {} })
+export const listBookings = async (reviewState?: ReviewState): Promise<Booking[]> => {
+	const res = await axios.get(base('bookings'), { params: reviewState ? { reviewState } : {} })
 	return unwrap(res.data)
 }
 
@@ -103,17 +127,41 @@ export const updateBooking = async (id: number, fields: Partial<Pick<Booking, 't
 	return unwrap(res.data)
 }
 
-export const confirmBooking = async (id: number): Promise<Booking> => {
-	const res = await axios.post(base(`bookings/${id}/confirm`), {})
+/**
+ * Confirm / discard / archive / un-discard. Soft — see deleteBooking to purge.
+ * @param id the booking to move
+ * @param reviewState the target review state
+ */
+export const setBookingReviewState = async (id: number, reviewState: ReviewState): Promise<Booking> => {
+	const res = await axios.post(base(`bookings/${id}/review`), { reviewState })
 	return unwrap(res.data)
 }
 
-export const discardBooking = async (id: number): Promise<void> => {
+/**
+ * Permanent removal, leaving no tombstone.
+ * @param id the booking to delete
+ */
+export const deleteBooking = async (id: number): Promise<void> => {
 	await axios.delete(base(`bookings/${id}`))
 }
 
 export const assignBookingToTrip = async (id: number, tripId: number | null): Promise<Booking> => {
 	const res = await axios.post(base(`bookings/${id}/trip`), { tripId })
+	return unwrap(res.data)
+}
+
+export const listMessages = async (status?: string): Promise<Message[]> => {
+	const res = await axios.get(base('messages'), { params: status ? { status } : {} })
+	return unwrap(res.data)
+}
+
+/**
+ * Re-run the extraction for an already-ingested message. Asynchronous: the
+ * model answers later, so the row updates on a subsequent reload.
+ * @param id the message to re-extract
+ */
+export const retryMessage = async (id: number): Promise<Message> => {
+	const res = await axios.post(base(`messages/${id}/retry`), {})
 	return unwrap(res.data)
 }
 

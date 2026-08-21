@@ -10,6 +10,7 @@ use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\AppFramework\OCS\OCSBadRequestException;
 use OCP\AppFramework\OCS\OCSNotFoundException;
 use OCP\AppFramework\OCSController;
 use OCP\IRequest;
@@ -32,15 +33,15 @@ class BookingController extends OCSController {
 	/**
 	 * List the current user's bookings, each with its type-specific details
 	 *
-	 * @param string|null $status Only return bookings with this status (draft, confirmed, cancelled, superseded)
+	 * @param string|null $reviewState Only return bookings in this review state (draft, confirmed, discarded, archived)
 	 * @return DataResponse<Http::STATUS_OK, list<TravelManagerBooking>, array{}>
 	 *
 	 * 200: Bookings returned
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'GET', url: '/api/bookings')]
-	public function index(?string $status = null): DataResponse {
-		$bookings = $this->bookingService->listBookings($this->uid(), $status);
+	public function index(?string $reviewState = null): DataResponse {
+		$bookings = $this->bookingService->listBookings($this->uid(), $reviewState);
 		$out = array_values(array_map(static fn ($b): array => $b->jsonSerialize(), $bookings));
 		return new DataResponse($out);
 	}
@@ -97,41 +98,52 @@ class BookingController extends OCSController {
 	}
 
 	/**
-	 * Confirm a draft booking
+	 * Move a booking to a review state
+	 *
+	 * Discarding and archiving are soft: the booking is kept and can be moved
+	 * back, and a later email about it will not resurrect it as a fresh draft.
 	 *
 	 * @param int $id Id of the booking
+	 * @param string $reviewState Target state: draft, confirmed, discarded or archived
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
+	 * @throws OCSBadRequestException Unknown review state
 	 *
-	 * 200: Booking confirmed
+	 * 200: Booking updated
+	 * 400: Unknown review state
 	 * 404: Booking not found
 	 */
 	#[NoAdminRequired]
-	#[ApiRoute(verb: 'POST', url: '/api/bookings/{id}/confirm')]
-	public function confirm(int $id): DataResponse {
+	#[ApiRoute(verb: 'POST', url: '/api/bookings/{id}/review')]
+	public function review(int $id, string $reviewState): DataResponse {
 		try {
-			$this->bookingService->confirm($this->uid(), $id);
+			$this->bookingService->setReviewState($this->uid(), $id, $reviewState);
 			return new DataResponse($this->serialize($id));
 		} catch (DoesNotExistException) {
 			throw new OCSNotFoundException();
+		} catch (\InvalidArgumentException $e) {
+			throw new OCSBadRequestException($e->getMessage());
 		}
 	}
 
 	/**
-	 * Discard (delete) a booking
+	 * Delete a booking permanently
+	 *
+	 * Unlike discarding this leaves no tombstone, so a later email about the
+	 * same booking will re-create it as a draft.
 	 *
 	 * @param int $id Id of the booking
 	 * @return DataResponse<Http::STATUS_OK, array{success: bool}, array{}>
 	 * @throws OCSNotFoundException Booking not found
 	 *
-	 * 200: Booking discarded
+	 * 200: Booking deleted
 	 * 404: Booking not found
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'DELETE', url: '/api/bookings/{id}')]
 	public function destroy(int $id): DataResponse {
 		try {
-			$this->bookingService->discard($this->uid(), $id);
+			$this->bookingService->purge($this->uid(), $id);
 			return new DataResponse(['success' => true]);
 		} catch (DoesNotExistException) {
 			throw new OCSNotFoundException();

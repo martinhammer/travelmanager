@@ -110,49 +110,99 @@ class IngestionService {
 	}
 
 	private function enqueue(string $userId, string $mailbox, ImapMessage $message): bool {
-		$now = $this->timeFactory->getDateTime();
-
 		// Record a dedup row up front so re-runs before completion don't
-		// re-enqueue the same message.
+		// re-enqueue the same message. The body is retained so the extraction can
+		// be re-run later without going back to IMAP (a message may be gone from
+		// the mailbox, and UIDVALIDITY may have rolled).
 		$record = new ProcessedMessage();
 		$record->setUserId($userId);
 		$record->setMailbox($mailbox);
 		$record->setMessageId($message->messageId);
 		$record->setUidValidity($message->uidValidity);
 		$record->setImapUid($message->uid);
+		$record->setSubject($message->subject === '' ? null : $message->subject);
+		$record->setSentAt($message->date === null ? null : \DateTime::createFromImmutable($message->date));
+		$record->setBodyText($message->textBody);
 		$record->setStatus(ProcessedMessage::STATUS_PROCESSING);
-		$record->setProcessedAt($now);
+		$record->setAttempts(0);
+		$record->setProcessedAt($this->timeFactory->getDateTime());
 		$this->processedMessageMapper->insert($record);
 
-		try {
-			$prompt = $this->extractionService->buildPrompt($message->textBody, $message->subject);
-			$taskId = $this->llmService->scheduleText2Text($prompt, $userId, $message->messageId);
-		} catch (\Throwable $e) {
-			$this->logger->warning('Travel Manager: failed to schedule extraction for ' . $userId . ': ' . $e->getMessage());
-			$this->activityLog->error(
-				$userId,
-				IngestionLog::STEP_SCHEDULE,
-				'Failed to schedule extraction for ' . $this->describe($message) . ': ' . $e->getMessage(),
-			);
-			$record->setStatus(ProcessedMessage::STATUS_FAILED);
-			$record->setError($e->getMessage());
-			$this->processedMessageMapper->update($record);
-			return false;
+		return $this->scheduleExtraction($record, $this->describe($message));
+	}
+
+	/**
+	 * Re-run the extraction for an already-ingested message, using the retained
+	 * body. Deliberately bypasses the dedup check — the message is processed by
+	 * definition; that is the whole point.
+	 *
+	 * @throws \RuntimeException when the body was not retained, so there is
+	 *                           nothing to re-extract
+	 */
+	public function retryMessage(string $userId, int $id): void {
+		$record = $this->processedMessageMapper->find($id, $userId);
+		if (!$record->canRetry()) {
+			throw new \RuntimeException('The email body for this message was not retained, so it cannot be re-extracted');
 		}
 
 		$this->activityLog->info(
 			$userId,
 			IngestionLog::STEP_SCHEDULE,
-			'Passing message to the model (task #' . $taskId . '): ' . $this->describe($message),
+			'Retrying extraction (attempt ' . ($record->getAttempts() + 1) . ') for ' . $this->describeRecord($record),
+		);
+
+		$record->setStatus(ProcessedMessage::STATUS_PROCESSING);
+		$record->setError(null);
+		$record->setFailureKind(null);
+		$record->setProcessedAt($this->timeFactory->getDateTime());
+		$this->processedMessageMapper->update($record);
+
+		$this->scheduleExtraction($record, $this->describeRecord($record));
+	}
+
+	/**
+	 * Build the prompt from a stored message and hand it to the model, recording
+	 * the task correlation. Shared by first ingestion and retry, so both count
+	 * attempts and report failures the same way.
+	 *
+	 * @param string $label human-readable identification for the activity log
+	 */
+	private function scheduleExtraction(ProcessedMessage $record, string $label): bool {
+		$userId = $record->getUserId();
+		$record->setAttempts($record->getAttempts() + 1);
+
+		try {
+			$prompt = $this->extractionService->buildPrompt($record->getBodyText() ?? '', $record->getSubject());
+			$taskId = $this->llmService->scheduleText2Text($prompt, $userId, $record->getMessageId());
+		} catch (\Throwable $e) {
+			$this->logger->warning('Travel Manager: failed to schedule extraction for ' . $userId . ': ' . $e->getMessage());
+			$this->activityLog->error(
+				$userId,
+				IngestionLog::STEP_SCHEDULE,
+				'Failed to schedule extraction for ' . $label . ': ' . $e->getMessage(),
+			);
+			$record->setStatus(ProcessedMessage::STATUS_FAILED);
+			$record->setFailureKind(ProcessedMessage::FAILURE_SCHEDULE);
+			$record->setError($e->getMessage());
+			$this->processedMessageMapper->update($record);
+			return false;
+		}
+
+		$this->processedMessageMapper->update($record);
+
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_SCHEDULE,
+			'Passing message to the model (task #' . $taskId . '): ' . $label,
 			$prompt,
 		);
 
 		$map = new TaskMap();
 		$map->setTaskId($taskId);
 		$map->setUserId($userId);
-		$map->setMessageId($message->messageId);
+		$map->setMessageId($record->getMessageId());
 		$map->setStatus(TaskMap::STATUS_PENDING);
-		$map->setCreatedAt($now);
+		$map->setCreatedAt($this->timeFactory->getDateTime());
 		$this->taskMapMapper->insert($map);
 
 		return true;
@@ -162,5 +212,10 @@ class IngestionService {
 	private function describe(ImapMessage $message): string {
 		$subject = $message->subject === '' ? '(no subject)' : $message->subject;
 		return '"' . $subject . '" ' . $message->messageId;
+	}
+
+	/** As describe(), for a message already in the database. */
+	private function describeRecord(ProcessedMessage $record): string {
+		return '"' . ($record->getSubject() ?? '(no subject)') . '" ' . $record->getMessageId();
 	}
 }

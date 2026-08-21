@@ -2,16 +2,21 @@ import { describe, expect, it } from 'vitest'
 import type { Booking } from '../../src/api'
 import {
 	bookingHeaderFields,
+	bookingTypes,
 	bookingsForTrip,
 	carFields,
+	filterBookings,
+	sortBookings,
 	decodeHtmlEntities,
 	draftCount,
-	filterByStatus,
+	filterByReviewState,
 	flightSegmentFields,
 	formatDateTime,
 	hotelFields,
 	linkDialogBookings,
 	passengerLines,
+	restoreTarget,
+	reviewActions,
 	unassignedBookings,
 } from '../../src/bookings'
 
@@ -23,7 +28,8 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 	bookingReference: 'ABC123',
 	confirmationNumber: null,
 	title: 'Trip',
-	status: 'draft',
+	status: 'active',
+	reviewState: 'draft',
 	confidence: null,
 	details: {},
 	startDate: null,
@@ -35,25 +41,32 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 })
 
 const items: Booking[] = [
-	booking({ id: 1, status: 'draft' }),
-	booking({ id: 2, status: 'draft' }),
-	booking({ id: 3, status: 'confirmed' }),
-	booking({ id: 4, status: 'cancelled' }),
+	booking({ id: 1, reviewState: 'draft' }),
+	booking({ id: 2, reviewState: 'draft' }),
+	booking({ id: 3, reviewState: 'confirmed' }),
+	booking({ id: 4, reviewState: 'discarded', status: 'cancelled' }),
 ]
 
-describe('filterByStatus', () => {
-	it('filters to a single status', () => {
-		expect(filterByStatus(items, 'draft').map((i) => i.id)).toEqual([1, 2])
-		expect(filterByStatus(items, 'confirmed').map((i) => i.id)).toEqual([3])
+describe('filterByReviewState', () => {
+	it('filters to a single review state', () => {
+		expect(filterByReviewState(items, 'draft').map((i) => i.id)).toEqual([1, 2])
+		expect(filterByReviewState(items, 'confirmed').map((i) => i.id)).toEqual([3])
 	})
 
-	it('returns everything for the "all" sentinel', () => {
-		expect(filterByStatus(items, 'all')).toHaveLength(4)
+	it('returns everything for the "all" sentinel, discarded included', () => {
+		expect(filterByReviewState(items, 'all')).toHaveLength(4)
+		expect(filterByReviewState(items, 'all').map((i) => i.id)).toContain(4)
+	})
+
+	it('is independent of the provider-side status', () => {
+		// #4 is cancelled by the airline but that is not a review state.
+		expect(filterByReviewState(items, 'cancelled')).toEqual([])
+		expect(filterByReviewState(items, 'discarded').map((i) => i.id)).toEqual([4])
 	})
 
 	it('does not mutate the input', () => {
 		const copy = [...items]
-		filterByStatus(items, 'draft')
+		filterByReviewState(items, 'draft')
 		expect(items).toEqual(copy)
 	})
 })
@@ -61,6 +74,74 @@ describe('filterByStatus', () => {
 describe('draftCount', () => {
 	it('counts only drafts', () => {
 		expect(draftCount(items)).toBe(2)
+	})
+})
+
+describe('review transitions', () => {
+	it('offers confirm and discard on a draft', () => {
+		expect(reviewActions(booking({ reviewState: 'draft' }))).toEqual(['confirmed', 'discarded'])
+	})
+
+	it('offers archive and discard on a confirmed booking', () => {
+		expect(reviewActions(booking({ reviewState: 'confirmed' }))).toEqual(['archived', 'discarded'])
+	})
+
+	it('offers only a way back from discarded and archived', () => {
+		expect(reviewActions(booking({ reviewState: 'discarded' }))).toEqual(['draft'])
+		expect(reviewActions(booking({ reviewState: 'archived' }))).toEqual(['draft'])
+	})
+
+	it('restores a previously confirmed booking to confirmed, not back into the draft queue', () => {
+		const wasConfirmed = booking({ reviewState: 'archived', confirmedAt: '2026-07-01T10:00:00+00:00' })
+		expect(restoreTarget(wasConfirmed)).toBe('confirmed')
+		expect(reviewActions(wasConfirmed)).toEqual(['confirmed'])
+		expect(restoreTarget(booking({ reviewState: 'discarded' }))).toBe('draft')
+	})
+})
+
+describe('sortBookings', () => {
+	const now = new Date('2026-08-14T12:00:00Z')
+	const pool = [
+		booking({ id: 1, startDate: '2026-06-24T18:00:00', createdAt: '2026-01-01T00:00:00+00:00' }),
+		booking({ id: 2, startDate: '2026-09-01T08:00:00', createdAt: '2026-02-01T00:00:00+00:00' }),
+		booking({ id: 3, startDate: null, createdAt: '2026-03-01T00:00:00+00:00' }),
+		booking({ id: 4, startDate: '2026-12-24T10:00:00', createdAt: '2026-04-01T00:00:00+00:00' }),
+		booking({ id: 5, startDate: '2026-07-30T09:00:00', createdAt: '2026-05-01T00:00:00+00:00' }),
+	]
+
+	it('puts the next trip first, past travel below, undated last', () => {
+		// 2 and 4 are ahead (soonest first); 5 and 1 are past (most recent
+		// first); 3 has no date at all.
+		expect(sortBookings(pool, 'upcoming', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
+	})
+
+	it('orders by creation or update when asked', () => {
+		expect(sortBookings(pool, 'added', now).map((b) => b.id)).toEqual([5, 4, 3, 2, 1])
+	})
+
+	it('does not mutate the input', () => {
+		const copy = [...pool]
+		sortBookings(pool, 'upcoming', now)
+		expect(pool).toEqual(copy)
+	})
+})
+
+describe('booking filters', () => {
+	const pool = [
+		booking({ id: 1, type: 'flight', reviewState: 'draft' }),
+		booking({ id: 2, type: 'car_rental', reviewState: 'draft' }),
+		booking({ id: 3, type: 'flight', reviewState: 'confirmed' }),
+	]
+
+	it('combines the review-state and type filters', () => {
+		expect(filterBookings(pool, 'draft', 'all').map((b) => b.id)).toEqual([1, 2])
+		expect(filterBookings(pool, 'all', 'flight').map((b) => b.id)).toEqual([1, 3])
+		expect(filterBookings(pool, 'draft', 'flight').map((b) => b.id)).toEqual([1])
+		expect(filterBookings(pool, 'all', 'all')).toHaveLength(3)
+	})
+
+	it('offers only the types actually present', () => {
+		expect(bookingTypes(pool)).toEqual(['car_rental', 'flight'])
 	})
 })
 
@@ -85,6 +166,15 @@ describe('trip grouping', () => {
 	it('the link dialog shows unassigned bookings plus the trip\'s own members', () => {
 		expect(linkDialogBookings(pool, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
 		expect(linkDialogBookings(pool, 9).map((i) => i.id)).toEqual([2, 4, 5])
+	})
+
+	it('the link dialog leaves out discarded and archived bookings', () => {
+		const withTombstones = [
+			...pool,
+			booking({ id: 6, tripId: null, reviewState: 'discarded' }),
+			booking({ id: 7, tripId: null, reviewState: 'archived' }),
+		]
+		expect(linkDialogBookings(withTombstones, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
 	})
 })
 

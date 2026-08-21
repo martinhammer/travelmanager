@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Service;
 
 use OCA\TravelManager\Exception\ExtractionException;
+use OCA\TravelManager\Service\Dto\ExtractionIssue;
 use OCA\TravelManager\Service\ExtractionService;
 use PHPUnit\Framework\TestCase;
 
@@ -42,7 +43,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertCount(1, $bookings);
 		$booking = $bookings[0];
@@ -71,7 +72,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertCount(2, $bookings[0]->details['segments']);
 		$this->assertSame('2026-08-01T08:00:00', $bookings[0]->startDate);
@@ -88,7 +89,35 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$this->assertSame([], $this->service->parseAndValidate($json));
+		$result = $this->service->parseAndValidate($json);
+
+		$this->assertSame([], $result->bookings);
+		// ...but the rejection is reported rather than swallowed.
+		$this->assertSame(1, $result->droppedCount());
+		$this->assertSame(ExtractionIssue::REASON_MISSING_DEPARTURE, $result->issues[0]->reason);
+	}
+
+	public function testReportsPartiallyDroppedFlightLegs(): void {
+		// The booking survives on its good leg; losing the other one silently
+		// would misreport the trip's span, so it is flagged.
+		$json = json_encode([
+			'bookings' => [[
+				'type' => 'flight',
+				'title' => 'OSL → LHR',
+				'details' => ['segments' => [
+					['departureLocal' => '2026-08-01T08:00:00'],
+					['departureLocal' => 'next tuesday'],
+				]],
+			]],
+		]);
+
+		$result = $this->service->parseAndValidate($json);
+
+		$this->assertCount(1, $result->bookings);
+		$this->assertCount(1, $result->bookings[0]->details['segments']);
+		$this->assertSame(0, $result->droppedCount());
+		$this->assertSame(ExtractionIssue::REASON_PARTIAL_SEGMENTS, $result->issues[0]->reason);
+		$this->assertStringContainsString('kept 1 of 2', $result->issues[0]->description);
 	}
 
 	public function testParsesCarRentalWithSupplierAndPeriod(): void {
@@ -110,7 +139,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertCount(1, $bookings);
 		$booking = $bookings[0];
@@ -126,11 +155,17 @@ final class ExtractionServiceTest extends TestCase {
 		$json = json_encode([
 			'bookings' => [[
 				'type' => 'car_rental',
-				'details' => ['rentalCompany' => 'Hertz', 'pickup' => ['location' => 'OSL']],
+				'details' => ['rentalCompany' => 'Hertz', 'pickup' => ['location' => 'OSL', 'local' => 'on arrival']],
 			]],
 		]);
 
-		$this->assertSame([], $this->service->parseAndValidate($json));
+		$result = $this->service->parseAndValidate($json);
+
+		$this->assertSame([], $result->bookings);
+		$this->assertSame(ExtractionIssue::REASON_MISSING_PICKUP, $result->issues[0]->reason);
+		// The unusable raw value is echoed back — that string is what you tune
+		// the prompt against.
+		$this->assertStringContainsString('on arrival', $result->issues[0]->description);
 	}
 
 	public function testParsesAccommodationWithGuests(): void {
@@ -148,7 +183,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertCount(1, $bookings);
 		$booking = $bookings[0];
@@ -166,7 +201,25 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$this->assertSame([], $this->service->parseAndValidate($json));
+		$result = $this->service->parseAndValidate($json);
+
+		$this->assertSame([], $result->bookings);
+		$this->assertSame(ExtractionIssue::REASON_MISSING_CHECKIN, $result->issues[0]->reason);
+	}
+
+	public function testDistinguishesAnEmptyResultFromARejectedOne(): void {
+		// The whole point of reporting issues: both of these yield zero bookings,
+		// but only the second one is worth retrying or tuning the prompt against.
+		$nothingFound = $this->service->parseAndValidate('{"bookings": []}');
+		$this->assertSame([], $nothingFound->bookings);
+		$this->assertSame([], $nothingFound->issues);
+		$this->assertSame(0, $nothingFound->droppedCount());
+
+		$rejected = $this->service->parseAndValidate((string)json_encode([
+			'bookings' => [['type' => 'accommodation', 'details' => ['propertyName' => 'Hotel Sol']]],
+		]));
+		$this->assertSame([], $rejected->bookings);
+		$this->assertSame(1, $rejected->droppedCount());
 	}
 
 	public function testAcceptsDateOnlyCheckIn(): void {
@@ -177,7 +230,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		// A date-only value normalizes to midnight local wall-clock.
 		$this->assertSame('2026-09-01T00:00:00', $bookings[0]->details['checkIn']['local']);
@@ -198,7 +251,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertSame('included', $bookings[0]->details['excessInsurance']);
 		$this->assertSame('1200 EUR', $bookings[0]->details['depositAmount']);
@@ -212,16 +265,19 @@ final class ExtractionServiceTest extends TestCase {
 			],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$result = $this->service->parseAndValidate($json);
 
-		$this->assertCount(1, $bookings);
-		$this->assertSame('flight', $bookings[0]->type);
+		$this->assertCount(1, $result->bookings);
+		$this->assertSame('flight', $result->bookings[0]->type);
+		// The unsupported type is reported, not silently ignored.
+		$this->assertSame(ExtractionIssue::REASON_UNKNOWN_TYPE, $result->issues[0]->reason);
+		$this->assertStringContainsString('event', $result->issues[0]->description);
 	}
 
 	public function testStripsMarkdownFences(): void {
 		$raw = "```json\n{\"bookings\": [{\"type\": \"accommodation\", \"details\": {\"checkIn\": {\"local\": \"2026-09-01\"}}}]}\n```";
 
-		$bookings = $this->service->parseAndValidate($raw);
+		$bookings = $this->service->parseAndValidate($raw)->bookings;
 
 		$this->assertCount(1, $bookings);
 		$this->assertSame('accommodation', $bookings[0]->type);
@@ -230,7 +286,7 @@ final class ExtractionServiceTest extends TestCase {
 	public function testIgnoresProseAroundJson(): void {
 		$raw = "Sure! Here is the data you asked for:\n{\"bookings\": []}\nLet me know if you need anything else.";
 
-		$this->assertSame([], $this->service->parseAndValidate($raw));
+		$this->assertSame([], $this->service->parseAndValidate($raw)->bookings);
 	}
 
 	public function testCancellationStatusPreserved(): void {
@@ -242,7 +298,7 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertSame('cancelled', $bookings[0]->status);
 	}
@@ -256,9 +312,70 @@ final class ExtractionServiceTest extends TestCase {
 			]],
 		]);
 
-		$bookings = $this->service->parseAndValidate($json);
+		$bookings = $this->service->parseAndValidate($json)->bookings;
 
 		$this->assertSame('confirmed', $bookings[0]->status);
+	}
+
+	public function testRepairsResponseMissingClosingBraces(): void {
+		// The observed intermittent failure: a car-rental response exactly one
+		// `}` short. Everything in it is correct, so throwing it away is waste.
+		$truncated = '{"bookings": [{"type": "car_rental", "provider": "Holiday Autos", '
+			. '"booking_reference": "ES867772590", "details": {"rentalCompany": "GOLDCAR", '
+			. '"driver": {"name": "Martin Hammer"}, '
+			. '"pickup": {"location": "Gran Canaria Airport", "local": "2026-06-24T18:00:00"}, '
+			. '"dropoff": {"location": "Gran Canaria Airport", "local": "2026-06-28T12:30:00"}}]}';
+
+		$result = $this->service->parseAndValidate($truncated);
+
+		$this->assertCount(1, $result->bookings);
+		$this->assertSame('car_rental', $result->bookings[0]->type);
+		$this->assertSame('GOLDCAR', $result->bookings[0]->details['rentalCompany']);
+		$this->assertSame('2026-06-24T18:00:00', $result->bookings[0]->startDate);
+		// The repair is recorded, never silent.
+		$this->assertSame(ExtractionIssue::REASON_REPAIRED_JSON, $result->issues[0]->reason);
+		$this->assertFalse($result->issues[0]->dropped);
+		$this->assertStringContainsString('inserted 1 missing closing character', $result->issues[0]->description);
+	}
+
+	public function testInsertsAClosingBraceInTheMiddleNotJustAtTheEnd(): void {
+		// The real failure closes the bookings array while a booking is still
+		// open, so the missing `}` belongs before the `]` — appending at the end
+		// would produce "…}]}}" and still not parse.
+		$repairNote = null;
+		$json = $this->service->extractJsonObject('{"bookings": [{"type": "flight"]}', $repairNote);
+
+		$this->assertSame('{"bookings": [{"type": "flight"}]}', $json);
+		$this->assertNotNull($repairNote);
+	}
+
+	public function testClosesNestedContainersInTheRightOrder(): void {
+		$repairNote = null;
+		// Needs "}]}" — a plain depth counter would emit "}}}".
+		$json = $this->service->extractJsonObject('{"bookings": [{"type": "flight"', $repairNote);
+
+		$this->assertSame('{"bookings": [{"type": "flight"}]}', $json);
+		$this->assertNotNull($repairNote);
+	}
+
+	public function testReportsNoRepairForWellFormedResponses(): void {
+		$repairNote = null;
+		$this->service->extractJsonObject('{"bookings": []}', $repairNote);
+		$this->assertNull($repairNote);
+		$this->assertSame([], $this->service->parseAndValidate('{"bookings": []}')->issues);
+	}
+
+	public function testRefusesToRepairAResponseCutOffInsideAString(): void {
+		// Closing the quote would turn a half-written value into a plausible
+		// whole one — worse than failing.
+		$this->expectException(ExtractionException::class);
+		$this->service->parseAndValidate('{"bookings": [{"type": "car_rental", "title": "Gran Cana');
+	}
+
+	public function testRefusesARepairThatWouldStillNotParse(): void {
+		// A dangling key: appending braces yields {"bookings": [{"type": }]}.
+		$this->expectException(ExtractionException::class);
+		$this->service->parseAndValidate('{"bookings": [{"type":');
 	}
 
 	public function testThrowsOnNonJson(): void {
@@ -291,5 +408,13 @@ final class ExtractionServiceTest extends TestCase {
 		$this->assertStringContainsString('"bookings"', $prompt);
 		$this->assertStringContainsString('confirmation_number', $prompt);
 		$this->assertStringContainsString('Do NOT convert timezones', $prompt);
+	}
+
+	public function testBuildPromptDemandsBalancedJson(): void {
+		// Observed failure mode: a response one closing brace short, which no
+		// amount of correct content can rescue.
+		$prompt = $this->service->buildPrompt('Your car rental is confirmed.');
+		$this->assertStringContainsString('valid JSON', $prompt);
+		$this->assertStringContainsString('Close every brace and bracket you open', $prompt);
 	}
 }

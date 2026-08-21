@@ -23,6 +23,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setTitle(?string $title)
  * @method string getStatus()
  * @method void setStatus(string $status)
+ * @method string getReviewState()
+ * @method void setReviewState(string $reviewState)
  * @method string|null getSourceMessageId()
  * @method void setSourceMessageId(?string $sourceMessageId)
  * @method float|null getConfidence()
@@ -45,10 +47,32 @@ use OCP\AppFramework\Db\Entity;
  * @psalm-suppress PropertyNotSetInConstructor
  */
 class Booking extends Entity implements \JsonSerializable {
-	public const STATUS_DRAFT = 'draft';
-	public const STATUS_CONFIRMED = 'confirmed';
+	/**
+	 * `status` is a fact about the booking itself — what the provider did.
+	 * It is set from the extracted email and is never a user decision.
+	 */
+	public const STATUS_ACTIVE = 'active';
 	public const STATUS_CANCELLED = 'cancelled';
 	public const STATUS_SUPERSEDED = 'superseded';
+
+	/**
+	 * `review_state` is the user's decision about the booking, orthogonal to
+	 * `status` (a cancelled booking can still be confirmed and later archived).
+	 * Discarded and archived are soft states: the row is kept so re-extraction
+	 * cannot resurrect it as a fresh draft, and so the user can undo.
+	 */
+	public const REVIEW_DRAFT = 'draft';
+	public const REVIEW_CONFIRMED = 'confirmed';
+	public const REVIEW_DISCARDED = 'discarded';
+	public const REVIEW_ARCHIVED = 'archived';
+
+	/** Every state a client may move a booking into. */
+	public const REVIEW_STATES = [
+		self::REVIEW_DRAFT,
+		self::REVIEW_CONFIRMED,
+		self::REVIEW_DISCARDED,
+		self::REVIEW_ARCHIVED,
+	];
 
 	public const TYPE_FLIGHT = 'flight';
 	public const TYPE_ACCOMMODATION = 'accommodation';
@@ -61,7 +85,8 @@ class Booking extends Entity implements \JsonSerializable {
 	protected ?string $bookingReference = null;
 	protected ?string $confirmationNumber = null;
 	protected ?string $title = null;
-	protected string $status = self::STATUS_DRAFT;
+	protected string $status = self::STATUS_ACTIVE;
+	protected string $reviewState = self::REVIEW_DRAFT;
 	protected ?string $sourceMessageId = null;
 	protected ?float $confidence = null;
 	/** Canonical per-type structured payload, stored as a JSON string. */
@@ -111,6 +136,7 @@ class Booking extends Entity implements \JsonSerializable {
 			'confirmationNumber' => $this->confirmationNumber,
 			'title' => $this->title,
 			'status' => $this->status,
+			'reviewState' => $this->reviewState,
 			'confidence' => $this->confidence,
 			'details' => $this->decodedDetails(),
 			// Local wall-clock span: emit without timezone offset (see V8).

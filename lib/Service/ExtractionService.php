@@ -6,6 +6,8 @@ namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Exception\ExtractionException;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
+use OCA\TravelManager\Service\Dto\ExtractionIssue;
+use OCA\TravelManager\Service\Dto\ExtractionResult;
 
 /**
  * Pure, dependency-free extraction core: builds the LLM prompt and parses /
@@ -112,6 +114,13 @@ JSON;
 			'Times are LOCAL wall-clock at the relevant place. Do NOT convert timezones.',
 			'Use null (or omit) for anything not present in the email. Never invent dates, references or names.',
 			'If the email contains no such booking, return {"bookings": []}.',
+			// Last, for recency: observed failure mode is a response that is one
+			// closing brace short, which is unparseable however good the content is.
+			'The response MUST be syntactically valid JSON that parses on the first attempt.',
+			'Close every brace and bracket you open. Count them before answering: the '
+				. 'response ends with the closing brace of the root object, after the closing '
+				. 'brace of each booking and the closing bracket of the "bookings" array.',
+			'Never truncate the response or stop mid-object.',
 		]);
 
 		$subjectLine = $subject !== null && $subject !== '' ? "SUBJECT: {$subject}\n\n" : '';
@@ -122,13 +131,27 @@ JSON;
 	/**
 	 * Parse and validate a raw LLM response into bookings.
 	 *
-	 * @return ExtractedBooking[]
+	 * Rejections are reported alongside the survivors rather than swallowed, so
+	 * "this email held no booking" stays distinguishable from "it held one we
+	 * refused" — see ExtractionResult.
+	 *
 	 * @throws ExtractionException when the response is not recoverable JSON
 	 */
-	public function parseAndValidate(string $rawOutput): array {
-		$json = $this->extractJsonObject($rawOutput);
+	public function parseAndValidate(string $rawOutput): ExtractionResult {
+		$repairNote = null;
+		$json = $this->extractJsonObject($rawOutput, $repairNote);
 		if ($json === null) {
 			throw new ExtractionException('No JSON object found in LLM response');
+		}
+
+		/** @var ExtractionIssue[] $issues */
+		$issues = [];
+		if ($repairNote !== null) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_REPAIRED_JSON,
+				'The model returned malformed JSON, repaired before parsing: ' . $repairNote,
+				false,
+			);
 		}
 
 		$decoded = json_decode($json, true);
@@ -144,25 +167,44 @@ JSON;
 		$bookings = [];
 		foreach ($rawBookings as $rawBooking) {
 			if (!is_array($rawBooking)) {
+				$issues[] = new ExtractionIssue(
+					ExtractionIssue::REASON_MALFORMED,
+					'Dropped a "bookings" entry that was not an object',
+					true,
+				);
 				continue;
 			}
-			$booking = $this->validateBooking($rawBooking);
+			$booking = $this->validateBooking($rawBooking, $issues);
 			if ($booking !== null) {
 				$bookings[] = $booking;
 			}
 		}
-		return $bookings;
+		return new ExtractionResult($bookings, $issues);
 	}
 
-	private function validateBooking(array $raw): ?ExtractedBooking {
+	/**
+	 * @param ExtractionIssue[] $issues collector for anything rejected or trimmed
+	 */
+	private function validateBooking(array $raw, array &$issues): ?ExtractedBooking {
 		// Classify: an unrecognised type falls through the match default to null.
 		$type = strtolower($this->nullableString($raw['type'] ?? null) ?? '');
 		$rawDetails = $this->asArray($raw['details'] ?? null);
+		$label = $this->label($raw);
+
+		if (!in_array($type, self::ALLOWED_TYPES, true)) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_UNKNOWN_TYPE,
+				$label . ': type "' . ($type === '' ? '(missing)' : $type) . '" is not one of '
+					. implode(', ', self::ALLOWED_TYPES),
+				true,
+			);
+			return null;
+		}
+
 		$validated = match ($type) {
-			'flight' => $this->validateFlightDetails($rawDetails),
-			'car_rental' => $this->validateCarRentalDetails($rawDetails),
-			'accommodation' => $this->validateAccommodationDetails($rawDetails),
-			default => null,
+			'flight' => $this->validateFlightDetails($rawDetails, $label, $issues),
+			'car_rental' => $this->validateCarRentalDetails($rawDetails, $label, $issues),
+			default => $this->validateAccommodationDetails($rawDetails, $label, $issues),
 		};
 
 		// Anti-hallucination: a booking without its anchoring date(s) is dropped.
@@ -192,15 +234,18 @@ JSON;
 
 	/**
 	 * @param array<array-key, mixed> $details
+	 * @param ExtractionIssue[] $issues
 	 * @return array{0: array<array-key, mixed>, 1: ?string, 2: ?string}|null
 	 */
-	private function validateFlightDetails(array $details): ?array {
+	private function validateFlightDetails(array $details, string $label, array &$issues): ?array {
 		$segments = [];
 		$dates = [];
+		$seen = 0;
 		foreach ($this->asArray($details['segments'] ?? null) as $rawSegment) {
 			if (!is_array($rawSegment)) {
 				continue;
 			}
+			$seen++;
 			$departure = $this->normalizeDate($rawSegment['departureLocal'] ?? null);
 			if ($departure === null) {
 				// A leg without a valid departure time is not usable.
@@ -217,7 +262,25 @@ JSON;
 		}
 
 		if ($segments === []) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_MISSING_DEPARTURE,
+				$label . ': flight dropped — ' . ($seen === 0
+					? 'details contained no segments'
+					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal'),
+				true,
+			);
 			return null;
+		}
+
+		// The booking survives, but silently losing a leg would misreport the trip.
+		$lost = $seen - count($segments);
+		if ($lost > 0) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_PARTIAL_SEGMENTS,
+				$label . ': kept ' . count($segments) . ' of ' . $seen
+					. ' flight segment(s); the rest had no parseable departureLocal',
+				false,
+			);
 		}
 
 		$details['segments'] = $segments;
@@ -226,12 +289,19 @@ JSON;
 
 	/**
 	 * @param array<array-key, mixed> $details
+	 * @param ExtractionIssue[] $issues
 	 * @return array{0: array<array-key, mixed>, 1: ?string, 2: ?string}|null
 	 */
-	private function validateCarRentalDetails(array $details): ?array {
+	private function validateCarRentalDetails(array $details, string $label, array &$issues): ?array {
 		$pickup = $this->asArray($details['pickup'] ?? null);
 		$pickupLocal = $this->normalizeDate($pickup['local'] ?? null);
 		if ($pickupLocal === null) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_MISSING_PICKUP,
+				$label . ': car rental dropped — pickup.local was missing or unparseable'
+					. $this->quoteRaw($pickup['local'] ?? null),
+				true,
+			);
 			return null;
 		}
 		$pickup['local'] = $pickupLocal;
@@ -247,12 +317,19 @@ JSON;
 
 	/**
 	 * @param array<array-key, mixed> $details
+	 * @param ExtractionIssue[] $issues
 	 * @return array{0: array<array-key, mixed>, 1: ?string, 2: ?string}|null
 	 */
-	private function validateAccommodationDetails(array $details): ?array {
+	private function validateAccommodationDetails(array $details, string $label, array &$issues): ?array {
 		$checkIn = $this->asArray($details['checkIn'] ?? null);
 		$checkInLocal = $this->normalizeDate($checkIn['local'] ?? null);
 		if ($checkInLocal === null) {
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_MISSING_CHECKIN,
+				$label . ': accommodation dropped — checkIn.local was missing or unparseable'
+					. $this->quoteRaw($checkIn['local'] ?? null),
+				true,
+			);
 			return null;
 		}
 		$checkIn['local'] = $checkInLocal;
@@ -268,8 +345,17 @@ JSON;
 
 	/**
 	 * Strip markdown fences and isolate the first balanced JSON object.
+	 *
+	 * When the response runs out before the structure closes — the observed
+	 * failure mode is a reply exactly one `}` short — the unclosed containers are
+	 * closed so an otherwise-correct extraction is not thrown away. Any such
+	 * repair is reported through $repairNote; it is never done silently.
+	 *
+	 * @param ?string $repairNote out-param: a description of the repair, or null
+	 *                            when the response needed none
 	 */
-	public function extractJsonObject(string $text): ?string {
+	public function extractJsonObject(string $text, ?string &$repairNote = null): ?string {
+		$repairNote = null;
 		$text = trim($text);
 		// Remove ```json ... ``` or ``` ... ``` fences if present.
 		$text = preg_replace('/^```(?:json)?\s*/i', '', $text) ?? $text;
@@ -280,13 +366,26 @@ JSON;
 			return null;
 		}
 
-		$depth = 0;
+		// A stack of the containers currently open, rather than a depth counter:
+		// a missing `}` is not always at the end. The observed failure closes the
+		// bookings array while a booking object is still open, so the repair has
+		// to insert that booking's `}` *before* the `]`, which a count cannot
+		// locate. The output is rebuilt as we scan; for a well-formed response it
+		// is byte-identical to the input slice.
+		/** @var list<string> $open */
+		$open = [];
+		$out = '';
+		$inserted = 0;
+		$complete = false;
 		$inString = false;
 		$escaped = false;
 		$length = strlen($text);
+
 		for ($i = $start; $i < $length; $i++) {
 			$char = $text[$i];
+
 			if ($inString) {
+				$out .= $char;
 				if ($escaped) {
 					$escaped = false;
 				} elseif ($char === '\\') {
@@ -296,18 +395,71 @@ JSON;
 				}
 				continue;
 			}
+
 			if ($char === '"') {
+				$out .= $char;
 				$inString = true;
-			} elseif ($char === '{') {
-				$depth++;
-			} elseif ($char === '}') {
-				$depth--;
-				if ($depth === 0) {
-					return substr($text, $start, $i - $start + 1);
-				}
+				continue;
+			}
+
+			if ($char === '{' || $char === '[') {
+				$out .= $char;
+				$open[] = $char;
+				continue;
+			}
+
+			if ($char !== '}' && $char !== ']') {
+				$out .= $char;
+				continue;
+			}
+
+			$expected = $char === '}' ? '{' : '[';
+			if (!in_array($expected, $open, true)) {
+				// A closer with nothing to match: drop it rather than unbalance
+				// everything after it.
+				$inserted++;
+				continue;
+			}
+			// Close whatever the model forgot to close before this one.
+			while (end($open) !== $expected) {
+				$missing = array_pop($open);
+				$out .= $missing === '{' ? '}' : ']';
+				$inserted++;
+			}
+			array_pop($open);
+			$out .= $char;
+			if ($open === []) {
+				$complete = true;
+				break;
 			}
 		}
-		return null;
+
+		if (!$complete) {
+			// Cut off inside a string: closing the quote would turn a half-written
+			// value into a plausible whole one, which is worse than failing.
+			if ($inString || $open === []) {
+				return null;
+			}
+			while ($open !== []) {
+				$missing = array_pop($open);
+				$out .= $missing === '{' ? '}' : ']';
+				$inserted++;
+			}
+		}
+
+		if ($inserted === 0) {
+			return $out;
+		}
+
+		// Only accept a repair that actually parses — one that yields
+		// different-but-still-broken JSON just moves the error somewhere less
+		// obvious.
+		if (!is_array(json_decode($out, true))) {
+			return null;
+		}
+
+		$repairNote = 'inserted ' . $inserted . ' missing closing character(s)';
+		return $out;
 	}
 
 	/**
@@ -353,6 +505,30 @@ JSON;
 			return null;
 		}
 		return max($dates);
+	}
+
+	/**
+	 * Identify a booking in an issue message using whatever the model gave us,
+	 * so a log line points at a specific booking rather than "one of them".
+	 *
+	 * @param array<array-key, mixed> $raw
+	 */
+	private function label(array $raw): string {
+		$title = $this->nullableString($raw['title'] ?? null)
+			?? $this->nullableString($raw['booking_reference'] ?? null)
+			?? $this->nullableString($raw['confirmation_number'] ?? null);
+		return $title === null ? '(untitled booking)' : '"' . $title . '"';
+	}
+
+	/**
+	 * Echo back the unusable raw date so the log shows what the model actually
+	 * emitted — that string is the thing you tune the prompt against.
+	 */
+	private function quoteRaw(mixed $value): string {
+		if (!is_string($value) || trim($value) === '') {
+			return '';
+		}
+		return ' (got "' . trim($value) . '")';
 	}
 
 	private function nullableString(mixed $value): ?string {

@@ -30,13 +30,17 @@ TaskSuccessfulEvent / TaskFailedEvent
   └─ ExtractionResultHandler  (correlates by task_id → TaskMap → user+message)
        ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
        └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
-UI (Vue, OCS API)
-  └─ list drafts → confirm / edit / discard ; group bookings into trips
+UI (Vue, OCS API) — three views: Bookings | Trips | Messages
+  ├─ Bookings: filter by review state + type, sort (upcoming/added/updated);
+  │            confirm / edit / discard / archive / restore
+  ├─ Trips:    group bookings into trips
+  └─ Messages: the ingestion ledger; filter by status, retry failed extractions
 ```
 
 Key classes (all under `OCA\TravelManager`, `lib/`):
 - `Service/ExtractionService` — **pure, dependency-free** prompt build + JSON
-  repair + validation. This is the most-tested unit.
+  repair + validation, returning `Dto/ExtractionResult` (kept bookings +
+  `Dto/ExtractionIssue[]`). This is the most-tested unit.
 - `Service/IngestionService`, `Service/ExtractionResultHandler`, `Service/BookingService`, `Service/ConfigService`.
 - `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy).
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
@@ -47,19 +51,34 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   (initial schema) + `Version1000Date2026070300…` (adds the `logs` table) +
   `Version1200Date2026070600…` (drops `segments`, moves type-specific data into a
   per-type `details` JSON column on `bookings`, adds `confirmation_number` +
-  `start_date`/`end_date`).
-- `Controller/{Booking,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
+  `start_date`/`end_date`) + `Version1300Date2026081400…` (splits `status` into
+  `status` + `review_state`).
+- `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
 
 ### Data model (5 tables, prefix `travelmanager_`)
-- `messages` — IMAP dedup + ingestion audit; unique `(user_id, message_id)`.
+- `messages` — IMAP dedup + ingestion audit + **retry source**; unique
+  `(user_id, message_id)`; `status` =
+  processing/processed/failed/no_booking/**dropped**/**related** (`related` =
+  every booking in it already exists, see §3; see the extraction contract
+  below — `dropped` is the retry-worthy one), `failure_kind` =
+  schedule/provider/validation, `attempts` counts extraction runs. Holds
+  `subject`, `sent_at` and the plain-text `body_text` that was fed to the model,
+  so an extraction can be re-run without going back to IMAP (a message may have
+  been deleted, and UIDVALIDITY may have rolled), plus `last_response` — the raw
+  model output of the most recent attempt, truncated to 20000 chars, so the
+  Messages view can show *what came back* next to the error rather than the error
+  alone. `body_text` + `last_response` are the bulky columns: both are meant to be
+  dropped once the bookings a message produced are archived.
 - `trips` — user-defined grouping.
 - `bookings` — one canonical booking per confirmation; natural key
   `(user_id, type, provider, booking_reference)` drives update/cancel idempotency;
-  `trip_id` links to a trip; `status` = draft/confirmed/cancelled/superseded.
+  `trip_id` links to a trip. **Two orthogonal state axes** (see §3):
+  `status` = active/cancelled/superseded (the booking *fact*, set from the email)
+  and `review_state` = draft/confirmed/discarded/archived (the *user's* decision).
   Cross-type header only (`type, provider, booking_reference,
-  confirmation_number, title, status, confidence, start_date, end_date`); **all
+  confirmation_number, title, status, review_state, confidence, start_date, end_date`); **all
   type-specific structure lives in the `details` JSON column** (see below).
   `start_date`/`end_date` are a denormalised span derived from `details` for list
   ordering.
@@ -80,7 +99,27 @@ balanced `{…}` → `json_decode` → **classify** each booking (`type` in allo
 → validate the per-type `details` (normalise the anchoring date(s), pass unknown
 fields through). Anti-hallucination: a booking without its anchoring date is
 dropped — flight ⇒ ≥1 segment with a valid `departureLocal`; car_rental ⇒ valid
-`pickup.local`; accommodation ⇒ valid `checkIn.local`. Output shape:
+`pickup.local`; accommodation ⇒ valid `checkIn.local`.
+
+**Malformed JSON is repaired, never silently.** `extractJsonObject` rebuilds the
+response while scanning it, keeping a **stack of open containers** (not a depth
+counter) so it can insert a closer the model skipped *at the point it skipped
+it* — the observed provider failure closes the `bookings` array while a booking
+object is still open, so the missing `}` belongs before the `]` and appending at
+the end cannot fix it. A repair is accepted only if the result actually parses,
+and is **refused** when the response was cut off inside a string (closing the
+quote would turn a half-written value into a plausible whole one). Every repair
+raises a `repaired_json` issue — a rising repair rate is how a degrading model
+shows up before it starts failing outright.
+
+**Rejections are reported, never swallowed.** `parseAndValidate` returns an
+`ExtractionResult` (`bookings` + `issues`), where each `ExtractionIssue` carries a
+reason slug, a human description (including the unusable raw date, which is what
+you tune the prompt against) and whether the whole booking was lost or only part
+of it (e.g. a flight that kept 2 of 3 legs). This exists because zero bookings is
+otherwise ambiguous: `messages.status` is now `no_booking` when the model
+genuinely found nothing versus **`dropped`** when it found bookings we then
+refused — only the latter is worth retrying or tuning against. Output shape:
 `{ "bookings": [ { type, provider, booking_reference, confirmation_number,
 status, title, confidence, details: { …type-specific… } } ] }` — see
 `ExtractionService::buildPrompt` for each type's `details` schema.
@@ -101,6 +140,44 @@ code follows the overrides.
 - **Trips are first-class in MVP** with manual booking→trip linking (auto-clustering deferred).
 - **Draft-then-confirm**: LLM output is stored as drafts; nothing is pushed to
   Calendar/Notes until the user confirms (Calendar/Notes projection is deferred).
+- **One message = one booking (MVP).** The *first* email about a booking creates
+  it. A later email matching the natural key is **reported, never applied**:
+  `applyOne` returns a description instead of writing, `applyExtraction` returns
+  an `AppliedExtraction` (created + related), and the message lands in
+  `messages.status = related` with the matched booking named in its notes.
+  **Why:** an extraction is a full replacement, not a patch — the old code
+  overwrote every column including nulls, so a follow-up email that omitted the
+  confirmation number erased it, and a change email listing one leg of a two-leg
+  flight truncated `details.segments`. Proper update semantics (which fields
+  merge, which replace, what a partial email means) is a design question in its
+  own right and is deferred until the simple flow is solid. **Consequence to keep in
+  mind:** a cancellation email no longer cancels the booking — it is flagged and
+  the user acts. `describeRelated` calls that case out by name.
+- **Booking state is two orthogonal axes, never one column.** `status` is a fact
+  about the booking (`active`/`cancelled`/`superseded`) and is the *only* one the
+  extraction writes; `review_state` is the user's decision
+  (`draft`/`confirmed`/`discarded`/`archived`) and is *only* ever written by an
+  explicit user action. Flattened into one column these were mutually exclusive —
+  a cancelled booking could not also be one you had reviewed. Consequences:
+  - **Discard and archive are soft.** The row survives as a tombstone, so the user
+    can undo *and* so a later email matching the same natural key cannot resurrect
+    a discarded booking as a fresh draft (`applyOne` deliberately never touches
+    `review_state` on update). Hard deletion is a separate, explicit action
+    (`BookingService::purge`, `DELETE /api/bookings/{id}`) — and because it leaves
+    no tombstone, a later email *will* re-create the booking.
+  - **Archiving is manual** (a user button) for now; an automatic sweep on
+    `end_date` + a cooling period is deferred, and is the intended trigger for
+    hard-deleting retained email bodies once message-body persistence lands.
+  - Review transitions all go through `POST /api/bookings/{id}/review`.
+- **Failed extractions are retried per message, not by wiping.** `messages`
+  retains the email body, so `IngestionService::retryMessage` rebuilds the prompt
+  and schedules a fresh task **bypassing the dedup check** (the message is
+  processed by definition — that is the point). `POST /api/messages/{id}/retry`;
+  the **Messages view** in the app lists the ledger and offers the button.
+  Retry is **manual only** for now — automatic bounded retry of
+  `failure_kind = provider` (transport/timeout, where retrying verbatim usually
+  works) is a deliberate later step. `attempts` is already counted so that
+  bound exists when it lands.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -146,20 +223,37 @@ debug panel for iterating without waiting for cron:
 - ✅ Migration, entities, mappers, services, jobs, listeners, controllers,
   settings panels, Vue UI, DI wiring (`Application.php` + `info.xml`).
 - ✅ Psalm clean (errorLevel 1); php-cs-fixer clean; `php -l` clean.
-- ✅ `ExtractionServiceTest` (19) + `HtmlTest` (7) pass standalone.
+- ✅ `ExtractionServiceTest` (21) + `HtmlTest` (7) pass standalone;
+  `bookings.spec.ts` + `messages.spec.ts` (36) pass under vitest.
 - ✅ **Real IMAP**: `HordeImapClient` (read-only, `Horde_Imap_Client` vendored)
   is bound as `IImapClient`; smoke-tested install/UI working in a live instance.
 - ✅ **Dev/debug tooling** (Personal settings): manual "Read mailbox now" trigger,
   per-user step-by-step activity log, and a data-wipe for reprocessing (see §3).
   Version bumped 1.0.0 → 1.1.0 so the `logs`-table migration runs on upgrade.
+- ✅ **Booking lifecycle**: `status` / `review_state` split, soft discard +
+  archive + restore, permanent delete (app version 1.3.0).
+- ✅ **Extraction issue reporting**: `ExtractionResult` + `messages.status =
+  dropped`, so a rejected booking is distinguishable from an email that held none.
+- ✅ **Retry**: `messages` retains subject/body, and the **Messages view** lists
+  the ingestion ledger with a per-message "Retry extraction" (app version 1.4.0).
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
-  each step), tune the extraction prompt on real emails, then enable multi-user
-  fan-out. PDF e-ticket attachments and Calendar/Notes projection remain deferred.
+  each step), then tune the extraction prompt against the `dropped` rows in the
+  Messages view, then enable multi-user fan-out. PDF e-ticket attachments and
+  Calendar/Notes projection remain deferred.
 
 Build/implement order from here: end-to-end flight extraction (single user) →
-prompt tuning on real emails → draft/confirm UI polish → multi-user fan-out.
+prompt tuning on real emails → **archive sweep + `body_text`/`last_response` GC**
+→ multi-user fan-out.
+
+**UI structure (§2).** `view` selects one of the three views; each view owns its
+filter/sort refs. Do not conflate the two again — the original single `filter`
+ref made "All bookings" a status and "Trips" a view, which is why adding a
+Messages view needed this untangling. All filtering/sorting is **client-side and
+pure** (`sortBookings`/`filterBookings` in `src/bookings.ts`,
+`sortMessages`/`filterMessagesByStatus` in `src/messages.ts`) so it stays
+unit-testable without `@nextcloud/*` runtime imports (§7).
 
 ## 5. Prerequisites (runtime)
 

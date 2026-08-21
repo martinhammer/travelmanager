@@ -52,6 +52,7 @@
                     "confirmationNumber",
                     "title",
                     "status",
+                    "reviewState",
                     "confidence",
                     "details",
                     "startDate",
@@ -90,6 +91,9 @@
                         "nullable": true
                     },
                     "status": {
+                        "type": "string"
+                    },
+                    "reviewState": {
                         "type": "string"
                     },
                     "confidence": {
@@ -169,6 +173,69 @@
                         "nullable": true
                     },
                     "createdAt": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "Message": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "mailbox",
+                    "messageId",
+                    "subject",
+                    "status",
+                    "failureKind",
+                    "error",
+                    "lastResponse",
+                    "attempts",
+                    "canRetry",
+                    "sentAt",
+                    "processedAt"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "mailbox": {
+                        "type": "string"
+                    },
+                    "messageId": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "failureKind": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "error": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "lastResponse": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "attempts": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "canRetry": {
+                        "type": "boolean"
+                    },
+                    "sentAt": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "processedAt": {
                         "type": "string",
                         "nullable": true
                     }
@@ -667,9 +734,9 @@
                 ],
                 "parameters": [
                     {
-                        "name": "status",
+                        "name": "reviewState",
                         "in": "query",
-                        "description": "Only return bookings with this status (draft, confirmed, cancelled, superseded)",
+                        "description": "Only return bookings in this review state (draft, confirmed, discarded, archived)",
                         "schema": {
                             "type": "string",
                             "nullable": true,
@@ -1041,7 +1108,8 @@
             },
             "delete": {
                 "operationId": "booking-destroy",
-                "summary": "Discard (delete) a booking",
+                "summary": "Delete a booking permanently",
+                "description": "Unlike discarding this leaves no tombstone, so a later email about the same booking will re-create it as a draft.",
                 "tags": [
                     "booking"
                 ],
@@ -1077,7 +1145,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Booking discarded",
+                        "description": "Booking deleted",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1173,10 +1241,11 @@
                 }
             }
         },
-        "/ocs/v2.php/apps/travelmanager/api/bookings/{id}/confirm": {
+        "/ocs/v2.php/apps/travelmanager/api/bookings/{id}/review": {
             "post": {
-                "operationId": "booking-confirm",
-                "summary": "Confirm a draft booking",
+                "operationId": "booking-review",
+                "summary": "Move a booking to a review state",
+                "description": "Discarding and archiving are soft: the booking is kept and can be moved back, and a later email about it will not resurrect it as a fresh draft.",
                 "tags": [
                     "booking"
                 ],
@@ -1188,6 +1257,25 @@
                         "basic_auth": []
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "reviewState"
+                                ],
+                                "properties": {
+                                    "reviewState": {
+                                        "type": "string",
+                                        "description": "Target state: draft, confirmed, discarded or archived"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "parameters": [
                     {
                         "name": "id",
@@ -1212,7 +1300,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Booking confirmed",
+                        "description": "Booking updated",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1243,6 +1331,34 @@
                     },
                     "404": {
                         "description": "Booking not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown review state",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1818,6 +1934,264 @@
                                                         }
                                                     }
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/messages": {
+            "get": {
+                "operationId": "message-index",
+                "summary": "List the messages ingested for the current user",
+                "tags": [
+                    "message"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Only return messages with this status (processing, processed, failed, no_booking, dropped)",
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Messages returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/Message"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/messages/{id}/retry": {
+            "post": {
+                "operationId": "message-retry",
+                "summary": "Re-run the extraction for a message",
+                "description": "Uses the retained email body, so it neither re-reads the mailbox nor is blocked by the dedup ledger. The model answers asynchronously, so the result appears once the task completes.",
+                "tags": [
+                    "message"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Id of the message",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Extraction re-scheduled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "$ref": "#/components/schemas/Message"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Message not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The email body was not retained, so it cannot be re-extracted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
                                             }
                                         }
                                     }
@@ -2681,6 +3055,10 @@
         {
             "name": "dev",
             "description": "Developer/debugging endpoints for the current user: trigger a mailbox read on demand (no waiting for cron), inspect the step-by-step activity log, and wipe the derived data so the same messages can be reprocessed from scratch."
+        },
+        {
+            "name": "message",
+            "description": "The ingestion ledger as a first-class view: what was read from the mailbox, what became of it, and a way to re-run the ones that went wrong."
         },
         {
             "name": "settings",

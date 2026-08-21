@@ -8,6 +8,7 @@ use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
+use OCA\TravelManager\Service\Dto\AppliedExtraction;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -29,50 +30,59 @@ class BookingService {
 	}
 
 	/**
-	 * Persist a set of extracted bookings for one source message. Existing
-	 * bookings matched by natural key are updated in place (never duplicated);
-	 * a 'cancelled' extraction cancels the matched booking.
+	 * Persist a set of extracted bookings for one source message.
+	 *
+	 * One message creates a booking at most once. A booking matching an existing
+	 * one by natural key is **not** applied — see AppliedExtraction for why — and
+	 * is reported back so the user can be told.
 	 *
 	 * @param ExtractedBooking[] $bookings
-	 * @return int number of bookings created or updated
 	 */
-	public function applyExtraction(string $userId, string $messageId, array $bookings): int {
-		$count = 0;
+	public function applyExtraction(string $userId, string $messageId, array $bookings): AppliedExtraction {
+		$created = 0;
+		/** @var list<string> $related */
+		$related = [];
 		$this->db->beginTransaction();
 		try {
 			foreach ($bookings as $extracted) {
-				$this->applyOne($userId, $messageId, $extracted);
-				$count++;
+				$note = $this->applyOne($userId, $messageId, $extracted);
+				if ($note === null) {
+					$created++;
+				} else {
+					$related[] = $note;
+				}
 			}
 			$this->db->commit();
 		} catch (\Throwable $e) {
 			$this->db->rollBack();
 			throw $e;
 		}
-		return $count;
+		return new AppliedExtraction($created, $related);
 	}
 
-	private function applyOne(string $userId, string $messageId, ExtractedBooking $extracted): void {
-		$now = $this->timeFactory->getDateTime();
+	/**
+	 * @return string|null null when the booking was stored; otherwise a
+	 *                     description of the existing booking it matched
+	 */
+	private function applyOne(string $userId, string $messageId, ExtractedBooking $extracted): ?string {
 		$existing = $this->bookingMapper->findByReference(
 			$userId,
 			$extracted->type,
 			$extracted->provider,
 			$extracted->bookingReference,
 		);
-
 		if ($existing !== null) {
-			$booking = $existing;
-			$booking->setUpdatedAt($now);
-		} else {
-			$booking = new Booking();
-			$booking->setUserId($userId);
-			$booking->setType($extracted->type);
-			$booking->setStatus(Booking::STATUS_DRAFT);
-			$booking->setCreatedAt($now);
-			$booking->setUpdatedAt($now);
+			return $this->describeRelated($existing, $extracted);
 		}
 
+		$now = $this->timeFactory->getDateTime();
+		$booking = new Booking();
+		$booking->setUserId($userId);
+		$booking->setType($extracted->type);
+		$booking->setStatus($extracted->status === 'cancelled' ? Booking::STATUS_CANCELLED : Booking::STATUS_ACTIVE);
+		$booking->setReviewState(Booking::REVIEW_DRAFT);
+		$booking->setCreatedAt($now);
+		$booking->setUpdatedAt($now);
 		$booking->setProvider($extracted->provider);
 		$booking->setBookingReference($extracted->bookingReference);
 		$booking->setConfirmationNumber($extracted->confirmationNumber);
@@ -83,18 +93,26 @@ class BookingService {
 		$booking->setDetails($encodedDetails === false ? null : $encodedDetails);
 		$booking->setStartDate($this->toDateTime($extracted->startDate));
 		$booking->setEndDate($this->toDateTime($extracted->endDate));
+		$this->bookingMapper->insert($booking);
 
+		return null;
+	}
+
+	/**
+	 * Explain what this email matched and what was (not) done about it. A
+	 * cancellation is called out by name: it is the case where leaving the
+	 * booking untouched matters most to the reader.
+	 */
+	private function describeRelated(Booking $existing, ExtractedBooking $extracted): string {
+		$label = $extracted->title ?? $extracted->bookingReference ?? $extracted->type;
+		$line = '"' . $label . '" matches the existing booking #' . (string)$existing->getId()
+			. ' (' . $existing->getType() . ', ' . ($existing->getBookingReference() ?? 'no reference')
+			. ', ' . $existing->getReviewState() . ')';
 		if ($extracted->status === 'cancelled') {
-			$booking->setStatus(Booking::STATUS_CANCELLED);
-		} elseif ($existing === null) {
-			$booking->setStatus(Booking::STATUS_DRAFT);
+			return $line . ' and reports it as CANCELLED. Updates are not supported yet, so the booking'
+				. ' was left unchanged — cancel or discard it yourself.';
 		}
-
-		if ($existing !== null) {
-			$this->bookingMapper->update($booking);
-		} else {
-			$this->bookingMapper->insert($booking);
-		}
+		return $line . '. Updates are not supported yet, so the booking was left unchanged.';
 	}
 
 	/* --------------------------------------------------------------- reads */
@@ -102,9 +120,9 @@ class BookingService {
 	/**
 	 * @return Booking[]
 	 */
-	public function listBookings(string $userId, ?string $status = null): array {
-		if ($status !== null) {
-			return $this->bookingMapper->findByStatus($userId, $status);
+	public function listBookings(string $userId, ?string $reviewState = null): array {
+		if ($reviewState !== null) {
+			return $this->bookingMapper->findByReviewState($userId, $reviewState);
 		}
 		return $this->bookingMapper->findAllForUser($userId);
 	}
@@ -113,16 +131,35 @@ class BookingService {
 		return $this->bookingMapper->find($bookingId, $userId);
 	}
 
-	/* -------------------------------------------------------- draft/confirm */
+	/* --------------------------------------------------------- review state */
 
-	public function confirm(string $userId, int $bookingId): Booking {
+	/**
+	 * Move a booking to a review state (see Booking::REVIEW_STATES).
+	 *
+	 * Discarding and archiving are soft: the row is kept, so the user can undo
+	 * and so a later email about the same booking cannot resurrect it as a fresh
+	 * draft. Use purge() to delete a booking for good.
+	 *
+	 * @throws \InvalidArgumentException on an unknown review state
+	 */
+	public function setReviewState(string $userId, int $bookingId, string $reviewState): Booking {
+		if (!in_array($reviewState, Booking::REVIEW_STATES, true)) {
+			throw new \InvalidArgumentException('Unknown review state: ' . $reviewState);
+		}
 		$booking = $this->bookingMapper->find($bookingId, $userId);
-		$booking->setStatus(Booking::STATUS_CONFIRMED);
-		$booking->setConfirmedAt($this->timeFactory->getDateTime());
+		$booking->setReviewState($reviewState);
+		if ($reviewState === Booking::REVIEW_CONFIRMED && $booking->getConfirmedAt() === null) {
+			$booking->setConfirmedAt($this->timeFactory->getDateTime());
+		}
+		$booking->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->bookingMapper->update($booking);
 	}
 
-	public function discard(string $userId, int $bookingId): void {
+	/**
+	 * Delete a booking for good. Unlike discarding, this leaves no tombstone, so
+	 * a later email about the same booking will re-create it as a draft.
+	 */
+	public function purge(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		$this->bookingMapper->delete($booking);
 	}

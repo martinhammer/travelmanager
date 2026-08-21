@@ -12,32 +12,61 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import {
 	type Booking,
+	type Message,
+	type ReviewState,
 	type Trip,
 	assignBookingToTrip,
-	confirmBooking,
 	createTrip,
+	deleteBooking,
 	deleteTrip,
-	discardBooking,
 	listBookings,
+	listMessages,
 	listTrips,
+	retryMessage,
+	setBookingReviewState,
 	updateTrip,
 } from './api'
 import {
+	type MessageSort,
+	failureKindLabel,
+	filterMessagesByStatus,
+	formatTimestamp,
+	hasDetails,
+	messageDetails,
+	messageStatusLabel,
+	needsAttention,
+	retryable,
+	sortMessages,
+	statusNotice,
+} from './messages'
+import {
+	type BookingSort,
 	bookingHeaderFields,
+	bookingTypes,
 	bookingsForTrip,
 	carFields,
 	decodeHtmlEntities,
 	draftCount as countDrafts,
-	filterByStatus,
+	filterBookings,
 	flightSegmentFields,
 	hotelFields,
 	linkDialogBookings,
 	passengerLines,
+	reviewActions,
+	sortBookings,
 } from './bookings'
 
 const bookings = ref<Booking[]>([])
 const trips = ref<Trip[]>([])
-const filter = ref<string>('draft')
+const messages = ref<Message[]>([])
+// The view, and each view's own filter/sort state — previously one `filter` ref
+// did double duty as both, which made "All bookings" a status and Trips a view.
+const view = ref<'bookings' | 'trips' | 'messages'>('bookings')
+const bookingFilter = ref('all')
+const bookingType = ref('all')
+const bookingSort = ref<BookingSort>('upcoming')
+const messageFilter = ref('all')
+const messageSort = ref<MessageSort>('received')
 const loading = ref(true)
 const newTripOpen = ref(false)
 const newTripName = ref('')
@@ -50,10 +79,56 @@ const linkTarget = ref<Trip | null>(null)
 // Trip-deletion confirmation state.
 const deleteTripOpen = ref(false)
 const deleteTripTarget = ref<Trip | null>(null)
+// Permanent booking-deletion confirmation state.
+const deleteBookingOpen = ref(false)
+const deleteBookingTarget = ref<Booking | null>(null)
 
-const filtered = computed(() => filterByStatus(bookings.value, filter.value))
+const filtered = computed(() => sortBookings(
+	filterBookings(bookings.value, bookingFilter.value, bookingType.value),
+	bookingSort.value,
+))
+
+const visibleMessages = computed(() => sortMessages(
+	filterMessagesByStatus(messages.value, messageFilter.value),
+	messageSort.value,
+))
+
+// Only offer type filters that exist in the data — an empty "Car rental" filter
+// is just a dead end.
+const availableTypes = computed(() => bookingTypes(bookings.value))
 
 const draftCount = computed(() => countDrafts(bookings.value))
+
+// Filter chips, defined once so the markup stays a loop rather than a wall.
+const bookingFilters: { key: string, label: string }[] = [
+	{ key: 'all', label: t('travelmanager', 'All') },
+	{ key: 'draft', label: t('travelmanager', 'Drafts') },
+	{ key: 'confirmed', label: t('travelmanager', 'Confirmed') },
+	{ key: 'archived', label: t('travelmanager', 'Archived') },
+	{ key: 'discarded', label: t('travelmanager', 'Discarded') },
+]
+
+const messageFilters: { key: string, label: string }[] = [
+	{ key: 'all', label: t('travelmanager', 'All') },
+	{ key: 'attention', label: t('travelmanager', 'Needs attention') },
+	{ key: 'processed', label: t('travelmanager', 'Extracted') },
+	{ key: 'related', label: t('travelmanager', 'Related') },
+	{ key: 'no_booking', label: t('travelmanager', 'No booking') },
+	{ key: 'processing', label: t('travelmanager', 'Waiting') },
+]
+
+const typeLabel = (type: string): string => {
+	switch (type) {
+	case 'flight':
+		return t('travelmanager', 'Flights')
+	case 'accommodation':
+		return t('travelmanager', 'Accommodation')
+	case 'car_rental':
+		return t('travelmanager', 'Car rental')
+	default:
+		return type
+	}
+}
 
 const linkCandidates = computed(() => linkTarget.value ? linkDialogBookings(bookings.value, linkTarget.value.id) : [])
 
@@ -61,10 +136,12 @@ const bookingLabel = (item: Booking): string => decodeHtmlEntities(item.title ||
 
 const tripLabel = (trip: Trip): string => decodeHtmlEntities(trip.name)
 
+const attentionCount = computed(() => needsAttention(messages.value).length)
+
 const reload = async () => {
 	loading.value = true
 	try {
-		[bookings.value, trips.value] = await Promise.all([listBookings(), listTrips()])
+		[bookings.value, trips.value, messages.value] = await Promise.all([listBookings(), listTrips(), listMessages()])
 	} catch (e) {
 		showError(t('travelmanager', 'Could not load travel data'))
 	} finally {
@@ -72,22 +149,69 @@ const reload = async () => {
 	}
 }
 
-const onConfirm = async (id: number) => {
+const copyMessageDetails = async (item: Message) => {
 	try {
-		await confirmBooking(id)
-		showSuccess(t('travelmanager', 'Booking confirmed'))
-		await reload()
+		await navigator.clipboard.writeText(messageDetails(item))
+		showSuccess(t('travelmanager', 'Copied to clipboard'))
 	} catch (e) {
-		showError(t('travelmanager', 'Could not confirm booking'))
+		showError(t('travelmanager', 'Could not copy to clipboard'))
 	}
 }
 
-const onDiscard = async (id: number) => {
+const onRetryMessage = async (id: number) => {
 	try {
-		await discardBooking(id)
+		await retryMessage(id)
+		// The model answers asynchronously, so the row will not settle until a
+		// later reload — say so rather than implying it is already done.
+		showSuccess(t('travelmanager', 'Extraction re-scheduled — refresh in a moment to see the result'))
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not discard booking'))
+		showError(t('travelmanager', 'Could not re-run the extraction'))
+	}
+}
+
+// Button label + success toast per target review state. Keeping them together
+// means adding a state is a single edit here plus one in reviewActions().
+const reviewLabels: Record<ReviewState, { action: string, done: string }> = {
+	draft: { action: t('travelmanager', 'Restore'), done: t('travelmanager', 'Booking restored to drafts') },
+	confirmed: { action: t('travelmanager', 'Confirm'), done: t('travelmanager', 'Booking confirmed') },
+	discarded: { action: t('travelmanager', 'Discard'), done: t('travelmanager', 'Booking discarded') },
+	archived: { action: t('travelmanager', 'Archive'), done: t('travelmanager', 'Booking archived') },
+}
+
+// A restore back to 'confirmed' is an undo, not a fresh confirmation.
+const actionLabel = (item: Booking, target: ReviewState): string =>
+	target === 'confirmed' && item.reviewState !== 'draft'
+		? t('travelmanager', 'Restore')
+		: reviewLabels[target].action
+
+const onReview = async (id: number, target: ReviewState) => {
+	try {
+		await setBookingReviewState(id, target)
+		showSuccess(reviewLabels[target].done)
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not update the booking'))
+	}
+}
+
+const askDeleteBooking = (item: Booking) => {
+	deleteBookingTarget.value = item
+	deleteBookingOpen.value = true
+}
+
+const confirmDeleteBooking = async () => {
+	if (deleteBookingTarget.value === null) {
+		return
+	}
+	try {
+		await deleteBooking(deleteBookingTarget.value.id)
+		showSuccess(t('travelmanager', 'Booking deleted'))
+		deleteBookingOpen.value = false
+		deleteBookingTarget.value = null
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not delete the booking'))
 	}
 }
 
@@ -177,30 +301,33 @@ onMounted(reload)
 	<NcContent app-name="travelmanager">
 		<NcAppNavigation>
 			<template #list>
-				<NcAppNavigationItem :name="t('travelmanager', 'Drafts')"
-					:active="filter === 'draft'"
-					@click="filter = 'draft'">
+				<!-- Three views; what to show within each is a filter, not a
+				     navigation choice. Counters show what awaits you, not totals. -->
+				<NcAppNavigationItem :name="t('travelmanager', 'Bookings')"
+					:active="view === 'bookings'"
+					@click="view = 'bookings'">
 					<template #counter>
 						{{ draftCount }}
 					</template>
 				</NcAppNavigationItem>
-				<NcAppNavigationItem :name="t('travelmanager', 'Confirmed')"
-					:active="filter === 'confirmed'"
-					@click="filter = 'confirmed'" />
-				<NcAppNavigationItem :name="t('travelmanager', 'All bookings')"
-					:active="filter === 'all'"
-					@click="filter = 'all'" />
 				<NcAppNavigationItem :name="t('travelmanager', 'Trips')"
-					:active="filter === 'trips'"
-					@click="filter = 'trips'">
+					:active="view === 'trips'"
+					@click="view = 'trips'">
 					<template #counter>
 						{{ trips.length }}
+					</template>
+				</NcAppNavigationItem>
+				<NcAppNavigationItem :name="t('travelmanager', 'Messages')"
+					:active="view === 'messages'"
+					@click="view = 'messages'">
+					<template #counter>
+						{{ attentionCount }}
 					</template>
 				</NcAppNavigationItem>
 			</template>
 		</NcAppNavigation>
 		<NcAppContent>
-			<div v-if="filter === 'trips'" :class="$style.content">
+			<div v-if="view === 'trips'" :class="$style.content">
 				<div :class="$style.tripsToolbar">
 					<h2 :class="$style.tripsHeading">
 						{{ t('travelmanager', 'Trips') }}
@@ -226,7 +353,7 @@ onMounted(reload)
 								:class="$style.tripBooking">
 								<div :class="$style.tripBookingInfo">
 									<strong>{{ bookingLabel(item) }}</strong>
-									<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.status }}</span>
+									<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.reviewState }}</span>
 								</div>
 								<NcButton variant="tertiary" @click="onUnlink(item.id)">
 									{{ t('travelmanager', 'Unlink') }}
@@ -250,14 +377,152 @@ onMounted(reload)
 					</div>
 				</details>
 			</div>
+			<div v-else-if="view === 'messages'" :class="$style.content">
+				<div :class="$style.tripsToolbar">
+					<h2 :class="$style.tripsHeading">
+						{{ t('travelmanager', 'Messages') }}
+					</h2>
+					<label :class="$style.sort">
+						{{ t('travelmanager', 'Sort by') }}
+						<select v-model="messageSort">
+							<option value="received">{{ t('travelmanager', 'Date received') }}</option>
+							<option value="processed">{{ t('travelmanager', 'Last processed') }}</option>
+						</select>
+					</label>
+				</div>
+				<div :class="$style.chips">
+					<NcButton v-for="chip in messageFilters"
+						:key="chip.key"
+						:variant="messageFilter === chip.key ? 'primary' : 'tertiary'"
+						@click="messageFilter = chip.key">
+						{{ chip.label }}
+					</NcButton>
+				</div>
+				<NcEmptyContent v-if="!loading && visibleMessages.length === 0"
+					:name="messages.length === 0 ? t('travelmanager', 'Nothing ingested yet') : t('travelmanager', 'Nothing matches this filter')"
+					:description="messages.length === 0
+						? t('travelmanager', 'Emails read from your travel mailbox will be listed here.')
+						: t('travelmanager', 'Try a different filter to see the other messages.')" />
+				<!-- One scannable row per message; native <details> so the disclosure
+				     is keyboard-operable and needs no open/closed state of its own. -->
+				<ol :class="$style.rows">
+					<li v-for="item in visibleMessages" :key="item.id">
+						<details :class="$style.row">
+							<summary :class="$style.rowSummary">
+								<svg :class="$style.chevron"
+									viewBox="0 0 24 24"
+									width="16"
+									height="16"
+									aria-hidden="true">
+									<path d="M9 5l7 7-7 7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round" />
+								</svg>
+								<span :class="$style.rowSubject">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
+								<span :class="$style.rowDate">{{ formatTimestamp(item.sentAt) || '—' }}</span>
+								<span :class="[$style.badge, $style.rowStatus, { [$style.statusBadge]: item.status === 'failed' || item.status === 'dropped' }]">
+									{{ messageStatusLabel(item.status) }}
+								</span>
+							</summary>
+							<div :class="$style.rowBody">
+								<div :class="[$style.fields, $style.meta]">
+									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Received') }}</span>
+									<span :class="$style.fieldValue">{{ formatTimestamp(item.sentAt) || '—' }}</span>
+									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Last processed') }}</span>
+									<span :class="$style.fieldValue">{{ formatTimestamp(item.processedAt) || '—' }}</span>
+									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Attempts') }}</span>
+									<span :class="$style.fieldValue">{{ item.attempts }}</span>
+								</div>
+								<p v-if="failureKindLabel(item)" :class="$style.tripEmpty">
+									{{ failureKindLabel(item) }}
+								</p>
+								<p v-else-if="statusNotice(item)" :class="$style.tripEmpty">
+									{{ statusNotice(item) }}
+								</p>
+								<!-- Long, so kept out of the way — but opened by default when
+								     something went wrong, since that is why you came here. -->
+								<details v-if="hasDetails(item)"
+									:class="$style.errorDetails"
+									:open="item.status === 'failed' || item.status === 'dropped' || item.status === 'related'">
+									<summary>{{ t('travelmanager', 'Details') }}</summary>
+									<div :class="$style.detailsActions">
+										<NcButton variant="tertiary" @click="copyMessageDetails(item)">
+											{{ t('travelmanager', 'Copy') }}
+										</NcButton>
+									</div>
+									<pre :class="$style.errorText">{{ messageDetails(item) }}</pre>
+								</details>
+								<div :class="$style.actions">
+									<!-- Shown whenever a retry is possible in principle, disabled
+									     while one is in flight: a control that vanishes is more
+									     confusing than one that greys out with a reason. -->
+									<NcButton v-if="item.canRetry"
+										variant="secondary"
+										:disabled="!retryable(item)"
+										@click="onRetryMessage(item.id)">
+										{{ t('travelmanager', 'Retry extraction') }}
+									</NcButton>
+									<span v-if="!item.canRetry" :class="$style.tripBookingMeta">
+										{{ t('travelmanager', 'The email text is no longer retained, so this cannot be re-run.') }}
+									</span>
+								</div>
+							</div>
+						</details>
+					</li>
+				</ol>
+			</div>
 			<div v-else :class="$style.content">
+				<div :class="$style.tripsToolbar">
+					<h2 :class="$style.tripsHeading">
+						{{ t('travelmanager', 'Bookings') }}
+					</h2>
+					<label :class="$style.sort">
+						{{ t('travelmanager', 'Sort by') }}
+						<select v-model="bookingSort">
+							<option value="upcoming">{{ t('travelmanager', 'Upcoming first') }}</option>
+							<option value="added">{{ t('travelmanager', 'Recently added') }}</option>
+							<option value="updated">{{ t('travelmanager', 'Recently updated') }}</option>
+						</select>
+					</label>
+				</div>
+				<div :class="$style.chips">
+					<NcButton v-for="chip in bookingFilters"
+						:key="chip.key"
+						:variant="bookingFilter === chip.key ? 'primary' : 'tertiary'"
+						@click="bookingFilter = chip.key">
+						{{ chip.label }}
+					</NcButton>
+				</div>
+				<div v-if="availableTypes.length > 1" :class="$style.chips">
+					<NcButton :variant="bookingType === 'all' ? 'secondary' : 'tertiary'"
+						@click="bookingType = 'all'">
+						{{ t('travelmanager', 'All types') }}
+					</NcButton>
+					<NcButton v-for="type in availableTypes"
+						:key="type"
+						:variant="bookingType === type ? 'secondary' : 'tertiary'"
+						@click="bookingType = type">
+						{{ typeLabel(type) }}
+					</NcButton>
+				</div>
 				<NcEmptyContent v-if="!loading && filtered.length === 0"
-					:name="t('travelmanager', 'Nothing here yet')"
-					:description="t('travelmanager', 'Travel bookings extracted from your mailbox will appear here as drafts.')" />
-				<div v-for="item in filtered" :key="item.id" :class="$style.card">
+					:name="bookings.length === 0 ? t('travelmanager', 'Nothing here yet') : t('travelmanager', 'Nothing matches these filters')"
+					:description="bookings.length === 0
+						? t('travelmanager', 'Travel bookings extracted from your mailbox will appear here as drafts.')
+						: t('travelmanager', 'Try a different filter to see your other bookings.')" />
+				<div v-for="item in filtered"
+					:key="item.id"
+					:class="[$style.card, { [$style.mutedCard]: item.reviewState === 'discarded' || item.reviewState === 'archived' }]">
 					<div :class="$style.cardHeader">
 						<strong>{{ item.title || item.type }}</strong>
-						<span :class="$style.badge">{{ item.status }}</span>
+						<span :class="$style.badges">
+							<!-- Provider-side status is only worth showing when it isn't the plain 'active' case. -->
+							<span v-if="item.status !== 'active'" :class="[$style.badge, $style.statusBadge]">{{ item.status }}</span>
+							<span :class="$style.badge">{{ item.reviewState }}</span>
+						</span>
 					</div>
 					<div :class="[$style.fields, $style.meta]">
 						<template v-for="field in bookingHeaderFields(item)" :key="field.label">
@@ -305,12 +570,17 @@ onMounted(reload)
 						</template>
 					</div>
 
-					<div v-if="item.status === 'draft'" :class="$style.actions">
-						<NcButton variant="primary" @click="onConfirm(item.id)">
-							{{ t('travelmanager', 'Confirm') }}
+					<div :class="$style.actions">
+						<NcButton v-for="(target, i) in reviewActions(item)"
+							:key="target"
+							:variant="i === 0 ? 'primary' : 'tertiary'"
+							@click="onReview(item.id, target)">
+							{{ actionLabel(item, target) }}
 						</NcButton>
-						<NcButton variant="tertiary" @click="onDiscard(item.id)">
-							{{ t('travelmanager', 'Discard') }}
+						<NcButton v-if="item.reviewState === 'discarded' || item.reviewState === 'archived'"
+							variant="tertiary"
+							@click="askDeleteBooking(item)">
+							{{ t('travelmanager', 'Delete permanently') }}
 						</NcButton>
 					</div>
 				</div>
@@ -365,6 +635,20 @@ onMounted(reload)
 			</template>
 		</NcDialog>
 
+		<NcDialog v-model:open="deleteBookingOpen"
+			:name="t('travelmanager', 'Delete booking permanently?')"
+			size="small">
+			{{ t('travelmanager', 'This removes the booking for good. Because no trace is kept, a later email about the same booking will bring it back as a new draft — discarding instead keeps it out of your way permanently. This cannot be undone.') }}
+			<template #actions>
+				<NcButton variant="tertiary" @click="deleteBookingOpen = false">
+					{{ t('travelmanager', 'Cancel') }}
+				</NcButton>
+				<NcButton variant="error" @click="confirmDeleteBooking">
+					{{ t('travelmanager', 'Delete permanently') }}
+				</NcButton>
+			</template>
+		</NcDialog>
+
 		<NcDialog v-model:open="deleteTripOpen"
 			:name="t('travelmanager', 'Delete trip?')"
 			size="small">
@@ -383,8 +667,10 @@ onMounted(reload)
 
 <style module>
 .content {
-	padding: 16px;
-	max-width: 800px;
+	/* Nextcloud floats the app-navigation toggle over the top-left of the content
+	   area, so start below it — otherwise it lands on the heading. */
+	padding: 44px 16px 16px;
+	max-width: none;
 }
 
 .card {
@@ -405,6 +691,148 @@ onMounted(reload)
 	padding: 2px 8px;
 	border-radius: var(--border-radius-pill);
 	background-color: var(--color-background-dark);
+}
+
+.badges {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+/* Amber lozenge: needs the dark warning text colour, not white — matches the
+   log level badges in Personal settings. */
+.statusBadge {
+	color: var(--color-warning-text, #8a6d00);
+	background-color: var(--color-warning, #fdf7e6);
+	font-weight: bold;
+}
+
+/* Discarded/archived rows stay visible but recede. */
+.mutedCard {
+	opacity: 0.65;
+}
+
+/* --- message list ------------------------------------------------------- */
+
+.rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large);
+	overflow: hidden;
+}
+
+.rows > li + li {
+	border-top: 1px solid var(--color-border);
+}
+
+/* Fixed metadata columns, not auto: every row is its own grid container, so
+   content-sized columns would land at a different x on each row and the list
+   would read as ragged — which is exactly what a list is meant to avoid. */
+.rowSummary {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr) 190px 200px;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	cursor: pointer;
+	list-style: none;
+}
+
+.rowSummary::-webkit-details-marker {
+	display: none;
+}
+
+.rowSummary:hover {
+	background-color: var(--color-background-hover);
+}
+
+.row summary:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: -2px;
+}
+
+.rowSubject {
+	font-weight: bold;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.rowDate {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+	white-space: nowrap;
+	text-align: end;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Left-aligned in a fixed column so the badges start on a common edge. */
+.rowStatus {
+	justify-self: start;
+}
+
+.chevron {
+	color: var(--color-text-maxcontrast);
+	transition: transform 0.15s ease;
+	flex-shrink: 0;
+}
+
+.row[open] .chevron {
+	transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chevron {
+		transition: none;
+	}
+}
+
+.rowBody {
+	padding: 4px 14px 14px 42px;
+}
+
+/* The date is the first thing to go when space is tight; the subject and the
+   status are what you scan for. */
+@media (max-width: 620px) {
+	.rowSummary {
+		grid-template-columns: 16px minmax(0, 1fr) auto;
+	}
+
+	.content {
+		padding-block-start: 16px;
+	}
+
+	.rowDate {
+		display: none;
+	}
+
+	.rowBody {
+		padding-inline-start: 14px;
+	}
+}
+
+.errorDetails {
+	margin: 8px 0 0;
+	font-size: 0.9em;
+}
+
+.detailsActions {
+	display: flex;
+	justify-content: flex-end;
+	margin: 4px 0;
+}
+
+.errorText {
+	margin: 8px 0 0;
+	padding: 8px;
+	max-height: 300px;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background-color: var(--color-background-dark);
+	border-radius: var(--border-radius);
 }
 
 .meta {
@@ -476,6 +904,22 @@ onMounted(reload)
 	justify-content: space-between;
 	gap: 12px;
 	margin-bottom: 12px;
+	flex-wrap: wrap;
+}
+
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 12px;
+}
+
+.sort {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--color-text-maxcontrast);
+	white-space: nowrap;
 }
 
 .tripsHeading {

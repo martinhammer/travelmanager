@@ -6,6 +6,7 @@ namespace OCA\TravelManager\Db;
 
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Db\QBMapper;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
@@ -41,6 +42,35 @@ class ProcessedMessageMapper extends QBMapper {
 		$qb->delete($this->getTableName())
 			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
 		$qb->executeStatement();
+	}
+
+	public function find(int $id, string $userId): ProcessedMessage {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		return $this->findEntity($qb);
+	}
+
+	/**
+	 * Newest first, by when the message arrived in the mailbox where known —
+	 * ingestion order is a poor proxy once a backlog is read in one run.
+	 *
+	 * @return ProcessedMessage[]
+	 */
+	public function findAllForUser(string $userId, ?string $status = null, int $limit = 200): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->orderBy('sent_at', 'DESC')
+			->addOrderBy('processed_at', 'DESC')
+			->setMaxResults($limit);
+		if ($status !== null) {
+			$qb->andWhere($qb->expr()->eq('status', $qb->createNamedParameter($status)));
+		}
+		return $this->findEntities($qb);
 	}
 
 	public function findByMessageId(string $userId, string $messageId): ?ProcessedMessage {

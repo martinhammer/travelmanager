@@ -40,12 +40,12 @@ class BookingMapper extends QBMapper {
 	/**
 	 * @return Booking[]
 	 */
-	public function findByStatus(string $userId, string $status): array {
+	public function findByReviewState(string $userId, string $reviewState): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
 			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
-			->andWhere($qb->expr()->eq('status', $qb->createNamedParameter($status)))
+			->andWhere($qb->expr()->eq('review_state', $qb->createNamedParameter($reviewState)))
 			->orderBy('created_at', 'DESC');
 		return $this->findEntities($qb);
 	}
