@@ -21,6 +21,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setStatus(string $status)
  * @method string|null getSubject()
  * @method void setSubject(?string $subject)
+ * @method string|null getSender()
+ * @method void setSender(?string $sender)
  * @method \DateTime|null getSentAt()
  * @method void setSentAt(?\DateTime $sentAt)
  * @method string|null getBodyText()
@@ -29,6 +31,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setAttempts(int $attempts)
  * @method string|null getFailureKind()
  * @method void setFailureKind(?string $failureKind)
+ * @method string|null getIssueReasons()
+ * @method void setIssueReasons(?string $issueReasons)
  * @method string|null getError()
  * @method void setError(?string $error)
  * @method string|null getLastResponse()
@@ -75,11 +79,18 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 	protected ?int $imapUid = null;
 	protected string $status = self::STATUS_PROCESSED;
 	protected ?string $subject = null;
+	/** Display form of the From header ("KLM <noreply@klm.com>"); null on rows ingested before it was captured. */
+	protected ?string $sender = null;
 	protected ?\DateTime $sentAt = null;
 	/** Plain-text body as fed to the model; retained so extraction can be re-run. */
 	protected ?string $bodyText = null;
 	protected int $attempts = 0;
 	protected ?string $failureKind = null;
+	/**
+	 * Comma-separated ExtractionIssue::REASON_* slugs from the last attempt. The
+	 * branchable form of what `error` says in prose — see Version1700.
+	 */
+	protected ?string $issueReasons = null;
 	protected ?string $error = null;
 	/** Raw model output from the last attempt, truncated — the thing you read to diagnose a failure. */
 	protected ?string $lastResponse = null;
@@ -107,8 +118,12 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 			'mailbox' => $this->mailbox,
 			'messageId' => $this->messageId,
 			'subject' => $this->subject,
+			'sender' => $this->sender,
 			'status' => $this->status,
 			'failureKind' => $this->failureKind,
+			'issueReasons' => $this->issueReasons === null || $this->issueReasons === ''
+				? []
+				: array_values(array_filter(explode(',', $this->issueReasons))),
 			'error' => $this->error,
 			'lastResponse' => $this->lastResponse,
 			'attempts' => $this->attempts,

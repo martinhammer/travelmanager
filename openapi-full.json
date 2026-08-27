@@ -185,8 +185,10 @@
                     "mailbox",
                     "messageId",
                     "subject",
+                    "sender",
                     "status",
                     "failureKind",
+                    "issueReasons",
                     "error",
                     "lastResponse",
                     "attempts",
@@ -209,12 +211,22 @@
                         "type": "string",
                         "nullable": true
                     },
+                    "sender": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "status": {
                         "type": "string"
                     },
                     "failureKind": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "issueReasons": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     },
                     "error": {
                         "type": "string",
@@ -236,6 +248,23 @@
                         "nullable": true
                     },
                     "processedAt": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "MessageBody": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "bodyText"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "bodyText": {
                         "type": "string",
                         "nullable": true
                     }
@@ -2036,6 +2065,134 @@
                                                         "$ref": "#/components/schemas/Message"
                                                     }
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/messages/{id}/body": {
+            "get": {
+                "operationId": "message-body",
+                "summary": "Get the retained email body for a message",
+                "description": "Deliberately not part of the list response: this is the bulky column, and the Messages view only needs it for the one row the user opened.",
+                "tags": [
+                    "message"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Id of the message",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Body returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "$ref": "#/components/schemas/MessageBody"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Message not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
                                             }
                                         }
                                     }

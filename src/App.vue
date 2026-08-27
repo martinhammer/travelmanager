@@ -7,6 +7,7 @@ import NcButton from '@nextcloud/vue/components/NcButton'
 import NcContent from '@nextcloud/vue/components/NcContent'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
@@ -19,6 +20,7 @@ import {
 	createTrip,
 	deleteBooking,
 	deleteTrip,
+	fetchMessageBody,
 	listBookings,
 	listMessages,
 	listTrips,
@@ -28,16 +30,18 @@ import {
 } from './api'
 import {
 	type MessageSort,
-	failureKindLabel,
+	type SortDirection,
+	MESSAGE_COLUMNS,
 	filterMessagesByStatus,
 	formatTimestamp,
 	hasDetails,
 	messageDetails,
+	messageNotices,
 	messageStatusLabel,
 	needsAttention,
+	nextSortDirection,
 	retryable,
 	sortMessages,
-	statusNotice,
 } from './messages'
 import {
 	type BookingSort,
@@ -67,6 +71,7 @@ const bookingType = ref('all')
 const bookingSort = ref<BookingSort>('upcoming')
 const messageFilter = ref('all')
 const messageSort = ref<MessageSort>('received')
+const messageSortDirection = ref<SortDirection>('desc')
 const loading = ref(true)
 const newTripOpen = ref(false)
 const newTripName = ref('')
@@ -91,7 +96,36 @@ const filtered = computed(() => sortBookings(
 const visibleMessages = computed(() => sortMessages(
 	filterMessagesByStatus(messages.value, messageFilter.value),
 	messageSort.value,
+	messageSortDirection.value,
 ))
+
+// Literal t() calls so the strings are extractable; order and default direction
+// come from MESSAGE_COLUMNS so the two cannot drift apart.
+const columnLabels: Record<MessageSort, string> = {
+	sender: t('travelmanager', 'From'),
+	subject: t('travelmanager', 'Subject'),
+	received: t('travelmanager', 'Date received'),
+	processed: t('travelmanager', 'Last processed'),
+	attempts: t('travelmanager', 'Attempts'),
+	status: t('travelmanager', 'Status'),
+}
+
+const messageColumns = MESSAGE_COLUMNS.map((column) => ({
+	key: column.key,
+	label: columnLabels[column.key],
+}))
+
+const onSortColumn = (column: MessageSort): void => {
+	messageSortDirection.value = nextSortDirection(column, messageSort.value, messageSortDirection.value)
+	messageSort.value = column
+}
+
+const sortMarker = (column: MessageSort): string => {
+	if (messageSort.value !== column) {
+		return ''
+	}
+	return messageSortDirection.value === 'asc' ? '▲' : '▼'
+}
 
 // Only offer type filters that exist in the data — an empty "Car rental" filter
 // is just a dead end.
@@ -149,12 +183,35 @@ const reload = async () => {
 	}
 }
 
-const copyMessageDetails = async (item: Message) => {
+const copyText = async (text: string) => {
 	try {
-		await navigator.clipboard.writeText(messageDetails(item))
+		await navigator.clipboard.writeText(text)
 		showSuccess(t('travelmanager', 'Copied to clipboard'))
 	} catch (e) {
 		showError(t('travelmanager', 'Could not copy to clipboard'))
+	}
+}
+
+// Retained email bodies, keyed by message id and fetched on first expand: the
+// list response deliberately omits them, and loading every one up front would
+// pull up to 20000 chars per row for text nobody has asked to see.
+const rawBodies = ref<Record<number, string>>({})
+
+const rawBody = (id: number): string =>
+	rawBodies.value[id] ?? t('travelmanager', 'Loading…')
+
+const onRawMessageToggle = async (id: number, event: Event) => {
+	const open = (event.target as HTMLDetailsElement).open
+	if (!open || rawBodies.value[id] !== undefined) {
+		return
+	}
+	try {
+		const body = await fetchMessageBody(id)
+		rawBodies.value[id] = body || t('travelmanager', '(no body retained)')
+	} catch (e) {
+		// Kept in the box rather than raised as a toast: the failure belongs to
+		// this one section, and a toast would leave "Loading…" sitting there.
+		rawBodies.value[id] = t('travelmanager', 'Could not load the message body.')
 	}
 }
 
@@ -382,13 +439,6 @@ onMounted(reload)
 					<h2 :class="$style.tripsHeading">
 						{{ t('travelmanager', 'Messages') }}
 					</h2>
-					<label :class="$style.sort">
-						{{ t('travelmanager', 'Sort by') }}
-						<select v-model="messageSort">
-							<option value="received">{{ t('travelmanager', 'Date received') }}</option>
-							<option value="processed">{{ t('travelmanager', 'Last processed') }}</option>
-						</select>
-					</label>
 				</div>
 				<div :class="$style.chips">
 					<NcButton v-for="chip in messageFilters"
@@ -403,9 +453,25 @@ onMounted(reload)
 					:description="messages.length === 0
 						? t('travelmanager', 'Emails read from your travel mailbox will be listed here.')
 						: t('travelmanager', 'Try a different filter to see the other messages.')" />
-				<!-- One scannable row per message; native <details> so the disclosure
-				     is keyboard-operable and needs no open/closed state of its own. -->
-				<ol :class="$style.rows">
+				<!-- A grid, not a <table>: each row is a native <details> so the
+				     disclosure is keyboard-operable and carries no open/closed state of
+				     its own, which a table's row-pair markup cannot do. The headings are
+				     therefore plain buttons — table ARIA here would promise a structure
+				     the markup does not have. -->
+				<div v-if="visibleMessages.length > 0" :class="[$style.rowSummary, $style.gridHeader]">
+					<span aria-hidden="true" />
+					<button v-for="column in messageColumns"
+						:key="column.key"
+						type="button"
+						:class="[$style.columnHeading, { [$style.columnHeadingActive]: messageSort === column.key }]"
+						@click="onSortColumn(column.key)">
+						{{ column.label }}
+						<span :class="$style.sortMarker" aria-hidden="true">{{ sortMarker(column.key) }}</span>
+					</button>
+				</div>
+				<!-- Dropped entirely when empty, not just left without rows: its own
+				     top/bottom rules would otherwise collapse into a stray line. -->
+				<ol v-if="visibleMessages.length > 0" :class="$style.rows">
 					<li v-for="item in visibleMessages" :key="item.id">
 						<details :class="$style.row">
 							<summary :class="$style.rowSummary">
@@ -421,39 +487,57 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
+								<span :class="$style.rowSender">{{ item.sender || '—' }}</span>
 								<span :class="$style.rowSubject">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
 								<span :class="$style.rowDate">{{ formatTimestamp(item.sentAt) || '—' }}</span>
+								<span :class="$style.rowDate">{{ formatTimestamp(item.processedAt) || '—' }}</span>
+								<span :class="$style.rowAttempts">{{ item.attempts }}</span>
 								<span :class="[$style.badge, $style.rowStatus, { [$style.statusBadge]: item.status === 'failed' || item.status === 'dropped' }]">
 									{{ messageStatusLabel(item.status) }}
 								</span>
 							</summary>
 							<div :class="$style.rowBody">
-								<div :class="[$style.fields, $style.meta]">
-									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Received') }}</span>
-									<span :class="$style.fieldValue">{{ formatTimestamp(item.sentAt) || '—' }}</span>
-									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Last processed') }}</span>
-									<span :class="$style.fieldValue">{{ formatTimestamp(item.processedAt) || '—' }}</span>
-									<span :class="$style.fieldLabel">{{ t('travelmanager', 'Attempts') }}</span>
-									<span :class="$style.fieldValue">{{ item.attempts }}</span>
-								</div>
-								<p v-if="failureKindLabel(item)" :class="$style.tripEmpty">
-									{{ failureKindLabel(item) }}
-								</p>
-								<p v-else-if="statusNotice(item)" :class="$style.tripEmpty">
-									{{ statusNotice(item) }}
-								</p>
+								<!-- No metadata repeated here: the grid row above already carries
+								     From/dates/attempts. What the body adds is what does not fit
+								     a column — why it failed, and the retry. -->
+								<NcNoteCard v-for="(notice, i) in messageNotices(item)"
+									:key="i"
+									:type="notice.type"
+									:text="notice.text"
+									:class="$style.notice" />
+								<!-- The two halves of a diagnosis: what we sent the model, and
+								     what it sent back. Both start collapsed — the body is fetched
+								     only once its section is opened. -->
+								<details v-if="item.canRetry"
+									:class="$style.errorDetails"
+									@toggle="onRawMessageToggle(item.id, $event)">
+									<summary>{{ t('travelmanager', 'Raw message') }}</summary>
+									<div :class="$style.textBox">
+										<!-- Wrapper, not the button itself: NcButton's own
+										     `position: relative` is the same specificity as ours and
+										     its stylesheet loads later, so it would win. -->
+										<span :class="$style.copyButton">
+											<NcButton variant="secondary" @click="copyText(rawBody(item.id))">
+												{{ t('travelmanager', 'Copy') }}
+											</NcButton>
+										</span>
+										<pre :class="$style.errorText">{{ rawBody(item.id) }}</pre>
+									</div>
+								</details>
 								<!-- Long, so kept out of the way — but opened by default when
 								     something went wrong, since that is why you came here. -->
 								<details v-if="hasDetails(item)"
 									:class="$style.errorDetails"
 									:open="item.status === 'failed' || item.status === 'dropped' || item.status === 'related'">
-									<summary>{{ t('travelmanager', 'Details') }}</summary>
-									<div :class="$style.detailsActions">
-										<NcButton variant="tertiary" @click="copyMessageDetails(item)">
-											{{ t('travelmanager', 'Copy') }}
-										</NcButton>
+									<summary>{{ t('travelmanager', 'Model response') }}</summary>
+									<div :class="$style.textBox">
+										<span :class="$style.copyButton">
+											<NcButton variant="secondary" @click="copyText(messageDetails(item))">
+												{{ t('travelmanager', 'Copy') }}
+											</NcButton>
+										</span>
+										<pre :class="$style.errorText">{{ messageDetails(item) }}</pre>
 									</div>
-									<pre :class="$style.errorText">{{ messageDetails(item) }}</pre>
 								</details>
 								<div :class="$style.actions">
 									<!-- Shown whenever a retry is possible in principle, disabled
@@ -714,13 +798,14 @@ onMounted(reload)
 
 /* --- message list ------------------------------------------------------- */
 
+/* Horizontal rules only — no enclosing box. The grid already reads as a unit
+   through its column alignment; a border round it just adds a second frame
+   inside the app content area. */
 .rows {
 	list-style: none;
 	margin: 0;
 	padding: 0;
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius-large);
-	overflow: hidden;
+	border-block: 1px solid var(--color-border);
 }
 
 .rows > li + li {
@@ -728,11 +813,15 @@ onMounted(reload)
 }
 
 /* Fixed metadata columns, not auto: every row is its own grid container, so
-   content-sized columns would land at a different x on each row and the list
-   would read as ragged — which is exactly what a list is meant to avoid. */
+   content-sized columns would land at a different x on each row and the grid
+   would read as ragged. The heading row uses the same template, which is what
+   keeps the headings over their own columns.
+
+   From and Subject share the flexible space 2:3 — the subject is the longer
+   string and the one you read; the sender only needs to be recognisable. */
 .rowSummary {
 	display: grid;
-	grid-template-columns: 16px minmax(0, 1fr) 190px 200px;
+	grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 180px 80px 200px;
 	align-items: center;
 	gap: 12px;
 	padding: 10px 14px;
@@ -740,11 +829,68 @@ onMounted(reload)
 	list-style: none;
 }
 
+.gridHeader {
+	cursor: default;
+	padding-block: 0;
+	border-bottom: none;
+}
+
+/* Headings are buttons, so they need their chrome stripped back to text. Scoped
+   under .gridHeader for the specificity: the server's own `button:not(…)` rules
+   outrank a bare class and would put a filled pill behind every heading. */
+.gridHeader .columnHeading {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	height: auto;
+	/* Padded so the hover highlight reads as a target rather than a bare strip,
+	   pulled back by the same amount so the label still sits on its column's
+	   left edge, over the values below it. */
+	margin: 0 -8px;
+	padding: 6px 8px;
+	border: none;
+	border-radius: var(--border-radius);
+	background-color: transparent;
+	/* `font: inherit` first: a button does not inherit the page font, and 0.85em
+	   here made the headings visibly smaller than every other control. */
+	font: inherit;
+	font-weight: bold;
+	color: var(--color-text-maxcontrast);
+	text-align: start;
+	cursor: pointer;
+}
+
+/* :focus and :active are included to defeat the server's own blue button
+   states, not for their own sake. */
+.gridHeader .columnHeading:hover,
+.gridHeader .columnHeading:focus,
+.gridHeader .columnHeading:active {
+	background-color: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+.gridHeader .columnHeading:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 2px;
+}
+
+.gridHeader .columnHeadingActive {
+	color: var(--color-main-text);
+}
+
+.sortMarker {
+	font-size: 0.75em;
+	line-height: 1;
+}
+
 .rowSummary::-webkit-details-marker {
 	display: none;
 }
 
-.rowSummary:hover {
+/* Message rows only: the heading row highlights per column, not as a whole —
+   hovering it is aiming at one heading, not selecting the row. */
+.rowSummary:not(.gridHeader):hover {
 	background-color: var(--color-background-hover);
 }
 
@@ -754,17 +900,30 @@ onMounted(reload)
 }
 
 .rowSubject {
-	font-weight: bold;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
+.rowSender {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Left-aligned, unlike the old card layout: values now sit under their own
+   heading, and a right-aligned column under a left-aligned heading reads as a
+   misalignment rather than as a deliberate choice. */
 .rowDate {
 	color: var(--color-text-maxcontrast);
 	font-size: 0.9em;
 	white-space: nowrap;
-	text-align: end;
+	font-variant-numeric: tabular-nums;
+}
+
+.rowAttempts {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
 	font-variant-numeric: tabular-nums;
 }
 
@@ -789,23 +948,57 @@ onMounted(reload)
 	}
 }
 
+/* One rhythm inside an expanded row: 14px above the first section, between the
+   last section and the actions, and below the actions before the separator. */
 .rowBody {
-	padding: 4px 14px 14px 42px;
+	padding: 14px 14px 14px 42px;
 }
 
-/* The date is the first thing to go when space is tight; the subject and the
-   status are what you scan for. */
-@media (max-width: 620px) {
+/* The first child brings its own top margin, which would stack on the padding. */
+.rowBody > *:first-child {
+	margin-block-start: 0;
+}
+
+/* Scoped: .actions is shared with the Trips and Bookings views, whose spacing
+   is not ours to change. */
+.rowBody .actions {
+	margin-block-start: 14px;
+}
+
+/* Columns drop as space runs out, least-scanned first. The expanded row body no
+   longer repeats this metadata, so a dropped column is genuinely not shown at
+   that width — only Attempts survives, inside the Details block's text.
+
+   The heading row and the message rows have their cells in the same order, so
+   one set of nth-child rules hides a column in both — that is the whole reason
+   the heading's chevron column is a real (empty) element rather than an offset. */
+@media (max-width: 1100px) {
+	.rowSummary {
+		grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 200px;
+	}
+
+	/* Last processed, Attempts. */
+	.rowSummary > *:nth-child(5),
+	.rowSummary > *:nth-child(6) {
+		display: none;
+	}
+}
+
+@media (max-width: 800px) {
 	.rowSummary {
 		grid-template-columns: 16px minmax(0, 1fr) auto;
 	}
 
+	/* From, Date received — the subject and the status are what you scan for. */
+	.rowSummary > *:nth-child(2),
+	.rowSummary > *:nth-child(4) {
+		display: none;
+	}
+}
+
+@media (max-width: 620px) {
 	.content {
 		padding-block-start: 16px;
-	}
-
-	.rowDate {
-		display: none;
 	}
 
 	.rowBody {
@@ -818,15 +1011,33 @@ onMounted(reload)
 	font-size: 0.9em;
 }
 
-.detailsActions {
-	display: flex;
-	justify-content: flex-end;
-	margin: 4px 0;
+/* NcNoteCard ships with a large block margin meant for full-page forms; inside a
+   row it only needs to clear its neighbours. Scoped for the specificity — its own
+   .notecard rule is a single class and loads after ours. */
+.rowBody .notice {
+	margin: 8px 0;
+}
+
+/* Positioning context for the copy button, which floats over the text rather
+   than sitting above it — one less row of chrome between you and the content. */
+.textBox {
+	position: relative;
+}
+
+/* Pinned to the box, not the text, so it stays put while the content scrolls
+   under it. Inset clears the pre's own scrollbar. */
+.copyButton {
+	position: absolute;
+	inset-block-start: 12px;
+	inset-inline-end: 16px;
+	z-index: 1;
 }
 
 .errorText {
 	margin: 8px 0 0;
 	padding: 8px;
+	/* Room at the end of the first line so the button never lands on text. */
+	padding-inline-end: 72px;
 	max-height: 300px;
 	overflow: auto;
 	white-space: pre-wrap;

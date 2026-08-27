@@ -168,7 +168,33 @@ class HordeImapClient implements IImapClient {
 		$date = $this->toDate($envelope->date);
 		$body = $this->extractText($client, $mailbox, $data);
 
-		return new ImapMessage($messageId, $uid, $uidValidity, $subject, $date, $body);
+		return new ImapMessage($messageId, $uid, $uidValidity, $subject, $date, $body, $this->firstAddress($envelope->from));
+	}
+
+	/**
+	 * Format the first From address for display: the personal name when the
+	 * sender gave one (that is what a mail client shows and what a human
+	 * recognises), otherwise the bare address.
+	 *
+	 * Horde hands back a Horde_Mail_Rfc822_List, which is untyped and may be
+	 * empty; a group address has no `bare_address`, hence the guards.
+	 */
+	private function firstAddress(mixed $list): ?string {
+		if ($list === null) {
+			return null;
+		}
+		foreach ($list as $address) {
+			$name = trim((string)($address->personal ?? ''));
+			$mail = trim((string)($address->bare_address ?? ''));
+			if ($name !== '' && $mail !== '') {
+				return $name . ' <' . $mail . '>';
+			}
+			$single = $name !== '' ? $name : $mail;
+			if ($single !== '') {
+				return $single;
+			}
+		}
+		return null;
 	}
 
 	/**

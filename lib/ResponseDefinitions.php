@@ -31,14 +31,24 @@ namespace OCA\TravelManager;
  *     mailbox: string,
  *     messageId: string,
  *     subject: string|null,
+ *     sender: string|null,
  *     status: string,
  *     failureKind: string|null,
+ *     issueReasons: list<string>,
  *     error: string|null,
  *     lastResponse: string|null,
  *     attempts: int,
  *     canRetry: bool,
  *     sentAt: string|null,
  *     processedAt: string|null,
+ * }
+ *
+ * The retained email body, fetched on its own so the list payload stays lean —
+ * it is up to 20000 chars per message and the list returns up to 200 of them.
+ *
+ * @psalm-type TravelManagerMessageBody = array{
+ *     id: int,
+ *     bodyText: string|null,
  * }
  *
  * @psalm-type TravelManagerTrip = array{

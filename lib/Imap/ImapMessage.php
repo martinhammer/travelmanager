@@ -17,6 +17,12 @@ class ImapMessage {
 		public readonly ?\DateTimeImmutable $date,
 		/** Plain-text body, HTML stripped, ready for the LLM. */
 		public readonly string $textBody,
+		/**
+		 * The From address as displayed ("KLM <noreply@klm.com>"), or null when
+		 * the envelope carried none. Display metadata only — never a dedup or
+		 * classification input.
+		 */
+		public readonly ?string $from = null,
 	) {
 	}
 }

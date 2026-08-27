@@ -34,7 +34,9 @@ UI (Vue, OCS API) — three views: Bookings | Trips | Messages
   ├─ Bookings: filter by review state + type, sort (upcoming/added/updated);
   │            confirm / edit / discard / archive / restore
   ├─ Trips:    group bookings into trips
-  └─ Messages: the ingestion ledger; filter by status, retry failed extractions
+  └─ Messages: the ingestion ledger as a sortable grid (From | Subject | Date
+               received | Last processed | Attempts | Status), rows expand for
+               details; filter by status, retry failed extractions
 ```
 
 Key classes (all under `OCA\TravelManager`, `lib/`):
@@ -52,7 +54,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `Version1200Date2026070600…` (drops `segments`, moves type-specific data into a
   per-type `details` JSON column on `bookings`, adds `confirmation_number` +
   `start_date`/`end_date`) + `Version1300Date2026081400…` (splits `status` into
-  `status` + `review_state`).
+  `status` + `review_state`) + `Version1600Date2026082700…` (adds `messages.sender`)
+  + `Version1700Date2026082710…` (adds `messages.issue_reasons`).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -63,8 +66,14 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   processing/processed/failed/no_booking/**dropped**/**related** (`related` =
   every booking in it already exists, see §3; see the extraction contract
   below — `dropped` is the retry-worthy one), `failure_kind` =
-  schedule/provider/validation, `attempts` counts extraction runs. Holds
-  `subject`, `sent_at` and the plain-text `body_text` that was fed to the model,
+  schedule/provider/validation, `issue_reasons` = comma-separated
+  `ExtractionIssue::REASON_*` slugs from the last attempt (the branchable form of
+  what `error` says in prose; cleared on retry), `attempts` counts extraction
+  runs. Holds
+  `subject`, `sender` (display form of the From header — grid metadata only,
+  never a dedup or classification input; null on rows ingested before it was
+  captured, since the envelope is not retained and cannot be backfilled),
+  `sent_at` and the plain-text `body_text` that was fed to the model,
   so an extraction can be re-run without going back to IMAP (a message may have
   been deleted, and UIDVALIDITY may have rolled), plus `last_response` — the raw
   model output of the most recent attempt, truncated to 20000 chars, so the
@@ -236,6 +245,9 @@ debug panel for iterating without waiting for cron:
   dropped`, so a rejected booking is distinguishable from an email that held none.
 - ✅ **Retry**: `messages` retains subject/body, and the **Messages view** lists
   the ingestion ledger with a per-message "Retry extraction" (app version 1.4.0).
+- ✅ **Messages grid**: sortable column headings (From | Subject | Date received |
+  Last processed | Attempts | Status) over expandable rows; `messages.sender`
+  captured from the IMAP envelope (app version 1.6.0).
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -254,6 +266,37 @@ Messages view needed this untangling. All filtering/sorting is **client-side and
 pure** (`sortBookings`/`filterBookings` in `src/bookings.ts`,
 `sortMessages`/`filterMessagesByStatus` in `src/messages.ts`) so it stays
 unit-testable without `@nextcloud/*` runtime imports (§7).
+
+The **Messages grid** is a CSS grid, not a `<table>`: each row is a native
+`<details>`, which a table's two-`<tr>` row pair cannot be without hand-rolling
+the open/closed state. Consequences to preserve:
+- The heading row and each message row use the **same `.rowSummary` grid
+  template and the same cell order**, so one set of `nth-child` rules hides a
+  column in both at a breakpoint. The heading's chevron cell is a real (empty)
+  element for exactly this reason — do not replace it with an offset.
+- Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
+  + `aria-sort`: grid ARIA would promise a table structure the markup does not
+  have. Sort state is `messageSort` + `messageSortDirection`; `MESSAGE_COLUMNS`
+  holds order and each column's default direction, and `nextSortDirection`
+  implements "default on a new column, flip on the same one".
+- Column **labels live in `App.vue`** as literal `t()` calls (extractable),
+  keyed off `MESSAGE_COLUMNS`; `src/messages.ts` stays `@nextcloud/*`-free.
+- Rows with no value for the sorted column sink to the bottom in **both**
+  directions — unsortable, not "smallest".
+- An expanded row opens with `NcNoteCard` notices from `messageNotices()`:
+  failure kind (error) → outcome for related/no_booking/dropped (info/info/warning)
+  → a warning when `issueReasons` contains `repaired_json`. A row can carry
+  several — a booking can be saved *and* have come from a repaired response.
+  **`repaired_json` is why `messages.issue_reasons` exists**
+  (`Version1700Date2026082710…`): the slugs were already in `error`, but only as
+  prose (`- [repaired_json] …`), and parsing our own sentences back out on the
+  client would have made that wording a wire contract.
+- An expanded row shows the two halves of a diagnosis — **Raw message** (what we
+  sent) and **Model response** (what came back) — each with a Copy button
+  floating in its box. `body_text` stays **out of the list response** (bulky:
+  20000 chars × up to 200 rows); the Raw message section fetches it lazily from
+  **`GET /api/messages/{id}/body`** on first expand and caches it by id. Do not
+  fold it back into `jsonSerialize()`.
 
 ## 5. Prerequisites (runtime)
 

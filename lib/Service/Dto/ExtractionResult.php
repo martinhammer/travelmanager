@@ -29,6 +29,18 @@ class ExtractionResult {
 		return count(array_filter($this->issues, static fn (ExtractionIssue $i): bool => $i->dropped));
 	}
 
+	/**
+	 * The distinct REASON_* slugs hit, for storing on the message. Machine-facing
+	 * counterpart to describeIssues() — the UI branches on these rather than
+	 * reading the prose back.
+	 *
+	 * @return list<string>
+	 */
+	public function reasonSlugs(): array {
+		$slugs = array_map(static fn (ExtractionIssue $i): string => $i->reason, $this->issues);
+		return array_values(array_unique($slugs));
+	}
+
 	/** One line per issue, for the activity log's context block. */
 	public function describeIssues(): string {
 		return implode("\n", array_map(

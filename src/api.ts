@@ -95,8 +95,12 @@ export interface Message {
 	mailbox: string
 	messageId: string
 	subject: string | null
+	/** Display form of the From header; null on messages ingested before it was captured. */
+	sender: string | null
 	status: string
 	failureKind: string | null
+	/** ExtractionIssue reason slugs from the last attempt, e.g. 'repaired_json'. */
+	issueReasons: string[]
 	error: string | null
 	/** Raw model output from the last attempt (truncated server-side). */
 	lastResponse: string | null
@@ -153,6 +157,16 @@ export const assignBookingToTrip = async (id: number, tripId: number | null): Pr
 export const listMessages = async (status?: string): Promise<Message[]> => {
 	const res = await axios.get(base('messages'), { params: status ? { status } : {} })
 	return unwrap(res.data)
+}
+
+/**
+ * Fetch the retained email body for one message. Kept out of the list response
+ * because it is the bulky column — only the row the user opened needs it.
+ * @param id the message whose body to read
+ */
+export const fetchMessageBody = async (id: number): Promise<string | null> => {
+	const res = await axios.get(base(`messages/${id}/body`))
+	return unwrap<{ id: number, bodyText: string | null }>(res.data).bodyText
 }
 
 /**

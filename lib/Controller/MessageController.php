@@ -21,6 +21,7 @@ use OCP\IRequest;
  * what became of it, and a way to re-run the ones that went wrong.
  *
  * @psalm-import-type TravelManagerMessage from \OCA\TravelManager\ResponseDefinitions
+ * @psalm-import-type TravelManagerMessageBody from \OCA\TravelManager\ResponseDefinitions
  *
  * @psalm-suppress UnusedClass
  */
@@ -49,6 +50,30 @@ class MessageController extends OCSController {
 		$messages = $this->mapper->findAllForUser($this->uid(), $status);
 		$out = array_values(array_map(static fn ($m): array => $m->jsonSerialize(), $messages));
 		return new DataResponse($out);
+	}
+
+	/**
+	 * Get the retained email body for a message
+	 *
+	 * Deliberately not part of the list response: this is the bulky column, and
+	 * the Messages view only needs it for the one row the user opened.
+	 *
+	 * @param int $id Id of the message
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerMessageBody, array{}>
+	 * @throws OCSNotFoundException Message not found
+	 *
+	 * 200: Body returned
+	 * 404: Message not found
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'GET', url: '/api/messages/{id}/body')]
+	public function body(int $id): DataResponse {
+		try {
+			$message = $this->mapper->find($id, $this->uid());
+		} catch (DoesNotExistException) {
+			throw new OCSNotFoundException();
+		}
+		return new DataResponse(['id' => $id, 'bodyText' => $message->getBodyText()]);
 	}
 
 	/**

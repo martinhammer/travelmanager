@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../src/api'
 import {
-	failureKindLabel,
 	filterMessagesByStatus,
 	formatTimestamp,
 	hasDetails,
 	messageDetails,
+	messageNotices,
 	messageStatusLabel,
 	needsAttention,
+	nextSortDirection,
 	retryable,
 	sortMessages,
-	statusNotice,
 } from '../../src/messages'
 
 const message = (overrides: Partial<Message> = {}): Message => ({
@@ -18,8 +18,10 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	mailbox: 'INBOX',
 	messageId: '<abc@example.com>',
 	subject: 'Your booking',
+	sender: 'KLM <noreply@klm.com>',
 	status: 'processed',
 	failureKind: null,
+	issueReasons: [],
 	error: null,
 	lastResponse: null,
 	attempts: 1,
@@ -68,27 +70,55 @@ describe('messageStatusLabel', () => {
 	})
 })
 
-describe('statusNotice', () => {
-	it('explains a related row without calling it a failure', () => {
-		const notice = statusNotice(message({ status: 'related' }))
-		expect(notice).toContain('does not apply updates yet')
-		// Not a fault: the failure channel stays silent for it.
-		expect(failureKindLabel(message({ status: 'related' }))).toBe('')
-	})
-
-	it('says nothing for ordinary rows', () => {
-		expect(statusNotice(message({ status: 'processed' }))).toBe('')
+describe('messageNotices', () => {
+	it('explains a related row as information, not a fault', () => {
+		const [notice] = messageNotices(message({ status: 'related' }))
+		expect(notice.type).toBe('info')
+		expect(notice.text).toContain('does not apply updates yet')
 	})
 
 	it('is not counted as needing attention — a notice you cannot clear', () => {
 		expect(needsAttention([message({ status: 'related' })])).toEqual([])
 	})
-})
 
-describe('failureKindLabel', () => {
-	it('describes a classified failure and stays silent otherwise', () => {
-		expect(failureKindLabel(message({ failureKind: 'provider' }))).toContain('provider')
-		expect(failureKindLabel(message({ failureKind: null }))).toBe('')
+	it('warns rather than informs when bookings were rejected', () => {
+		expect(messageNotices(message({ status: 'dropped' }))[0].type).toBe('warning')
+	})
+
+	it('reassures on an email that genuinely held no booking', () => {
+		expect(messageNotices(message({ status: 'no_booking' }))[0].type).toBe('info')
+	})
+
+	it('reports a classified failure as an error', () => {
+		const [notice] = messageNotices(message({ status: 'failed', failureKind: 'provider' }))
+		expect(notice.type).toBe('error')
+		expect(notice.text).toBe('No response from AI provider')
+	})
+
+	it('says nothing for a clean extraction', () => {
+		expect(messageNotices(message({ status: 'processed' }))).toEqual([])
+	})
+
+	it('surfaces a repaired response even on a successful row', () => {
+		// The whole point: a repair is invisible in the status, and a rising
+		// repair rate is the early warning of a degrading model.
+		const notices = messageNotices(message({ status: 'processed', issueReasons: ['repaired_json'] }))
+		expect(notices).toHaveLength(1)
+		expect(notices[0].type).toBe('warning')
+		expect(notices[0].text).toContain('repaired')
+	})
+
+	it('stacks a failure and a repair, most urgent first', () => {
+		const notices = messageNotices(message({
+			status: 'dropped',
+			failureKind: 'validation',
+			issueReasons: ['repaired_json', 'missing_departure'],
+		}))
+		expect(notices.map((n) => n.type)).toEqual(['error', 'warning', 'warning'])
+	})
+
+	it('ignores issue reasons that carry no notice of their own', () => {
+		expect(messageNotices(message({ issueReasons: ['partial_segments'] }))).toEqual([])
 	})
 })
 
@@ -114,17 +144,60 @@ describe('sortMessages', () => {
 	]
 
 	it('orders newest first, undated last', () => {
-		expect(sortMessages(pool, 'received').map((m) => m.id)).toEqual([2, 1, 3])
+		expect(sortMessages(pool, 'received', 'desc').map((m) => m.id)).toEqual([2, 1, 3])
 	})
 
 	it('orders by last processing when asked — a retried old message rises', () => {
-		expect(sortMessages(pool, 'processed').map((m) => m.id)).toEqual([1, 3, 2])
+		expect(sortMessages(pool, 'processed', 'desc').map((m) => m.id)).toEqual([1, 3, 2])
+	})
+
+	it('reverses on ascending', () => {
+		expect(sortMessages(pool, 'received', 'asc').map((m) => m.id)).toEqual([1, 2, 3])
+	})
+
+	it('keeps valueless rows last in both directions — they are unsortable, not smallest', () => {
+		expect(sortMessages(pool, 'received', 'asc').at(-1)?.id).toBe(3)
+		expect(sortMessages(pool, 'received', 'desc').at(-1)?.id).toBe(3)
+	})
+
+	it('sorts text case-insensitively, blanks last', () => {
+		const senders = [
+			message({ id: 1, sender: 'united' }),
+			message({ id: 2, sender: null }),
+			message({ id: 3, sender: 'KLM' }),
+		]
+		expect(sortMessages(senders, 'sender', 'asc').map((m) => m.id)).toEqual([3, 1, 2])
+	})
+
+	it('sorts attempts numerically, not as strings', () => {
+		const tries = [message({ id: 1, attempts: 9 }), message({ id: 2, attempts: 10 })]
+		expect(sortMessages(tries, 'attempts', 'desc').map((m) => m.id)).toEqual([2, 1])
+	})
+
+	it('sorts status by the label on screen, not the raw slug', () => {
+		// 'failed' sorts after 'no_booking' as a slug, but its label ("Failed")
+		// sorts before "No booking".
+		const statuses = [message({ id: 1, status: 'no_booking' }), message({ id: 2, status: 'failed' })]
+		expect(sortMessages(statuses, 'status', 'asc').map((m) => m.id)).toEqual([2, 1])
 	})
 
 	it('does not mutate the input', () => {
 		const copy = [...pool]
-		sortMessages(pool, 'received')
+		sortMessages(pool, 'received', 'desc')
 		expect(pool).toEqual(copy)
+	})
+})
+
+describe('nextSortDirection', () => {
+	it('starts a new column at its own default', () => {
+		// Dates open newest-first; names open A→Z.
+		expect(nextSortDirection('received', 'sender', 'asc')).toBe('desc')
+		expect(nextSortDirection('sender', 'received', 'desc')).toBe('asc')
+	})
+
+	it('flips the column already sorted on', () => {
+		expect(nextSortDirection('received', 'received', 'desc')).toBe('asc')
+		expect(nextSortDirection('received', 'received', 'asc')).toBe('desc')
 	})
 })
 

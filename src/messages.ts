@@ -6,12 +6,12 @@ import type { Message } from './api'
  * only the second is the app's fault and worth retrying.
  */
 const STATUS_LABELS: Record<string, string> = {
-	processing: 'Waiting for the model',
+	processing: 'Submitted',
 	processed: 'Bookings extracted',
-	no_booking: 'No booking in this email',
-	related: 'Relates to a booking you have',
-	dropped: 'Bookings found but rejected',
-	failed: 'Extraction failed',
+	no_booking: 'No booking',
+	related: 'Existing booking',
+	dropped: 'Rejected',
+	failed: 'Failed',
 }
 
 /**
@@ -55,32 +55,97 @@ export const filterMessagesByStatus = (items: Message[], status: string): Messag
 	return items.filter((m) => m.status === status)
 }
 
-/** How the ingestion ledger is ordered. */
-export type MessageSort = 'received' | 'processed'
+/** The grid's sortable columns — one per column heading. */
+export type MessageSort = 'sender' | 'subject' | 'received' | 'processed' | 'attempts' | 'status'
+
+/** Which way a column is ordered. */
+export type SortDirection = 'asc' | 'desc'
 
 /**
- * Order ledger rows, newest first either way. 'received' follows the email's own
- * date, 'processed' follows when we last ran it — which differ once a retry
- * re-runs an old message.
- * @param items the rows to order (not mutated)
- * @param sort the ordering to apply
+ * The Messages grid's columns, in display order. Dates and counts default to
+ * descending (newest / most attempts first — what you came to look at), text to
+ * ascending (A→Z, which is what "sort by name" means to everyone).
+ *
+ * Labels live in the component: `t()` needs literal strings to be extractable,
+ * and this module stays free of @nextcloud/* imports so it can be unit-tested
+ * standalone (§7 of CLAUDE.md).
  */
-export const sortMessages = (items: Message[], sort: MessageSort): Message[] => {
-	const key = sort === 'received' ? 'sentAt' : 'processedAt'
+export const MESSAGE_COLUMNS: { key: MessageSort, defaultDirection: SortDirection }[] = [
+	{ key: 'sender', defaultDirection: 'asc' },
+	{ key: 'subject', defaultDirection: 'asc' },
+	{ key: 'received', defaultDirection: 'desc' },
+	{ key: 'processed', defaultDirection: 'desc' },
+	{ key: 'attempts', defaultDirection: 'desc' },
+	{ key: 'status', defaultDirection: 'asc' },
+]
+
+/**
+ * The value a column sorts on. Strings sort case-insensitively so "KLM" and
+ * "klm" land together; status sorts on the label shown, not the raw slug, so the
+ * order matches what is on screen.
+ * @param message the ledger row
+ * @param sort the column to read
+ */
+const sortValue = (message: Message, sort: MessageSort): string | number | null => {
+	switch (sort) {
+	case 'sender':
+		return message.sender?.toLowerCase() || null
+	case 'subject':
+		return message.subject?.toLowerCase() || null
+	case 'received':
+		return message.sentAt
+	case 'processed':
+		return message.processedAt
+	case 'attempts':
+		return message.attempts
+	case 'status':
+		return messageStatusLabel(message.status).toLowerCase()
+	}
+}
+
+/**
+ * Order ledger rows by one column. Rows with no value for that column always
+ * sink to the bottom, in both directions: a message with no sender is not
+ * "smallest", it is simply unsortable, and flipping it to the top would bury the
+ * rows you asked to see.
+ * @param items the rows to order (not mutated)
+ * @param sort the column to order by
+ * @param direction 'asc' or 'desc'
+ */
+export const sortMessages = (items: Message[], sort: MessageSort, direction: SortDirection = 'desc'): Message[] => {
+	const sign = direction === 'asc' ? 1 : -1
 	return [...items].sort((a, b) => {
-		const av = a[key]
-		const bv = b[key]
+		const av = sortValue(a, sort)
+		const bv = sortValue(b, sort)
 		if (av === bv) {
 			return 0
 		}
-		if (!av) {
+		if (av === null || av === '') {
 			return 1
 		}
-		if (!bv) {
+		if (bv === null || bv === '') {
 			return -1
 		}
-		return av < bv ? 1 : -1
+		return av < bv ? -sign : sign
 	})
+}
+
+/**
+ * The direction a column should take when the user clicks its heading: its own
+ * default on first click, then flipped on every click after that.
+ * @param column the heading that was clicked
+ * @param current the column currently sorted on
+ * @param direction the direction currently applied
+ */
+export const nextSortDirection = (
+	column: MessageSort,
+	current: MessageSort,
+	direction: SortDirection,
+): SortDirection => {
+	if (column !== current) {
+		return MESSAGE_COLUMNS.find((c) => c.key === column)?.defaultDirection ?? 'desc'
+	}
+	return direction === 'asc' ? 'desc' : 'asc'
 }
 
 /**
@@ -133,29 +198,76 @@ export const messageDetails = (message: Message): string => {
 export const hasDetails = (message: Message): boolean =>
 	Boolean(message.error) || Boolean(message.lastResponse)
 
-/**
- * A notice for outcomes that are not faults but still need explaining. Kept
- * apart from failureKindLabel so an informational row never reads as an error.
- * @param message the ledger row
- */
-export const statusNotice = (message: Message): string =>
-	message.status === 'related'
-		? 'This email is about a booking you already have. Travel Manager creates a booking from one email only and does not apply updates yet, so nothing was changed.'
-		: ''
+/** One note card in an expanded row. `type` maps to NcNoteCard's own types. */
+export interface MessageNotice {
+	type: 'info' | 'warning' | 'error'
+	text: string
+}
 
 /**
- * Why a failure happened, in words, when the backend classified it.
+ * Why a failure happened, when the backend classified it. Separate from the
+ * outcome notices below so a fault never renders as an informational note.
  * @param message the ledger row
  */
-export const failureKindLabel = (message: Message): string => {
+const failureNotice = (message: Message): MessageNotice | null => {
 	switch (message.failureKind) {
 	case 'provider':
-		return 'The AI provider failed to answer — retrying usually helps'
+		return { type: 'error', text: 'No response from AI provider' }
 	case 'validation':
-		return 'The model answered, but the response could not be parsed'
+		return { type: 'error', text: 'Model response could not be parsed' }
 	case 'schedule':
-		return 'The extraction task could not be scheduled'
+		return { type: 'error', text: 'The extraction task could not be scheduled' }
 	default:
-		return ''
+		return null
 	}
+}
+
+/**
+ * Why a run that did not fail still produced no booking — or produced one from a
+ * response we had to touch first. Every zero-booking outcome gets a note: the
+ * status badge alone says *what* happened, not whether it needs you.
+ * @param message the ledger row
+ */
+const outcomeNotice = (message: Message): MessageNotice | null => {
+	switch (message.status) {
+	case 'related':
+		return {
+			type: 'info',
+			text: 'This email is about an existing booking. Travel Manager creates a booking from one email only and does not apply updates yet, so nothing was changed.',
+		}
+	case 'no_booking':
+		return {
+			type: 'info',
+			text: 'The model read this email and found no travel booking in it.',
+		}
+	case 'dropped':
+		return {
+			type: 'warning',
+			text: 'The model reported a booking, but it could not be validated, so nothing was saved.',
+		}
+	default:
+		return null
+	}
+}
+
+/**
+ * Notes to show above the detail sections of an expanded row, most urgent first.
+ * A row can warrant more than one: a booking can be saved *and* have come from a
+ * response we repaired.
+ * @param message the ledger row
+ */
+export const messageNotices = (message: Message): MessageNotice[] => {
+	const notices = [failureNotice(message), outcomeNotice(message)]
+
+	// Not tied to a status: a repair can accompany any outcome, including a
+	// perfectly good extraction. A rising repair rate is how a degrading model
+	// shows up before it starts failing outright, so it is never silent.
+	if (message.issueReasons.includes('repaired_json')) {
+		notices.push({
+			type: 'warning',
+			text: 'The model returned malformed JSON, which Travel Manager repaired before reading it.',
+		})
+	}
+
+	return notices.filter((n): n is MessageNotice => n !== null)
 }

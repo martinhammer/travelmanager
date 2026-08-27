@@ -67,6 +67,9 @@ class ExtractionResultHandler {
 				throw new ExtractionException('Task output contained no text');
 			}
 			$result = $this->extractionService->parseAndValidate($text);
+			// Set before any branch, like the response above: every outcome carries
+			// the issues that produced it, and the UI branches on these slugs.
+			$this->setIssueReasons($message, $result->reasonSlugs());
 			$applied = $this->bookingService->applyExtraction($userId, $map->getMessageId(), $result->bookings);
 			$count = $applied->created;
 			$dropped = $result->droppedCount();
@@ -175,6 +178,8 @@ class ExtractionResultHandler {
 				? null
 				: (string)json_encode($output, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
 		);
+		// Nothing was validated, so any slugs on the row belong to an earlier run.
+		$this->setIssueReasons($message, []);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $error, ProcessedMessage::FAILURE_PROVIDER);
 		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}
@@ -288,6 +293,16 @@ class ExtractionResultHandler {
 	 * response next to the error rather than only the error. Truncated: this is a
 	 * diagnostic, not an archive.
 	 */
+	/**
+	 * @param list<string> $reasons
+	 */
+	private function setIssueReasons(?ProcessedMessage $message, array $reasons): void {
+		if ($message === null) {
+			return;
+		}
+		$message->setIssueReasons($reasons === [] ? null : mb_substr(implode(',', $reasons), 0, 255));
+	}
+
 	private function setLastResponse(?ProcessedMessage $message, ?string $response): void {
 		if ($message === null) {
 			return;

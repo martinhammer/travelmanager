@@ -121,6 +121,8 @@ class IngestionService {
 		$record->setUidValidity($message->uidValidity);
 		$record->setImapUid($message->uid);
 		$record->setSubject($message->subject === '' ? null : $message->subject);
+		// Truncated to the column width: a display label, not a parseable header.
+		$record->setSender($message->from === null ? null : mb_substr($message->from, 0, 255));
 		$record->setSentAt($message->date === null ? null : \DateTime::createFromImmutable($message->date));
 		$record->setBodyText($message->textBody);
 		$record->setStatus(ProcessedMessage::STATUS_PROCESSING);
@@ -154,6 +156,8 @@ class IngestionService {
 		$record->setStatus(ProcessedMessage::STATUS_PROCESSING);
 		$record->setError(null);
 		$record->setFailureKind(null);
+		// The previous attempt's issues describe a response we are about to replace.
+		$record->setIssueReasons(null);
 		$record->setProcessedAt($this->timeFactory->getDateTime());
 		$this->processedMessageMapper->update($record);
 
