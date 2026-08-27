@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Booking } from '../../src/api'
 import {
 	bookingHeaderFields,
+	bookingSpan,
 	bookingTypes,
 	bookingsForTrip,
 	carFields,
@@ -112,16 +113,33 @@ describe('sortBookings', () => {
 	it('puts the next trip first, past travel below, undated last', () => {
 		// 2 and 4 are ahead (soonest first); 5 and 1 are past (most recent
 		// first); 3 has no date at all.
-		expect(sortBookings(pool, 'upcoming', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
+		expect(sortBookings(pool, 'travel', 'asc', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
 	})
 
-	it('orders by creation or update when asked', () => {
-		expect(sortBookings(pool, 'added', now).map((b) => b.id)).toEqual([5, 4, 3, 2, 1])
+	it('falls back to plain reverse chronology descending — looking back, not ahead', () => {
+		// Deliberately NOT the reverse of the ascending order: that one groups
+		// future before past, which only makes sense pointing forwards.
+		expect(sortBookings(pool, 'travel', 'desc', now).map((b) => b.id)).toEqual([4, 2, 5, 1, 3])
+	})
+
+	it('orders by creation when asked', () => {
+		expect(sortBookings(pool, 'added', 'desc', now).map((b) => b.id)).toEqual([5, 4, 3, 2, 1])
+	})
+
+	it('sorts text columns case-insensitively, blanks last', () => {
+		const pairs = [
+			booking({ id: 1, provider: 'united' }),
+			booking({ id: 2, provider: null }),
+			booking({ id: 3, provider: 'KLM' }),
+		]
+		expect(sortBookings(pairs, 'provider', 'asc', now).map((b) => b.id)).toEqual([3, 1, 2])
+		// Unsortable, not smallest: the blank stays last either way.
+		expect(sortBookings(pairs, 'provider', 'desc', now).at(-1)?.id).toBe(2)
 	})
 
 	it('does not mutate the input', () => {
 		const copy = [...pool]
-		sortBookings(pool, 'upcoming', now)
+		sortBookings(pool, 'travel', 'asc', now)
 		expect(pool).toEqual(copy)
 	})
 })
@@ -198,20 +216,31 @@ describe('formatDateTime', () => {
 })
 
 describe('bookingHeaderFields', () => {
-	it('labels the flight header with provider and reference', () => {
+	it('carries only what the grid does not already show as a column', () => {
+		// Type, provider and reference are columns now; repeating them in the
+		// expanded row would be the same value twice.
 		expect(bookingHeaderFields(booking({ type: 'flight', provider: 'KLM', bookingReference: 'YGUE6T', confirmationNumber: '29276863' }))).toEqual([
-			{ label: 'Booking type', value: 'flight' },
-			{ label: 'Provider', value: 'KLM' },
-			{ label: 'Booking reference', value: 'YGUE6T' },
 			{ label: 'Confirmation number', value: '29276863' },
 		])
 	})
 
-	it('labels the car provider as "Supplier" and omits empty fields', () => {
-		expect(bookingHeaderFields(booking({ type: 'car_rental', provider: 'Holiday Autos', bookingReference: null, confirmationNumber: null }))).toEqual([
-			{ label: 'Booking type', value: 'car_rental' },
-			{ label: 'Supplier', value: 'Holiday Autos' },
-		])
+	it('omits empty fields, leaving nothing to render', () => {
+		expect(bookingHeaderFields(booking({ type: 'car_rental', provider: 'Holiday Autos', confirmationNumber: null }))).toEqual([])
+	})
+})
+
+describe('bookingSpan', () => {
+	it('shows a range when the end date differs, one date when it does not', () => {
+		expect(bookingSpan(booking({ startDate: '2026-07-25T08:35:00', endDate: '2026-07-28T11:00:00' })))
+			.toBe('2026-07-25 → 2026-07-28')
+		expect(bookingSpan(booking({ startDate: '2026-07-25T08:35:00', endDate: '2026-07-25T22:00:00' })))
+			.toBe('2026-07-25')
+		expect(bookingSpan(booking({ startDate: '2026-07-25T08:35:00', endDate: null })))
+			.toBe('2026-07-25')
+	})
+
+	it('is empty without a start date, so the column renders a dash', () => {
+		expect(bookingSpan(booking({ startDate: null }))).toBe('')
 	})
 })
 

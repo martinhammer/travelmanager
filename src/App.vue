@@ -29,25 +29,29 @@ import {
 	updateTrip,
 } from './api'
 import {
-	type MessageSort,
 	type SortDirection,
+	formatSpan,
+	formatTimestamp,
+	nextSortDirection,
+} from './grid'
+import {
+	type MessageSort,
 	MESSAGE_COLUMNS,
 	filterMessagesByStatus,
-	formatTimestamp,
 	hasDetails,
 	messageDetails,
 	messageNotices,
 	messageStatusLabel,
 	needsAttention,
-	nextSortDirection,
 	retryable,
 	sortMessages,
 } from './messages'
 import {
 	type BookingSort,
+	BOOKING_COLUMNS,
 	bookingHeaderFields,
+	bookingSpan,
 	bookingTypes,
-	bookingsForTrip,
 	carFields,
 	decodeHtmlEntities,
 	draftCount as countDrafts,
@@ -59,6 +63,13 @@ import {
 	reviewActions,
 	sortBookings,
 } from './bookings'
+import {
+	type TripSort,
+	TRIP_COLUMNS,
+	filterTripsByPeriod,
+	sortTrips,
+	tripRows,
+} from './trips'
 
 const bookings = ref<Booking[]>([])
 const trips = ref<Trip[]>([])
@@ -68,10 +79,15 @@ const messages = ref<Message[]>([])
 const view = ref<'bookings' | 'trips' | 'messages'>('bookings')
 const bookingFilter = ref('all')
 const bookingType = ref('all')
-const bookingSort = ref<BookingSort>('upcoming')
+// 'travel' ascending is the default: what is coming up next, first.
+const bookingSort = ref<BookingSort>('travel')
+const bookingSortDirection = ref<SortDirection>('asc')
 const messageFilter = ref('all')
 const messageSort = ref<MessageSort>('received')
 const messageSortDirection = ref<SortDirection>('desc')
+const tripFilter = ref('all')
+const tripSort = ref<TripSort>('travel')
+const tripSortDirection = ref<SortDirection>('asc')
 const loading = ref(true)
 const newTripOpen = ref(false)
 const newTripName = ref('')
@@ -91,12 +107,19 @@ const deleteBookingTarget = ref<Booking | null>(null)
 const filtered = computed(() => sortBookings(
 	filterBookings(bookings.value, bookingFilter.value, bookingType.value),
 	bookingSort.value,
+	bookingSortDirection.value,
 ))
 
 const visibleMessages = computed(() => sortMessages(
 	filterMessagesByStatus(messages.value, messageFilter.value),
 	messageSort.value,
 	messageSortDirection.value,
+))
+
+const visibleTrips = computed(() => sortTrips(
+	filterTripsByPeriod(tripRows(trips.value, bookings.value), tripFilter.value),
+	tripSort.value,
+	tripSortDirection.value,
 ))
 
 // Literal t() calls so the strings are extractable; order and default direction
@@ -115,17 +138,91 @@ const messageColumns = MESSAGE_COLUMNS.map((column) => ({
 	label: columnLabels[column.key],
 }))
 
+const bookingColumnLabels: Record<BookingSort, string> = {
+	title: t('travelmanager', 'Title'),
+	type: t('travelmanager', 'Type'),
+	provider: t('travelmanager', 'Provider'),
+	reference: t('travelmanager', 'Reference'),
+	travel: t('travelmanager', 'Travel dates'),
+	added: t('travelmanager', 'Added'),
+	reviewState: t('travelmanager', 'Status'),
+}
+
+const bookingColumns = BOOKING_COLUMNS.map((column) => ({
+	key: column.key,
+	label: bookingColumnLabels[column.key],
+}))
+
+const tripColumnLabels: Record<TripSort, string> = {
+	name: t('travelmanager', 'Trip'),
+	travel: t('travelmanager', 'Travel dates'),
+	bookings: t('travelmanager', 'Bookings'),
+}
+
+const tripColumns = TRIP_COLUMNS.map((column) => ({
+	key: column.key,
+	label: tripColumnLabels[column.key],
+}))
+
+const tripFilters: { key: string, label: string }[] = [
+	{ key: 'all', label: t('travelmanager', 'All') },
+	{ key: 'current', label: t('travelmanager', 'Current') },
+	{ key: 'future', label: t('travelmanager', 'Future') },
+	{ key: 'past', label: t('travelmanager', 'Past') },
+]
+
+const onSortTripColumn = (column: TripSort): void => {
+	tripSortDirection.value = nextSortDirection(TRIP_COLUMNS, column, tripSort.value, tripSortDirection.value)
+	tripSort.value = column
+}
+
 const onSortColumn = (column: MessageSort): void => {
-	messageSortDirection.value = nextSortDirection(column, messageSort.value, messageSortDirection.value)
+	messageSortDirection.value = nextSortDirection(MESSAGE_COLUMNS, column, messageSort.value, messageSortDirection.value)
 	messageSort.value = column
 }
 
-const sortMarker = (column: MessageSort): string => {
-	if (messageSort.value !== column) {
+const onSortBookingColumn = (column: BookingSort): void => {
+	bookingSortDirection.value = nextSortDirection(BOOKING_COLUMNS, column, bookingSort.value, bookingSortDirection.value)
+	bookingSort.value = column
+}
+
+/**
+ * The ▲/▼ next to the column currently sorted on, empty for the others. Shared
+ * by both grids — the two differ only in which refs they pass in.
+ * @param active the column the grid is sorted on
+ * @param column the column being rendered
+ * @param direction the direction currently applied
+ */
+const sortMarker = (active: string, column: string, direction: SortDirection): string => {
+	if (active !== column) {
 		return ''
 	}
-	return messageSortDirection.value === 'asc' ? '▲' : '▼'
+	return direction === 'asc' ? '▲' : '▼'
 }
+
+// Used for both the grid's Type column and the type filter chips, so the two
+// always read the same.
+const typeName = (type: string): string => {
+	switch (type) {
+	case 'flight':
+		return t('travelmanager', 'Flight')
+	case 'accommodation':
+		return t('travelmanager', 'Accommodation')
+	case 'car_rental':
+		return t('travelmanager', 'Car rental')
+	default:
+		return type
+	}
+}
+
+const reviewStateLabels: Record<string, string> = {
+	draft: t('travelmanager', 'Draft'),
+	confirmed: t('travelmanager', 'Confirmed'),
+	discarded: t('travelmanager', 'Discarded'),
+	archived: t('travelmanager', 'Archived'),
+}
+
+const reviewStateLabel = (state: string): string => reviewStateLabels[state] ?? state
 
 // Only offer type filters that exist in the data — an empty "Car rental" filter
 // is just a dead end.
@@ -150,19 +247,6 @@ const messageFilters: { key: string, label: string }[] = [
 	{ key: 'no_booking', label: t('travelmanager', 'No booking') },
 	{ key: 'processing', label: t('travelmanager', 'Waiting') },
 ]
-
-const typeLabel = (type: string): string => {
-	switch (type) {
-	case 'flight':
-		return t('travelmanager', 'Flights')
-	case 'accommodation':
-		return t('travelmanager', 'Accommodation')
-	case 'car_rental':
-		return t('travelmanager', 'Car rental')
-	default:
-		return type
-	}
-}
 
 const linkCandidates = computed(() => linkTarget.value ? linkDialogBookings(bookings.value, linkTarget.value.id) : [])
 
@@ -393,46 +477,94 @@ onMounted(reload)
 						{{ t('travelmanager', 'Create trip') }}
 					</NcButton>
 				</div>
-				<NcEmptyContent v-if="!loading && trips.length === 0"
-					:name="t('travelmanager', 'No trips yet')"
-					:description="t('travelmanager', 'Create a trip, then group your bookings under it.')" />
-				<details v-for="trip in trips" :key="trip.id" :class="$style.tripCard">
-					<summary :class="$style.tripSummary">
-						<strong>{{ tripLabel(trip) }}</strong>
-						<span :class="$style.badge">
-							{{ t('travelmanager', '{n} booking(s)', { n: bookingsForTrip(bookings, trip.id).length }) }}
+				<div :class="$style.chips">
+					<NcButton v-for="chip in tripFilters"
+						:key="chip.key"
+						:variant="tripFilter === chip.key ? 'primary' : 'tertiary'"
+						@click="tripFilter = chip.key">
+						{{ chip.label }}
+					</NcButton>
+				</div>
+				<NcEmptyContent v-if="!loading && visibleTrips.length === 0"
+					:name="trips.length === 0 ? t('travelmanager', 'No trips yet') : t('travelmanager', 'Nothing matches this filter')"
+					:description="trips.length === 0
+						? t('travelmanager', 'Create a trip, then group your bookings under it.')
+						: t('travelmanager', 'Try a different filter to see your other trips.')" />
+				<div v-if="visibleTrips.length > 0" :class="[$style.rowSummary, $style.tripColumns, $style.gridHeader]">
+					<span aria-hidden="true" />
+					<button v-for="column in tripColumns"
+						:key="column.key"
+						type="button"
+						:class="[$style.columnHeading, { [$style.columnHeadingActive]: tripSort === column.key }]"
+						@click="onSortTripColumn(column.key)">
+						{{ column.label }}
+						<span :class="$style.sortMarker" aria-hidden="true">
+							{{ sortMarker(tripSort, column.key, tripSortDirection) }}
 						</span>
-					</summary>
-					<div :class="$style.tripBody">
-						<ul v-if="bookingsForTrip(bookings, trip.id).length > 0" :class="$style.tripBookings">
-							<li v-for="item in bookingsForTrip(bookings, trip.id)"
-								:key="item.id"
-								:class="$style.tripBooking">
-								<div :class="$style.tripBookingInfo">
-									<strong>{{ bookingLabel(item) }}</strong>
-									<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.reviewState }}</span>
+					</button>
+				</div>
+				<ol v-if="visibleTrips.length > 0" :class="$style.rows">
+					<li v-for="row in visibleTrips" :key="row.trip.id">
+						<details :class="$style.row">
+							<summary :class="[$style.rowSummary, $style.tripColumns]">
+								<svg :class="$style.chevron"
+									viewBox="0 0 24 24"
+									width="16"
+									height="16"
+									aria-hidden="true">
+									<path d="M9 5l7 7-7 7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round" />
+								</svg>
+								<span :class="$style.cellText">{{ tripLabel(row.trip) }}</span>
+								<span :class="$style.cellMeta">{{ formatSpan(row.start, row.end) || '—' }}</span>
+								<!-- Count plus one lozenge per distinct type: what the trip is
+								     made of, without opening it. -->
+								<span :class="[$style.badges, $style.cellStatus]">
+									<span :class="$style.badge">
+										{{ t('travelmanager', '{n} booking(s)', { n: row.bookings.length }) }}
+									</span>
+									<span v-for="type in row.types" :key="type" :class="$style.badge">
+										{{ typeName(type) }}
+									</span>
+								</span>
+							</summary>
+							<div :class="$style.rowBody">
+								<ul v-if="row.bookings.length > 0" :class="$style.tripBookings">
+									<li v-for="item in row.bookings" :key="item.id" :class="$style.tripBooking">
+										<div :class="$style.tripBookingInfo">
+											<strong>{{ bookingLabel(item) }}</strong>
+											<span :class="$style.tripBookingMeta">
+												{{ typeName(item.type) }} · {{ reviewStateLabel(item.reviewState) }}
+												<template v-if="bookingSpan(item)"> · {{ bookingSpan(item) }}</template>
+											</span>
+										</div>
+										<NcButton variant="tertiary" @click="onUnlink(item.id)">
+											{{ t('travelmanager', 'Unlink') }}
+										</NcButton>
+									</li>
+								</ul>
+								<p v-else :class="$style.tripEmpty">
+									{{ t('travelmanager', 'No bookings linked to this trip yet.') }}
+								</p>
+								<div :class="$style.actions">
+									<NcButton variant="secondary" @click="openLink(row.trip)">
+										{{ t('travelmanager', 'Link booking') }}
+									</NcButton>
+									<NcButton variant="secondary" @click="onEditTrip(row.trip)">
+										{{ t('travelmanager', 'Edit trip') }}
+									</NcButton>
+									<NcButton variant="error" @click="askDeleteTrip(row.trip)">
+										{{ t('travelmanager', 'Delete trip') }}
+									</NcButton>
 								</div>
-								<NcButton variant="tertiary" @click="onUnlink(item.id)">
-									{{ t('travelmanager', 'Unlink') }}
-								</NcButton>
-							</li>
-						</ul>
-						<p v-else :class="$style.tripEmpty">
-							{{ t('travelmanager', 'No bookings linked to this trip yet.') }}
-						</p>
-						<div :class="$style.actions">
-							<NcButton variant="secondary" @click="openLink(trip)">
-								{{ t('travelmanager', 'Link booking') }}
-							</NcButton>
-							<NcButton variant="secondary" @click="onEditTrip(trip)">
-								{{ t('travelmanager', 'Edit trip') }}
-							</NcButton>
-							<NcButton variant="error" @click="askDeleteTrip(trip)">
-								{{ t('travelmanager', 'Delete trip') }}
-							</NcButton>
-						</div>
-					</div>
-				</details>
+							</div>
+						</details>
+					</li>
+				</ol>
 			</div>
 			<div v-else-if="view === 'messages'" :class="$style.content">
 				<div :class="$style.tripsToolbar">
@@ -458,7 +590,7 @@ onMounted(reload)
 				     its own, which a table's row-pair markup cannot do. The headings are
 				     therefore plain buttons — table ARIA here would promise a structure
 				     the markup does not have. -->
-				<div v-if="visibleMessages.length > 0" :class="[$style.rowSummary, $style.gridHeader]">
+				<div v-if="visibleMessages.length > 0" :class="[$style.rowSummary, $style.messageColumns, $style.gridHeader]">
 					<span aria-hidden="true" />
 					<button v-for="column in messageColumns"
 						:key="column.key"
@@ -466,7 +598,9 @@ onMounted(reload)
 						:class="[$style.columnHeading, { [$style.columnHeadingActive]: messageSort === column.key }]"
 						@click="onSortColumn(column.key)">
 						{{ column.label }}
-						<span :class="$style.sortMarker" aria-hidden="true">{{ sortMarker(column.key) }}</span>
+						<span :class="$style.sortMarker" aria-hidden="true">
+							{{ sortMarker(messageSort, column.key, messageSortDirection) }}
+						</span>
 					</button>
 				</div>
 				<!-- Dropped entirely when empty, not just left without rows: its own
@@ -474,7 +608,7 @@ onMounted(reload)
 				<ol v-if="visibleMessages.length > 0" :class="$style.rows">
 					<li v-for="item in visibleMessages" :key="item.id">
 						<details :class="$style.row">
-							<summary :class="$style.rowSummary">
+							<summary :class="[$style.rowSummary, $style.messageColumns]">
 								<svg :class="$style.chevron"
 									viewBox="0 0 24 24"
 									width="16"
@@ -487,12 +621,12 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
-								<span :class="$style.rowSender">{{ item.sender || '—' }}</span>
-								<span :class="$style.rowSubject">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
-								<span :class="$style.rowDate">{{ formatTimestamp(item.sentAt) || '—' }}</span>
-								<span :class="$style.rowDate">{{ formatTimestamp(item.processedAt) || '—' }}</span>
-								<span :class="$style.rowAttempts">{{ item.attempts }}</span>
-								<span :class="[$style.badge, $style.rowStatus, { [$style.statusBadge]: item.status === 'failed' || item.status === 'dropped' }]">
+								<span :class="$style.cellText">{{ item.sender || '—' }}</span>
+								<span :class="$style.cellText">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.sentAt) || '—' }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.processedAt) || '—' }}</span>
+								<span :class="$style.cellMeta">{{ item.attempts }}</span>
+								<span :class="[$style.badge, $style.cellStatus, { [$style.statusBadge]: item.status === 'failed' || item.status === 'dropped' }]">
 									{{ messageStatusLabel(item.status) }}
 								</span>
 							</summary>
@@ -563,14 +697,6 @@ onMounted(reload)
 					<h2 :class="$style.tripsHeading">
 						{{ t('travelmanager', 'Bookings') }}
 					</h2>
-					<label :class="$style.sort">
-						{{ t('travelmanager', 'Sort by') }}
-						<select v-model="bookingSort">
-							<option value="upcoming">{{ t('travelmanager', 'Upcoming first') }}</option>
-							<option value="added">{{ t('travelmanager', 'Recently added') }}</option>
-							<option value="updated">{{ t('travelmanager', 'Recently updated') }}</option>
-						</select>
-					</label>
 				</div>
 				<div :class="$style.chips">
 					<NcButton v-for="chip in bookingFilters"
@@ -589,7 +715,7 @@ onMounted(reload)
 						:key="type"
 						:variant="bookingType === type ? 'secondary' : 'tertiary'"
 						@click="bookingType = type">
-						{{ typeLabel(type) }}
+						{{ typeName(type) }}
 					</NcButton>
 				</div>
 				<NcEmptyContent v-if="!loading && filtered.length === 0"
@@ -597,77 +723,115 @@ onMounted(reload)
 					:description="bookings.length === 0
 						? t('travelmanager', 'Travel bookings extracted from your mailbox will appear here as drafts.')
 						: t('travelmanager', 'Try a different filter to see your other bookings.')" />
-				<div v-for="item in filtered"
-					:key="item.id"
-					:class="[$style.card, { [$style.mutedCard]: item.reviewState === 'discarded' || item.reviewState === 'archived' }]">
-					<div :class="$style.cardHeader">
-						<strong>{{ item.title || item.type }}</strong>
-						<span :class="$style.badges">
-							<!-- Provider-side status is only worth showing when it isn't the plain 'active' case. -->
-							<span v-if="item.status !== 'active'" :class="[$style.badge, $style.statusBadge]">{{ item.status }}</span>
-							<span :class="$style.badge">{{ item.reviewState }}</span>
+				<!-- Same grid as Messages: shared .rowSummary/.rows/.gridHeader, with
+				     only the column template differing (see .bookingColumns). -->
+				<div v-if="filtered.length > 0" :class="[$style.rowSummary, $style.bookingColumns, $style.gridHeader]">
+					<span aria-hidden="true" />
+					<button v-for="column in bookingColumns"
+						:key="column.key"
+						type="button"
+						:class="[$style.columnHeading, { [$style.columnHeadingActive]: bookingSort === column.key }]"
+						@click="onSortBookingColumn(column.key)">
+						{{ column.label }}
+						<span :class="$style.sortMarker" aria-hidden="true">
+							{{ sortMarker(bookingSort, column.key, bookingSortDirection) }}
 						</span>
-					</div>
-					<div :class="[$style.fields, $style.meta]">
-						<template v-for="field in bookingHeaderFields(item)" :key="field.label">
-							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-							<span :class="$style.fieldValue">{{ field.value }}</span>
-						</template>
-					</div>
-
-					<!-- Flight: passengers + one row per leg -->
-					<template v-if="item.type === 'flight'">
-						<div v-if="passengerLines(item.details).length > 0" :class="$style.fields">
-							<span :class="$style.fieldLabel">{{ t('travelmanager', 'Passengers') }}</span>
-							<span :class="$style.fieldValue">
-								<span v-for="(line, i) in passengerLines(item.details)" :key="i" :class="$style.passenger">
-									{{ line }}
+					</button>
+				</div>
+				<ol v-if="filtered.length > 0" :class="$style.rows">
+					<li v-for="item in filtered" :key="item.id">
+						<details :class="[$style.row, { [$style.mutedCard]: item.reviewState === 'discarded' || item.reviewState === 'archived' }]">
+							<summary :class="[$style.rowSummary, $style.bookingColumns]">
+								<svg :class="$style.chevron"
+									viewBox="0 0 24 24"
+									width="16"
+									height="16"
+									aria-hidden="true">
+									<path d="M9 5l7 7-7 7"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round" />
+								</svg>
+								<span :class="$style.cellText">{{ item.title || typeName(item.type) }}</span>
+								<span :class="$style.cellText">{{ typeName(item.type) }}</span>
+								<span :class="$style.cellText">{{ item.provider || '—' }}</span>
+								<span :class="$style.cellText">{{ item.bookingReference || '—' }}</span>
+								<span :class="$style.cellMeta">{{ bookingSpan(item) || '—' }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.createdAt) || '—' }}</span>
+								<span :class="[$style.badges, $style.cellStatus]">
+									<!-- Provider-side status only when it isn't the plain 'active'
+									     case; the two axes are orthogonal, so both can show. -->
+									<span v-if="item.status !== 'active'" :class="[$style.badge, $style.statusBadge]">{{ item.status }}</span>
+									<span :class="$style.badge">{{ reviewStateLabel(item.reviewState) }}</span>
 								</span>
-							</span>
-						</div>
-						<ul :class="$style.segments">
-							<li v-for="(seg, i) in (item.details.segments ?? [])" :key="i" :class="$style.segment">
-								<span v-if="(item.details.segments ?? []).length > 1" :class="$style.segmentIndex">
-									{{ t('travelmanager', 'Leg {n}', { n: i + 1 }) }}
-								</span>
-								<div :class="$style.fields">
-									<template v-for="field in flightSegmentFields(seg)" :key="field.label">
+							</summary>
+							<div :class="$style.rowBody">
+								<!-- Only what is not already a column above. -->
+								<div v-if="bookingHeaderFields(item).length > 0" :class="$style.fields">
+									<template v-for="field in bookingHeaderFields(item)" :key="field.label">
 										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
 										<span :class="$style.fieldValue">{{ field.value }}</span>
 									</template>
 								</div>
-							</li>
-						</ul>
-					</template>
 
-					<!-- Car rental / accommodation: a single labelled detail block -->
-					<div v-else-if="item.type === 'car_rental'" :class="[$style.fields, $style.typeFields]">
-						<template v-for="field in carFields(item.details)" :key="field.label">
-							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-							<span :class="$style.fieldValue">{{ field.value }}</span>
-						</template>
-					</div>
-					<div v-else-if="item.type === 'accommodation'" :class="[$style.fields, $style.typeFields]">
-						<template v-for="field in hotelFields(item.details)" :key="field.label">
-							<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-							<span :class="$style.fieldValue">{{ field.value }}</span>
-						</template>
-					</div>
+								<!-- Flight: passengers + one row per leg -->
+								<template v-if="item.type === 'flight'">
+									<div v-if="passengerLines(item.details).length > 0" :class="[$style.fields, $style.typeFields]">
+										<span :class="$style.fieldLabel">{{ t('travelmanager', 'Passengers') }}</span>
+										<span :class="$style.fieldValue">
+											<span v-for="(line, i) in passengerLines(item.details)" :key="i" :class="$style.passenger">
+												{{ line }}
+											</span>
+										</span>
+									</div>
+									<ul :class="$style.segments">
+										<li v-for="(seg, i) in (item.details.segments ?? [])" :key="i" :class="$style.segment">
+											<span v-if="(item.details.segments ?? []).length > 1" :class="$style.segmentIndex">
+												{{ t('travelmanager', 'Leg {n}', { n: i + 1 }) }}
+											</span>
+											<div :class="$style.fields">
+												<template v-for="field in flightSegmentFields(seg)" :key="field.label">
+													<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+													<span :class="$style.fieldValue">{{ field.value }}</span>
+												</template>
+											</div>
+										</li>
+									</ul>
+								</template>
 
-					<div :class="$style.actions">
-						<NcButton v-for="(target, i) in reviewActions(item)"
-							:key="target"
-							:variant="i === 0 ? 'primary' : 'tertiary'"
-							@click="onReview(item.id, target)">
-							{{ actionLabel(item, target) }}
-						</NcButton>
-						<NcButton v-if="item.reviewState === 'discarded' || item.reviewState === 'archived'"
-							variant="tertiary"
-							@click="askDeleteBooking(item)">
-							{{ t('travelmanager', 'Delete permanently') }}
-						</NcButton>
-					</div>
-				</div>
+								<!-- Car rental / accommodation: a single labelled detail block -->
+								<div v-else-if="item.type === 'car_rental'" :class="[$style.fields, $style.typeFields]">
+									<template v-for="field in carFields(item.details)" :key="field.label">
+										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+										<span :class="$style.fieldValue">{{ field.value }}</span>
+									</template>
+								</div>
+								<div v-else-if="item.type === 'accommodation'" :class="[$style.fields, $style.typeFields]">
+									<template v-for="field in hotelFields(item.details)" :key="field.label">
+										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
+										<span :class="$style.fieldValue">{{ field.value }}</span>
+									</template>
+								</div>
+
+								<div :class="$style.actions">
+									<NcButton v-for="(target, i) in reviewActions(item)"
+										:key="target"
+										:variant="i === 0 ? 'primary' : 'tertiary'"
+										@click="onReview(item.id, target)">
+										{{ actionLabel(item, target) }}
+									</NcButton>
+									<NcButton v-if="item.reviewState === 'discarded' || item.reviewState === 'archived'"
+										variant="tertiary"
+										@click="askDeleteBooking(item)">
+										{{ t('travelmanager', 'Delete permanently') }}
+									</NcButton>
+								</div>
+							</div>
+						</details>
+					</li>
+				</ol>
 			</div>
 		</NcAppContent>
 
@@ -757,19 +921,6 @@ onMounted(reload)
 	max-width: none;
 }
 
-.card {
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius-large);
-	padding: 12px 16px;
-	margin-bottom: 12px;
-}
-
-.cardHeader {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-}
-
 .badge {
 	font-size: 0.8em;
 	padding: 2px 8px;
@@ -812,21 +963,39 @@ onMounted(reload)
 	border-top: 1px solid var(--color-border);
 }
 
-/* Fixed metadata columns, not auto: every row is its own grid container, so
-   content-sized columns would land at a different x on each row and the grid
-   would read as ragged. The heading row uses the same template, which is what
-   keeps the headings over their own columns.
-
-   From and Subject share the flexible space 2:3 — the subject is the longer
-   string and the one you read; the sender only needs to be recognisable. */
+/* Shared by both grids (Messages, Bookings); only the column template differs,
+   in the .messageColumns / .bookingColumns modifiers below. The heading row
+   carries the same pair of classes, which is what keeps headings over columns. */
 .rowSummary {
 	display: grid;
-	grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 180px 80px 200px;
 	align-items: center;
 	gap: 12px;
 	padding: 10px 14px;
 	cursor: pointer;
 	list-style: none;
+}
+
+/* Fixed metadata columns, not auto: every row is its own grid container, so
+   content-sized columns would land at a different x on each row and the grid
+   would read as ragged.
+
+   From and Subject share the flexible space 2:3 — the subject is the longer
+   string and the one you read; the sender only needs to be recognisable. */
+.messageColumns {
+	grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 180px 80px 200px;
+}
+
+/* Title takes the lion's share for the same reason Subject does; Provider gets
+   the remaining stretch since supplier names vary far more in length than a
+   type, a reference or a date. */
+.bookingColumns {
+	grid-template-columns: 16px minmax(0, 3fr) 110px minmax(0, 2fr) 140px 190px 165px 135px;
+}
+
+/* Only three columns, so the name takes the stretch and the lozenges get a
+   generous fixed strip — their number varies with the trip's booking types. */
+.tripColumns {
+	grid-template-columns: 16px minmax(0, 1fr) 190px 340px;
 }
 
 .gridHeader {
@@ -899,13 +1068,9 @@ onMounted(reload)
 	outline-offset: -2px;
 }
 
-.rowSubject {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.rowSender {
+/* Three cell types, shared by both grids: free text that may overrun its
+   column, secondary metadata (dates, counts), and the status badges. */
+.cellText {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -914,21 +1079,15 @@ onMounted(reload)
 /* Left-aligned, unlike the old card layout: values now sit under their own
    heading, and a right-aligned column under a left-aligned heading reads as a
    misalignment rather than as a deliberate choice. */
-.rowDate {
+.cellMeta {
 	color: var(--color-text-maxcontrast);
 	font-size: 0.9em;
 	white-space: nowrap;
 	font-variant-numeric: tabular-nums;
 }
 
-.rowAttempts {
-	color: var(--color-text-maxcontrast);
-	font-size: 0.9em;
-	font-variant-numeric: tabular-nums;
-}
-
 /* Left-aligned in a fixed column so the badges start on a common edge. */
-.rowStatus {
+.cellStatus {
 	justify-self: start;
 }
 
@@ -973,25 +1132,55 @@ onMounted(reload)
    one set of nth-child rules hides a column in both — that is the whole reason
    the heading's chevron column is a real (empty) element rather than an offset. */
 @media (max-width: 1100px) {
-	.rowSummary {
+	.messageColumns {
 		grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 200px;
 	}
 
 	/* Last processed, Attempts. */
-	.rowSummary > *:nth-child(5),
-	.rowSummary > *:nth-child(6) {
+	.messageColumns > *:nth-child(5),
+	.messageColumns > *:nth-child(6) {
+		display: none;
+	}
+
+	.bookingColumns {
+		grid-template-columns: 16px minmax(0, 3fr) 110px minmax(0, 2fr) 190px 135px;
+	}
+
+	/* Reference, Added — both are lookups rather than things you scan. */
+	.bookingColumns > *:nth-child(5),
+	.bookingColumns > *:nth-child(7) {
 		display: none;
 	}
 }
 
 @media (max-width: 800px) {
-	.rowSummary {
+	.messageColumns {
 		grid-template-columns: 16px minmax(0, 1fr) auto;
 	}
 
 	/* From, Date received — the subject and the status are what you scan for. */
-	.rowSummary > *:nth-child(2),
-	.rowSummary > *:nth-child(4) {
+	.messageColumns > *:nth-child(2),
+	.messageColumns > *:nth-child(4) {
+		display: none;
+	}
+
+	.bookingColumns {
+		grid-template-columns: 16px minmax(0, 1fr) 190px 135px;
+	}
+
+	/* Type, Provider — the title usually names both anyway ("AMS → SOU"). */
+	.bookingColumns > *:nth-child(3),
+	.bookingColumns > *:nth-child(4) {
+		display: none;
+	}
+
+	/* The lozenge strip is the widest thing here and the least urgent; the
+	   bookings themselves are one click away in the expanded row. */
+	.tripColumns {
+		grid-template-columns: 16px minmax(0, 1fr) 190px;
+	}
+
+	.tripColumns > *:nth-child(4) {
 		display: none;
 	}
 }
@@ -1044,12 +1233,6 @@ onMounted(reload)
 	overflow-wrap: anywhere;
 	background-color: var(--color-background-dark);
 	border-radius: var(--border-radius);
-}
-
-.meta {
-	margin: 8px 0;
-	padding-bottom: 8px;
-	border-bottom: 1px solid var(--color-border);
 }
 
 .typeFields {
@@ -1125,34 +1308,8 @@ onMounted(reload)
 	margin-bottom: 12px;
 }
 
-.sort {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	color: var(--color-text-maxcontrast);
-	white-space: nowrap;
-}
-
 .tripsHeading {
 	margin: 0;
-}
-
-.tripCard {
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius-large);
-	margin-bottom: 12px;
-}
-
-.tripSummary {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 12px 16px;
-	cursor: pointer;
-}
-
-.tripBody {
-	padding: 0 16px 12px;
 }
 
 .tripBookings {

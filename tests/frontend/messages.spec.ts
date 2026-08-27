@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '../../src/api'
 import {
 	filterMessagesByStatus,
-	formatTimestamp,
 	hasDetails,
 	messageDetails,
 	messageNotices,
 	messageStatusLabel,
 	needsAttention,
-	nextSortDirection,
 	retryable,
 	sortMessages,
 } from '../../src/messages'
@@ -188,19 +186,6 @@ describe('sortMessages', () => {
 	})
 })
 
-describe('nextSortDirection', () => {
-	it('starts a new column at its own default', () => {
-		// Dates open newest-first; names open A→Z.
-		expect(nextSortDirection('received', 'sender', 'asc')).toBe('desc')
-		expect(nextSortDirection('sender', 'received', 'desc')).toBe('asc')
-	})
-
-	it('flips the column already sorted on', () => {
-		expect(nextSortDirection('received', 'received', 'desc')).toBe('asc')
-		expect(nextSortDirection('received', 'received', 'asc')).toBe('desc')
-	})
-})
-
 describe('messageDetails', () => {
 	it('pairs the error with what the model actually returned', () => {
 		const block = messageDetails(message({
@@ -223,10 +208,3 @@ describe('messageDetails', () => {
 	})
 })
 
-describe('formatTimestamp', () => {
-	it('renders an ATOM timestamp and passes through what it cannot parse', () => {
-		expect(formatTimestamp('2026-08-14T10:00:00+00:00')).not.toBe('')
-		expect(formatTimestamp(null)).toBe('')
-		expect(formatTimestamp('not a date')).toBe('not a date')
-	})
-})

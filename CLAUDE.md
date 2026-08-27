@@ -31,9 +31,13 @@ TaskSuccessfulEvent / TaskFailedEvent
        ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
        └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
 UI (Vue, OCS API) — three views: Bookings | Trips | Messages
-  ├─ Bookings: filter by review state + type, sort (upcoming/added/updated);
+  ├─ Bookings: sortable grid (Title | Type | Provider | Reference | Travel
+  │            dates | Added | Status), rows expand to the type-specific fields;
+  │            filter by review state + type;
   │            confirm / edit / discard / archive / restore
-  ├─ Trips:    group bookings into trips
+  ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
+  │            lozenges derived from the linked bookings; filter All/Current/
+  │            Future/Past; rows expand to link/unlink and edit
   └─ Messages: the ingestion ledger as a sortable grid (From | Subject | Date
                received | Last processed | Attempts | Status), rows expand for
                details; filter by status, retry failed extractions
@@ -259,21 +263,72 @@ Build/implement order from here: end-to-end flight extraction (single user) →
 prompt tuning on real emails → **archive sweep + `body_text`/`last_response` GC**
 → multi-user fan-out.
 
+### Provenance: message ↔ booking ↔ trip (standing consideration, not yet built)
+
+**The user must always be able to see where a piece of information came from.**
+Treat navigable links between the three entities as a first-class goal, and weigh
+any design decision against whether it preserves or destroys that trail — this is
+a recurring consideration, not a one-off feature request.
+
+State of the linkage as of 2026-08-27 (assessed, deliberately parked):
+- `bookings.source_message_id` (RFC Message-ID) is written on every insert and,
+  because nothing updates an existing booking, genuinely means *created by*. It
+  is **not** in `Booking::jsonSerialize()`/`TravelManagerBooking`, so the UI has
+  never seen it — exposing it is the one-line prerequisite for either direction.
+- **Booking → message** is the easy direction: one-to-one, key on the booking, no
+  schema change. Caveat: `findAllForUser` caps the message list at 200, so an old
+  booking's message may not be in the loaded set.
+- **Message → booking** is one-to-**many** (one email can yield a flight *and* a
+  hotel), and the `related` rows — the case where you would most want the jump —
+  record the matched booking's id **only as prose** inside `messages.error`
+  (`describeRelated`: "matches the existing booking #12"). Same shape of problem
+  that `issue_reasons` solved: it would want a real `related_booking_id` column.
+- There is **no vue-router and no hash routing**; `view` is a plain ref, so a
+  booking is not addressable. A `focusBookingId` ref would work but must bypass
+  the review-state filter (or jumping to a discarded booking lands on an empty
+  list), and risks re-creating the view/filter conflation warned about below.
+  Real routing is the honest foundation if deep links are ever wanted.
+
 **UI structure (§2).** `view` selects one of the three views; each view owns its
 filter/sort refs. Do not conflate the two again — the original single `filter`
 ref made "All bookings" a status and "Trips" a view, which is why adding a
 Messages view needed this untangling. All filtering/sorting is **client-side and
 pure** (`sortBookings`/`filterBookings` in `src/bookings.ts`,
-`sortMessages`/`filterMessagesByStatus` in `src/messages.ts`) so it stays
-unit-testable without `@nextcloud/*` runtime imports (§7).
+`sortMessages`/`filterMessagesByStatus` in `src/messages.ts`,
+`sortTrips`/`filterTripsByPeriod`/`tripRows` in `src/trips.ts`, shared helpers in
+`src/grid.ts`) so it stays unit-testable without `@nextcloud/*` runtime
+imports (§7).
 
-The **Messages grid** is a CSS grid, not a `<table>`: each row is a native
-`<details>`, which a table's two-`<tr>` row pair cannot be without hand-rolling
-the open/closed state. Consequences to preserve:
-- The heading row and each message row use the **same `.rowSummary` grid
-  template and the same cell order**, so one set of `nth-child` rules hides a
-  column in both at a breakpoint. The heading's chevron cell is a real (empty)
-  element for exactly this reason — do not replace it with an offset.
+**All three views are the same grid**, built from one set of CSS classes
+(`.rows`, `.rowSummary`, `.gridHeader`, `.columnHeading`, `.chevron`, `.rowBody`,
+`.cellText`/`.cellMeta`/`.cellStatus`) plus a per-view column template
+(`.messageColumns` / `.bookingColumns` / `.tripColumns`). Sort behaviour shared
+via **`src/grid.ts`** (`SortColumn`, `SortDirection`, `nextSortDirection`,
+`formatSpan`, `formatTimestamp`) so no view's module imports another's. Keep them
+in step: a change to one grid's look belongs in the shared classes, not copied
+into a second set.
+
+It is a CSS grid, not a `<table>`: each row is a native `<details>`, which a
+table's two-`<tr>` row pair cannot be without hand-rolling the open/closed state.
+Consequences to preserve:
+- The heading row and each data row use the **same `.rowSummary` + column-template
+  pair and the same cell order**, so one set of `nth-child` rules hides a column
+  in both at a breakpoint. The heading's chevron cell is a real (empty) element
+  for exactly this reason — do not replace it with an offset.
+- **`sortBookings('travel', 'asc')` is deliberately not a plain date sort**: next
+  trip first, then further-off ones, *then past travel in reverse*, undated last.
+  Ascending by date would bury what is coming up under everything that already
+  happened. Descending is plain reverse chronology (looking back, not ahead).
+- **`sortTrips('travel')` is the opposite call, on purpose**: a plain chronology,
+  because the Current/Future/Past chips already answer "what is coming up" and
+  re-ranking the column around today as well would fight them.
+- **Trip dates and type lozenges are derived, never read from `trips.start_date`/
+  `end_date`** (`tripRows`/`tripSpan` in `src/trips.ts`): the stored columns are
+  user-entered and go stale the moment a booking is linked or unlinked, so the
+  grid would disagree with the rows underneath it. A booking with no end date
+  contributes its start, so a one-day hire still extends the trip. `TripPeriod`
+  keeps **`undated`** as its own case — such trips appear under **All only**,
+  because filing them under a period would make the period filters lie.
 - Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
   + `aria-sort`: grid ARIA would promise a table structure the markup does not
   have. Sort state is `messageSort` + `messageSortDirection`; `MESSAGE_COLUMNS`

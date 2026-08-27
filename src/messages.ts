@@ -1,4 +1,5 @@
 import type { Message } from './api'
+import type { SortColumn, SortDirection } from './grid'
 
 /**
  * Human labels for the ingestion ledger's statuses. The wording matters here:
@@ -58,19 +59,8 @@ export const filterMessagesByStatus = (items: Message[], status: string): Messag
 /** The grid's sortable columns — one per column heading. */
 export type MessageSort = 'sender' | 'subject' | 'received' | 'processed' | 'attempts' | 'status'
 
-/** Which way a column is ordered. */
-export type SortDirection = 'asc' | 'desc'
-
-/**
- * The Messages grid's columns, in display order. Dates and counts default to
- * descending (newest / most attempts first — what you came to look at), text to
- * ascending (A→Z, which is what "sort by name" means to everyone).
- *
- * Labels live in the component: `t()` needs literal strings to be extractable,
- * and this module stays free of @nextcloud/* imports so it can be unit-tested
- * standalone (§7 of CLAUDE.md).
- */
-export const MESSAGE_COLUMNS: { key: MessageSort, defaultDirection: SortDirection }[] = [
+/** The Messages grid's columns, in display order. See SortColumn in ./grid. */
+export const MESSAGE_COLUMNS: SortColumn<MessageSort>[] = [
 	{ key: 'sender', defaultDirection: 'asc' },
 	{ key: 'subject', defaultDirection: 'asc' },
 	{ key: 'received', defaultDirection: 'desc' },
@@ -128,41 +118,6 @@ export const sortMessages = (items: Message[], sort: MessageSort, direction: Sor
 		}
 		return av < bv ? -sign : sign
 	})
-}
-
-/**
- * The direction a column should take when the user clicks its heading: its own
- * default on first click, then flipped on every click after that.
- * @param column the heading that was clicked
- * @param current the column currently sorted on
- * @param direction the direction currently applied
- */
-export const nextSortDirection = (
-	column: MessageSort,
-	current: MessageSort,
-	direction: SortDirection,
-): SortDirection => {
-	if (column !== current) {
-		return MESSAGE_COLUMNS.find((c) => c.key === column)?.defaultDirection ?? 'desc'
-	}
-	return direction === 'asc' ? 'desc' : 'asc'
-}
-
-/**
- * Format an ATOM timestamp for display in the viewer's own locale/timezone.
- * Unlike booking times (local wall-clock at the destination, never converted —
- * see V8), these are real instants, so converting is correct.
- * @param value the ATOM timestamp, or null
- */
-export const formatTimestamp = (value: string | null): string => {
-	if (!value) {
-		return ''
-	}
-	const date = new Date(value)
-	if (Number.isNaN(date.getTime())) {
-		return value
-	}
-	return date.toLocaleString()
 }
 
 /**

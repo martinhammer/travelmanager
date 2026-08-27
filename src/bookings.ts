@@ -1,3 +1,5 @@
+import type { SortColumn, SortDirection } from './grid'
+import { formatSpan } from './grid'
 import type {
 	Booking,
 	CarDetails,
@@ -99,18 +101,24 @@ const collect = (fields: SegmentField[], label: string, value: string | null | u
 }
 
 /**
- * The booking's cross-type header fields (type, provider, reference numbers),
- * rendered with the same label/value layout as the type-specific detail rows.
+ * The cross-type fields that are *not* already grid columns — today only the
+ * confirmation number. Type, provider and booking reference used to live here
+ * too; they moved to columns, and repeating them in the expanded row would just
+ * be the same value twice.
  * @param booking the booking to describe
  */
 export const bookingHeaderFields = (booking: Booking): SegmentField[] => {
 	const fields: SegmentField[] = []
-	collect(fields, 'Booking type', booking.type)
-	collect(fields, booking.type === 'car_rental' ? 'Supplier' : 'Provider', booking.provider)
-	collect(fields, 'Booking reference', booking.bookingReference)
 	collect(fields, 'Confirmation number', booking.confirmationNumber)
 	return fields
 }
+
+/**
+ * The booking's travel span for the grid's Travel dates column.
+ * @param booking the booking to describe
+ */
+export const bookingSpan = (booking: Booking): string =>
+	formatSpan(booking.startDate, booking.endDate)
 
 /**
  * Labelled fields for one flight leg. Only populated fields are returned so a
@@ -196,8 +204,26 @@ export const passengerLines = (details: FlightDetails): string[] =>
 export const filterByReviewState = (items: Booking[], reviewState: string): Booking[] =>
 	reviewState === 'all' ? items : items.filter((item) => item.reviewState === reviewState)
 
-/** How the bookings list is ordered. */
-export type BookingSort = 'upcoming' | 'added' | 'updated'
+/** The Bookings grid's sortable columns — one per column heading. */
+export type BookingSort = 'title' | 'type' | 'provider' | 'reference' | 'travel' | 'added' | 'reviewState'
+
+/**
+ * The Bookings grid's columns, in display order. Same contract as
+ * MESSAGE_COLUMNS: labels live in the component so `t()` sees literal strings
+ * and this module stays free of @nextcloud/* imports (§7 of CLAUDE.md).
+ *
+ * 'travel' is the default, and the only column with an ordering specific to
+ * travel rather than to text or time — see sortBookings.
+ */
+export const BOOKING_COLUMNS: SortColumn<BookingSort>[] = [
+	{ key: 'title', defaultDirection: 'asc' },
+	{ key: 'type', defaultDirection: 'asc' },
+	{ key: 'provider', defaultDirection: 'asc' },
+	{ key: 'reference', defaultDirection: 'asc' },
+	{ key: 'travel', defaultDirection: 'asc' },
+	{ key: 'added', defaultDirection: 'desc' },
+	{ key: 'reviewState', defaultDirection: 'asc' },
+]
 
 // Sorts a nullable ISO-ish string descending, with nulls always last.
 const byDateDesc = (a: string | null, b: string | null): number => {
@@ -213,47 +239,87 @@ const byDateDesc = (a: string | null, b: string | null): number => {
 	return a < b ? 1 : -1
 }
 
+// The value a column sorts on; strings lowercased so case never splits a group.
+const sortValue = (item: Booking, sort: BookingSort): string | null => {
+	switch (sort) {
+	case 'title':
+		return item.title?.toLowerCase() || null
+	case 'type':
+		return item.type.toLowerCase()
+	case 'provider':
+		return item.provider?.toLowerCase() || null
+	case 'reference':
+		return item.bookingReference?.toLowerCase() || null
+	case 'travel':
+		return item.startDate
+	case 'added':
+		return item.createdAt
+	case 'reviewState':
+		return item.reviewState
+	}
+}
+
 /**
- * Order bookings for display.
+ * Order bookings by one column, valueless rows last in both directions.
  *
- * 'upcoming' is the default and the only one specific to travel: the next trip
- * first, then further-off ones, with past travel below in reverse order and
+ * 'travel' ascending is special-cased and is the view's default: the next trip
+ * first, then further-off ones, with **past travel below in reverse order** and
  * undated bookings last. Plain ascending by date would bury what is coming up
- * under everything that already happened.
+ * under everything that already happened — which is the whole reason this view
+ * does not simply sort the column like any other. Descending is a plain reverse
+ * chronology, for when you are looking back rather than ahead.
  * @param items the bookings to order (not mutated)
- * @param sort the ordering to apply
+ * @param sort the column to order by
+ * @param direction 'asc' or 'desc'
  * @param now reference point for "past"; injectable so tests do not depend on today
  */
-export const sortBookings = (items: Booking[], sort: BookingSort, now: Date = new Date()): Booking[] => {
+export const sortBookings = (
+	items: Booking[],
+	sort: BookingSort,
+	direction: SortDirection = 'asc',
+	now: Date = new Date(),
+): Booking[] => {
 	const copy = [...items]
-	if (sort === 'added') {
-		return copy.sort((a, b) => byDateDesc(a.createdAt, b.createdAt))
-	}
-	if (sort === 'updated') {
-		return copy.sort((a, b) => byDateDesc(a.updatedAt, b.updatedAt))
+
+	if (sort === 'travel' && direction === 'asc') {
+		// Compare against local wall-clock (V8: booking times carry no offset).
+		const today = now.toISOString().slice(0, 19)
+		const rank = (item: Booking): number => {
+			if (!item.startDate) {
+				return 2
+			}
+			return item.startDate >= today ? 0 : 1
+		}
+		return copy.sort((a, b) => {
+			const ra = rank(a)
+			const rb = rank(b)
+			if (ra !== rb) {
+				return ra - rb
+			}
+			if (ra === 2) {
+				return byDateDesc(a.createdAt, b.createdAt)
+			}
+			// Upcoming ascending (soonest first); past descending (most recent first).
+			return ra === 0
+				? (a.startDate! < b.startDate! ? -1 : 1)
+				: byDateDesc(a.startDate, b.startDate)
+		})
 	}
 
-	// Compare against local wall-clock (V8: booking times carry no offset).
-	const today = now.toISOString().slice(0, 19)
-	const rank = (item: Booking): number => {
-		if (!item.startDate) {
-			return 2
-		}
-		return item.startDate >= today ? 0 : 1
-	}
+	const sign = direction === 'asc' ? 1 : -1
 	return copy.sort((a, b) => {
-		const ra = rank(a)
-		const rb = rank(b)
-		if (ra !== rb) {
-			return ra - rb
+		const av = sortValue(a, sort)
+		const bv = sortValue(b, sort)
+		if (av === bv) {
+			return 0
 		}
-		if (ra === 2) {
-			return byDateDesc(a.createdAt, b.createdAt)
+		if (av === null) {
+			return 1
 		}
-		// Upcoming ascending (soonest first); past descending (most recent first).
-		return ra === 0
-			? (a.startDate! < b.startDate! ? -1 : 1)
-			: byDateDesc(a.startDate, b.startDate)
+		if (bv === null) {
+			return -1
+		}
+		return av < bv ? -sign : sign
 	})
 }
 
