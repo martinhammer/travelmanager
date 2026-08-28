@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Booking, Trip } from '../../src/api'
 import {
+	canCreateTrip,
 	filterTripsByPeriod,
+	searchTrips,
 	sortTrips,
+	suggestedTrips,
 	tripPeriod,
 	tripRows,
 	tripSpan,
@@ -89,6 +92,20 @@ describe('tripRows', () => {
 		booking({ id: 4, tripId: 2, type: 'car_rental', startDate: '2026-06-01T09:00:00', endDate: null }),
 	]
 
+	it('lists the bookings in travel order, not the order they were ingested', () => {
+		// The API returns newest-ingested first, so the outbound flight would
+		// otherwise show up last.
+		const shuffled = [bookings[2], bookings[0], bookings[1]]
+		const [row] = tripRows([trip({ id: 1 })], shuffled, now)
+		expect(row.bookings.map((b) => b.id)).toEqual([1, 2, 3])
+	})
+
+	it('puts a booking with no dates last, having nowhere else to put it', () => {
+		const withUndated = [...bookings, booking({ id: 5, tripId: 1, startDate: null })]
+		const [row] = tripRows([trip({ id: 1 })], withUndated, now)
+		expect(row.bookings.at(-1)?.id).toBe(5)
+	})
+
 	it('derives span, distinct types and period from the linked bookings', () => {
 		const [first] = tripRows([trip({ id: 1 })], bookings, now)
 		expect(first.bookings.map((b) => b.id)).toEqual([1, 2, 3])
@@ -165,5 +182,88 @@ describe('sortTrips', () => {
 		const copy = [...rows]
 		sortTrips(rows, 'name', 'asc')
 		expect(rows).toEqual(copy)
+	})
+})
+
+describe('suggestedTrips', () => {
+	// Norway runs 14–28 Aug; Christmas is months away; Canary has no dates.
+	const rows = tripRows(
+		[trip({ id: 1, name: 'Norway' }), trip({ id: 2, name: 'Christmas' }), trip({ id: 3, name: 'Canary' })],
+		[
+			booking({ id: 1, tripId: 1, startDate: '2026-08-14T08:00:00', endDate: '2026-08-28T20:00:00' }),
+			booking({ id: 2, tripId: 2, startDate: '2026-12-22T08:00:00', endDate: '2026-12-28T20:00:00' }),
+			booking({ id: 3, tripId: 3, startDate: null }),
+		],
+		now,
+	)
+
+	it('suggests the trip whose dates the booking falls inside', () => {
+		const candidate = booking({ tripId: null, startDate: '2026-08-20T09:00:00', endDate: '2026-08-22T09:00:00' })
+		expect(suggestedTrips(rows, candidate).map((r) => r.trip.id)).toEqual([1])
+	})
+
+	it('allows two days of slack — a flight home lands after checkout', () => {
+		const dayAfter = booking({ tripId: null, startDate: '2026-08-30T06:00:00', endDate: null })
+		expect(suggestedTrips(rows, dayAfter).map((r) => r.trip.id)).toEqual([1])
+		// ...but not indefinitely.
+		const weekAfter = booking({ tripId: null, startDate: '2026-09-04T06:00:00', endDate: null })
+		expect(suggestedTrips(rows, weekAfter)).toEqual([])
+	})
+
+	it('suggests nothing for a booking with no dates, so the section disappears', () => {
+		expect(suggestedTrips(rows, booking({ startDate: null }))).toEqual([])
+	})
+
+	it('never suggests a trip with no dated bookings — there is nothing to compare', () => {
+		const candidate = booking({ startDate: '2026-08-20T09:00:00' })
+		expect(suggestedTrips(rows, candidate).map((r) => r.trip.id)).not.toContain(3)
+	})
+
+	it('orders by nearest start when several overlap', () => {
+		const overlapping = tripRows(
+			[trip({ id: 1, name: 'Far' }), trip({ id: 2, name: 'Near' })],
+			[
+				booking({ id: 1, tripId: 1, startDate: '2026-08-01T08:00:00', endDate: '2026-08-30T20:00:00' }),
+				booking({ id: 2, tripId: 2, startDate: '2026-08-19T08:00:00', endDate: '2026-08-25T20:00:00' }),
+			],
+			now,
+		)
+		const candidate = booking({ startDate: '2026-08-20T09:00:00', endDate: '2026-08-21T09:00:00' })
+		expect(suggestedTrips(overlapping, candidate).map((r) => r.trip.id)).toEqual([2, 1])
+	})
+})
+
+describe('searchTrips', () => {
+	const rows = tripRows(
+		[trip({ id: 1, name: 'Norway' }), trip({ id: 2, name: 'Christmas in Oslo' }), trip({ id: 3, name: 'Canary' })],
+		[
+			booking({ id: 1, tripId: 1, startDate: '2026-08-14T08:00:00' }),
+			booking({ id: 2, tripId: 2, startDate: '2026-12-22T08:00:00' }),
+		],
+		now,
+	)
+
+	it('matches case-insensitively on any part of the name', () => {
+		expect(searchTrips(rows, 'osl').map((r) => r.trip.id)).toEqual([2])
+	})
+
+	it('returns everything for an empty query, most recent travel first, undated last', () => {
+		expect(searchTrips(rows, '').map((r) => r.trip.id)).toEqual([2, 1, 3])
+	})
+})
+
+describe('canCreateTrip', () => {
+	const rows = tripRows([trip({ id: 1, name: 'Norway' })], [], now)
+
+	it('offers to create a name that does not exist yet', () => {
+		expect(canCreateTrip(rows, 'Ski trip')).toBe(true)
+	})
+
+	it('does not offer a duplicate, whatever the casing or padding', () => {
+		expect(canCreateTrip(rows, '  norway ')).toBe(false)
+	})
+
+	it('offers nothing for an empty search', () => {
+		expect(canCreateTrip(rows, '   ')).toBe(false)
 	})
 })

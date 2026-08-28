@@ -4,6 +4,7 @@ import NcAppContent from '@nextcloud/vue/components/NcAppContent'
 import NcAppNavigation from '@nextcloud/vue/components/NcAppNavigation'
 import NcAppNavigationItem from '@nextcloud/vue/components/NcAppNavigationItem'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcContent from '@nextcloud/vue/components/NcContent'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
@@ -66,8 +67,11 @@ import {
 import {
 	type TripSort,
 	TRIP_COLUMNS,
+	canCreateTrip,
 	filterTripsByPeriod,
+	searchTrips,
 	sortTrips,
+	suggestedTrips,
 	tripRows,
 } from './trips'
 
@@ -103,12 +107,33 @@ const deleteTripTarget = ref<Trip | null>(null)
 // Permanent booking-deletion confirmation state.
 const deleteBookingOpen = ref(false)
 const deleteBookingTarget = ref<Booking | null>(null)
+// Confirming a draft: the moment a booking becomes something you have decided to
+// keep, which is the natural point to say what trip it belongs to.
+const confirmOpen = ref(false)
+const confirmTarget = ref<Booking | null>(null)
+// One selection across both sections of the dialog: a trip id, 'none', or 'new'
+// (create whatever is typed in the search box). Nothing is selected initially —
+// a pre-selected suggestion would link silently on a wrong guess.
+const confirmChoice = ref<string>('')
+const confirmSearch = ref('')
+const confirmBusy = ref(false)
+
+// Names by id, so the Trip column can render and sort on the name rather than
+// the foreign key. Built once per change instead of scanned per row.
+const tripNames = computed(() => Object.fromEntries(
+	trips.value.map((trip) => [trip.id, tripLabel(trip)]),
+))
 
 const filtered = computed(() => sortBookings(
 	filterBookings(bookings.value, bookingFilter.value, bookingType.value),
 	bookingSort.value,
 	bookingSortDirection.value,
+	new Date(),
+	tripNames.value,
 ))
+
+const tripNameFor = (tripId: number | null): string =>
+	tripId === null ? '' : (tripNames.value[tripId] ?? '')
 
 const visibleMessages = computed(() => sortMessages(
 	filterMessagesByStatus(messages.value, messageFilter.value),
@@ -116,11 +141,30 @@ const visibleMessages = computed(() => sortMessages(
 	messageSortDirection.value,
 ))
 
+// Derived once and shared: the Trips grid filters and sorts these, and the
+// confirm dialog reads the same rows so both describe a trip identically.
+const allTripRows = computed(() => tripRows(trips.value, bookings.value))
+
 const visibleTrips = computed(() => sortTrips(
-	filterTripsByPeriod(tripRows(trips.value, bookings.value), tripFilter.value),
+	filterTripsByPeriod(allTripRows.value, tripFilter.value),
 	tripSort.value,
 	tripSortDirection.value,
 ))
+
+/**
+ * A trip's dates and size, for choosing between trips in a dialog.
+ * @param tripId the trip to describe
+ */
+const tripSummary = (tripId: number): string => {
+	const row = allTripRows.value.find((r) => r.trip.id === tripId)
+	if (row === undefined) {
+		return ''
+	}
+	return [
+		formatSpan(row.start, row.end) || null,
+		t('travelmanager', '{n} booking(s)', { n: row.bookings.length }),
+	].filter(Boolean).join(' · ')
+}
 
 // Literal t() calls so the strings are extractable; order and default direction
 // come from MESSAGE_COLUMNS so the two cannot drift apart.
@@ -140,6 +184,7 @@ const messageColumns = MESSAGE_COLUMNS.map((column) => ({
 
 const bookingColumnLabels: Record<BookingSort, string> = {
 	title: t('travelmanager', 'Title'),
+	trip: t('travelmanager', 'Trip'),
 	type: t('travelmanager', 'Type'),
 	provider: t('travelmanager', 'Provider'),
 	reference: t('travelmanager', 'Reference'),
@@ -223,6 +268,29 @@ const reviewStateLabels: Record<string, string> = {
 }
 
 const reviewStateLabel = (state: string): string => reviewStateLabels[state] ?? state
+
+// The other state axis: a fact about the booking, set from the email.
+const bookingStatusLabels: Record<string, string> = {
+	active: t('travelmanager', 'Active'),
+	cancelled: t('travelmanager', 'Cancelled'),
+	superseded: t('travelmanager', 'Superseded'),
+}
+
+const bookingStatusLabel = (status: string): string => bookingStatusLabels[status] ?? status
+
+/**
+ * One-line description of a booking for the places it appears as a list item
+ * rather than a grid row (a trip's contents, the link dialog). 'active' is left
+ * out: it is the ordinary case and saying so on every row is noise — only a
+ * cancellation or supersession is worth the reader's attention.
+ * @param item the booking to describe
+ */
+const bookingMeta = (item: Booking): string => [
+	typeName(item.type),
+	reviewStateLabel(item.reviewState),
+	item.status === 'active' ? null : bookingStatusLabel(item.status),
+	bookingSpan(item) || null,
+].filter(Boolean).join(' · ')
 
 // Only offer type filters that exist in the data — an empty "Car rental" filter
 // is just a dead end.
@@ -333,6 +401,132 @@ const onReview = async (id: number, target: ReviewState) => {
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update the booking'))
+	}
+}
+
+/**
+ * Confirming a *draft* asks which trip it belongs to first; every other review
+ * transition applies straight away. Restoring a discarded booking also targets
+ * 'confirmed', but it is not a first decision and may already have a trip — hence
+ * the reviewState check rather than a target check alone.
+ * @param item the booking being acted on
+ * @param target the review state the button moves it to
+ */
+const onReviewAction = (item: Booking, target: ReviewState) => {
+	if (target === 'confirmed' && item.reviewState === 'draft') {
+		openTripDialog(item)
+		return
+	}
+	onReview(item.id, target)
+}
+
+/**
+ * Open the trip picker for a booking — as the second half of confirming a draft,
+ * or on its own for a confirmed booking that never got grouped.
+ * @param item the booking to file
+ */
+const openTripDialog = (item: Booking) => {
+	confirmTarget.value = item
+	// A booking that already has a trip opens with it selected — the dialog is
+	// then showing you where it is, not asking you to start from nothing. A draft
+	// still starts empty: nothing pre-selected, so a wrong guess cannot slip
+	// through on a single click.
+	confirmChoice.value = item.tripId === null ? '' : String(item.tripId)
+	confirmSearch.value = ''
+	confirmOpen.value = true
+}
+
+// Whether the dialog is also confirming, or only re-filing an already-confirmed
+// booking. Drives its wording and whether "No trip" is worth offering.
+const confirmIsDraft = computed(() => confirmTarget.value?.reviewState === 'draft')
+const confirmHasTrip = computed(() => confirmTarget.value?.tripId != null)
+
+/**
+ * Archiving and discarding are never the obvious next thing to do, so they never
+ * take the primary slot; confirming and restoring are.
+ * @param target the review state the button moves the booking to
+ */
+const reviewVariant = (target: ReviewState): 'primary' | 'secondary' =>
+	target === 'archived' || target === 'discarded' ? 'secondary' : 'primary'
+
+// Trips whose dates line up with the booking's own — almost always the one you
+// want. Hidden while searching: once you type you are browsing deliberately, and
+// a pinned suggestion above filtered results is just noise.
+const confirmSuggestions = computed(() => {
+	if (confirmTarget.value === null || confirmSearch.value.trim() !== '') {
+		return []
+	}
+	return suggestedTrips(allTripRows.value, confirmTarget.value)
+})
+
+// The full list, minus anything already shown as a suggestion.
+const confirmCandidates = computed(() => {
+	const suggested = new Set(confirmSuggestions.value.map((row) => row.trip.id))
+	return searchTrips(allTripRows.value, confirmSearch.value).filter((row) => !suggested.has(row.trip.id))
+})
+
+const confirmCanCreate = computed(() => canCreateTrip(allTripRows.value, confirmSearch.value))
+
+/**
+ * Enter in the search box takes the create row when there is one, otherwise the
+ * first match — so a name can be typed and committed without reaching for the
+ * mouse.
+ */
+const onConfirmSearchEnter = () => {
+	if (confirmCanCreate.value) {
+		confirmChoice.value = 'new'
+		return
+	}
+	const first = confirmCandidates.value[0]
+	if (first !== undefined) {
+		confirmChoice.value = String(first.trip.id)
+	}
+}
+
+/**
+ * Apply the dialog: create the trip if asked, link unless "No trip", and confirm
+ * when the booking was still a draft. The link is applied *before* the review
+ * change so a failure there leaves the booking a draft — recoverable by pressing
+ * Confirm again — rather than confirmed but orphaned.
+ */
+const submitConfirm = async () => {
+	const item = confirmTarget.value
+	if (item === null || confirmBusy.value || confirmChoice.value === '') {
+		return
+	}
+	const confirming = confirmIsDraft.value
+	confirmBusy.value = true
+	try {
+		let tripId: number | null = null
+		if (confirmChoice.value === 'new') {
+			tripId = (await createTrip(confirmSearch.value.trim())).id
+		} else if (confirmChoice.value !== 'none') {
+			tripId = Number(confirmChoice.value)
+		}
+		// One call covers linking, moving and unlinking; skipped when the choice
+		// is the trip the booking is already on, which is the ordinary outcome of
+		// opening the dialog just to look.
+		const changed = tripId !== item.tripId
+		if (changed) {
+			await assignBookingToTrip(item.id, tripId)
+		}
+		if (confirming) {
+			await setBookingReviewState(item.id, 'confirmed')
+		}
+		if (confirming) {
+			showSuccess(reviewLabels.confirmed.done)
+		} else if (changed) {
+			showSuccess(tripId === null
+				? t('travelmanager', 'Booking removed from the trip')
+				: t('travelmanager', 'Booking added to the trip'))
+		}
+		confirmOpen.value = false
+		confirmTarget.value = null
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not update the booking'))
+	} finally {
+		confirmBusy.value = false
 	}
 }
 
@@ -520,7 +714,7 @@ onMounted(reload)
 										stroke-linejoin="round" />
 								</svg>
 								<span :class="$style.cellText">{{ tripLabel(row.trip) }}</span>
-								<span :class="$style.cellMeta">{{ formatSpan(row.start, row.end) || '—' }}</span>
+								<span :class="$style.cellMeta">{{ formatSpan(row.start, row.end) }}</span>
 								<!-- Count plus one lozenge per distinct type: what the trip is
 								     made of, without opening it. -->
 								<span :class="[$style.badges, $style.cellStatus]">
@@ -534,25 +728,22 @@ onMounted(reload)
 							</summary>
 							<div :class="$style.rowBody">
 								<ul v-if="row.bookings.length > 0" :class="$style.tripBookings">
+									<!-- Read-only here: linking and unlinking both happen in the
+									     Bookings dialog, so there is one place that changes what a
+									     trip contains. -->
 									<li v-for="item in row.bookings" :key="item.id" :class="$style.tripBooking">
 										<div :class="$style.tripBookingInfo">
 											<strong>{{ bookingLabel(item) }}</strong>
-											<span :class="$style.tripBookingMeta">
-												{{ typeName(item.type) }} · {{ reviewStateLabel(item.reviewState) }}
-												<template v-if="bookingSpan(item)"> · {{ bookingSpan(item) }}</template>
-											</span>
+											<span :class="$style.tripBookingMeta">{{ bookingMeta(item) }}</span>
 										</div>
-										<NcButton variant="tertiary" @click="onUnlink(item.id)">
-											{{ t('travelmanager', 'Unlink') }}
-										</NcButton>
 									</li>
 								</ul>
 								<p v-else :class="$style.tripEmpty">
 									{{ t('travelmanager', 'No bookings linked to this trip yet.') }}
 								</p>
 								<div :class="$style.actions">
-									<NcButton variant="secondary" @click="openLink(row.trip)">
-										{{ t('travelmanager', 'Link booking') }}
+									<NcButton variant="primary" @click="openLink(row.trip)">
+										{{ t('travelmanager', 'Bookings') }}
 									</NcButton>
 									<NcButton variant="secondary" @click="onEditTrip(row.trip)">
 										{{ t('travelmanager', 'Edit trip') }}
@@ -621,10 +812,10 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
-								<span :class="$style.cellText">{{ item.sender || '—' }}</span>
+								<span :class="$style.cellText">{{ item.sender }}</span>
 								<span :class="$style.cellText">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
-								<span :class="$style.cellMeta">{{ formatTimestamp(item.sentAt) || '—' }}</span>
-								<span :class="$style.cellMeta">{{ formatTimestamp(item.processedAt) || '—' }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.sentAt) }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.processedAt) }}</span>
 								<span :class="$style.cellMeta">{{ item.attempts }}</span>
 								<span :class="[$style.badge, $style.cellStatus, { [$style.statusBadge]: item.status === 'failed' || item.status === 'dropped' }]">
 									{{ messageStatusLabel(item.status) }}
@@ -755,15 +946,16 @@ onMounted(reload)
 										stroke-linejoin="round" />
 								</svg>
 								<span :class="$style.cellText">{{ item.title || typeName(item.type) }}</span>
+								<span :class="$style.cellText">{{ tripNameFor(item.tripId) }}</span>
 								<span :class="$style.cellText">{{ typeName(item.type) }}</span>
-								<span :class="$style.cellText">{{ item.provider || '—' }}</span>
-								<span :class="$style.cellText">{{ item.bookingReference || '—' }}</span>
-								<span :class="$style.cellMeta">{{ bookingSpan(item) || '—' }}</span>
-								<span :class="$style.cellMeta">{{ formatTimestamp(item.createdAt) || '—' }}</span>
+								<span :class="$style.cellText">{{ item.provider }}</span>
+								<span :class="$style.cellText">{{ item.bookingReference }}</span>
+								<span :class="$style.cellMeta">{{ bookingSpan(item) }}</span>
+								<span :class="$style.cellMeta">{{ formatTimestamp(item.createdAt) }}</span>
 								<span :class="[$style.badges, $style.cellStatus]">
 									<!-- Provider-side status only when it isn't the plain 'active'
 									     case; the two axes are orthogonal, so both can show. -->
-									<span v-if="item.status !== 'active'" :class="[$style.badge, $style.statusBadge]">{{ item.status }}</span>
+									<span v-if="item.status !== 'active'" :class="[$style.badge, $style.statusBadge]">{{ bookingStatusLabel(item.status) }}</span>
 									<span :class="$style.badge">{{ reviewStateLabel(item.reviewState) }}</span>
 								</span>
 							</summary>
@@ -816,14 +1008,22 @@ onMounted(reload)
 								</div>
 
 								<div :class="$style.actions">
-									<NcButton v-for="(target, i) in reviewActions(item)"
+									<!-- Primary while the booking has no trip — filing it is then the
+									     one thing still outstanding; secondary once it has one, where
+									     the button is a way back in rather than a task. -->
+									<NcButton v-if="item.reviewState === 'confirmed'"
+										:variant="item.tripId === null ? 'primary' : 'secondary'"
+										@click="openTripDialog(item)">
+										{{ t('travelmanager', 'Trip') }}
+									</NcButton>
+									<NcButton v-for="target in reviewActions(item)"
 										:key="target"
-										:variant="i === 0 ? 'primary' : 'tertiary'"
-										@click="onReview(item.id, target)">
+										:variant="reviewVariant(target)"
+										@click="onReviewAction(item, target)">
 										{{ actionLabel(item, target) }}
 									</NcButton>
 									<NcButton v-if="item.reviewState === 'discarded' || item.reviewState === 'archived'"
-										variant="tertiary"
+										variant="error"
 										@click="askDeleteBooking(item)">
 										{{ t('travelmanager', 'Delete permanently') }}
 									</NcButton>
@@ -866,7 +1066,7 @@ onMounted(reload)
 				<li v-for="item in linkCandidates" :key="item.id" :class="$style.tripBooking">
 					<div :class="$style.tripBookingInfo">
 						<strong>{{ bookingLabel(item) }}</strong>
-						<span :class="$style.tripBookingMeta">{{ item.type }} · {{ item.status }}</span>
+						<span :class="$style.tripBookingMeta">{{ bookingMeta(item) }}</span>
 					</div>
 					<NcButton v-if="item.tripId === linkTarget?.id" variant="tertiary" @click="onUnlink(item.id)">
 						{{ t('travelmanager', 'Unlink') }}
@@ -879,6 +1079,95 @@ onMounted(reload)
 			<template #actions>
 				<NcButton variant="primary" @click="linkOpen = false">
 					{{ t('travelmanager', 'Done') }}
+				</NcButton>
+			</template>
+		</NcDialog>
+
+		<NcDialog v-model:open="confirmOpen"
+			:name="confirmIsDraft
+				? t('travelmanager', 'Confirm booking')
+				: (confirmHasTrip ? t('travelmanager', 'Change trip') : t('travelmanager', 'Add to a trip'))"
+			size="normal">
+			<div v-if="confirmTarget" :class="$style.confirmHeader">
+				<strong>{{ bookingLabel(confirmTarget) }}</strong>
+				<span v-if="bookingSpan(confirmTarget)" :class="$style.tripBookingMeta">
+					{{ bookingSpan(confirmTarget) }}
+				</span>
+			</div>
+
+			<!-- Rendered only when it has something in it, so a booking with no
+			     dates simply gets the plain searchable list. -->
+			<template v-if="confirmSuggestions.length > 0">
+				<h3 :class="$style.confirmHeading">
+					{{ t('travelmanager', 'Suggested') }}
+				</h3>
+				<div :class="$style.tripChoices">
+					<NcCheckboxRadioSwitch v-for="row in confirmSuggestions"
+						:key="row.trip.id"
+						v-model="confirmChoice"
+						type="radio"
+						name="confirm-trip"
+						:value="String(row.trip.id)">
+						{{ tripLabel(row.trip) }}
+						<span :class="$style.tripBookingMeta"> — {{ tripSummary(row.trip.id) }}</span>
+					</NcCheckboxRadioSwitch>
+				</div>
+			</template>
+
+			<h3 :class="$style.confirmHeading">
+				{{ t('travelmanager', 'All trips') }}
+			</h3>
+			<NcTextField v-model="confirmSearch"
+				:label="t('travelmanager', 'Search, or type a new trip name')"
+				:disabled="confirmBusy"
+				@keydown.enter="onConfirmSearchEnter" />
+			<!-- One radio group across both sections (same `name`), so choosing in
+			     one clears the other. -->
+			<div :class="[$style.tripChoices, $style.tripChoicesScroll]">
+				<NcCheckboxRadioSwitch v-if="confirmCanCreate"
+					v-model="confirmChoice"
+					type="radio"
+					name="confirm-trip"
+					value="new">
+					{{ t('travelmanager', 'Create “{name}”', { name: confirmSearch.trim() }) }}
+				</NcCheckboxRadioSwitch>
+				<!-- Offered when it can actually do something: confirming without a
+				     trip, or unlinking one that has one. Omitted for a booking that
+				     already has no trip, where it would be a control that does nothing. -->
+				<NcCheckboxRadioSwitch v-if="confirmIsDraft || confirmHasTrip"
+					v-model="confirmChoice"
+					type="radio"
+					name="confirm-trip"
+					value="none">
+					{{ t('travelmanager', 'No trip') }}
+				</NcCheckboxRadioSwitch>
+				<NcCheckboxRadioSwitch v-for="row in confirmCandidates"
+					:key="row.trip.id"
+					v-model="confirmChoice"
+					type="radio"
+					name="confirm-trip"
+					:value="String(row.trip.id)">
+					{{ tripLabel(row.trip) }}
+					<span :class="$style.tripBookingMeta"> — {{ tripSummary(row.trip.id) }}</span>
+				</NcCheckboxRadioSwitch>
+				<p v-if="confirmCandidates.length === 0 && !confirmCanCreate" :class="$style.tripEmpty">
+					{{ trips.length === 0
+						? t('travelmanager', 'No trips yet — type a name above to create your first.')
+						: t('travelmanager', 'No trip matches that search.') }}
+				</p>
+			</div>
+			<template #actions>
+				<NcButton variant="tertiary" :disabled="confirmBusy" @click="confirmOpen = false">
+					{{ t('travelmanager', 'Cancel') }}
+				</NcButton>
+				<!-- Disabled until a choice is made: nothing is pre-selected, so an
+				     enabled button would have no defined meaning. -->
+				<NcButton variant="primary"
+					:disabled="confirmBusy || confirmChoice === ''"
+					@click="submitConfirm">
+					{{ confirmIsDraft
+						? t('travelmanager', 'Confirm')
+						: (confirmHasTrip ? t('travelmanager', 'Save') : t('travelmanager', 'Add to trip')) }}
 				</NcButton>
 			</template>
 		</NcDialog>
@@ -985,11 +1274,11 @@ onMounted(reload)
 	grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 180px 80px 200px;
 }
 
-/* Title takes the lion's share for the same reason Subject does; Provider gets
-   the remaining stretch since supplier names vary far more in length than a
-   type, a reference or a date. */
+/* Title takes the lion's share for the same reason Subject does; Trip and
+   Provider stretch too, since trip and supplier names vary far more in length
+   than a type, a reference or a date. */
 .bookingColumns {
-	grid-template-columns: 16px minmax(0, 3fr) 110px minmax(0, 2fr) 140px 190px 165px 135px;
+	grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 110px minmax(0, 2fr) 140px 190px 165px 135px;
 }
 
 /* Only three columns, so the name takes the stretch and the lozenges get a
@@ -1143,12 +1432,12 @@ onMounted(reload)
 	}
 
 	.bookingColumns {
-		grid-template-columns: 16px minmax(0, 3fr) 110px minmax(0, 2fr) 190px 135px;
+		grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 110px minmax(0, 2fr) 190px 135px;
 	}
 
 	/* Reference, Added — both are lookups rather than things you scan. */
-	.bookingColumns > *:nth-child(5),
-	.bookingColumns > *:nth-child(7) {
+	.bookingColumns > *:nth-child(6),
+	.bookingColumns > *:nth-child(8) {
 		display: none;
 	}
 }
@@ -1168,9 +1457,11 @@ onMounted(reload)
 		grid-template-columns: 16px minmax(0, 1fr) 190px 135px;
 	}
 
-	/* Type, Provider — the title usually names both anyway ("AMS → SOU"). */
+	/* Trip, Type, Provider — the title usually names the latter two anyway
+	   ("AMS → SOU"), and the trip is one click away in the Trips view. */
 	.bookingColumns > *:nth-child(3),
-	.bookingColumns > *:nth-child(4) {
+	.bookingColumns > *:nth-child(4),
+	.bookingColumns > *:nth-child(5) {
 		display: none;
 	}
 
@@ -1327,10 +1618,43 @@ onMounted(reload)
 	border-top: 1px solid var(--color-border);
 }
 
+/* The action button, which must never shrink: as a flex item it otherwise gives
+   up width to a long booking title and ends up rendering as "Li…". The title is
+   the thing with room to give — .tripBookingInfo carries the min-width: 0 that
+   lets it wrap instead. */
+.tripBooking > *:last-child {
+	flex-shrink: 0;
+}
+
 .tripBookingInfo {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
+}
+
+.confirmHeader {
+	display: flex;
+	flex-direction: column;
+	margin-bottom: 12px;
+}
+
+.confirmHeading {
+	font-size: 1em;
+	color: var(--color-text-maxcontrast);
+	margin: 16px 0 6px;
+}
+
+.tripChoices {
+	display: flex;
+	flex-direction: column;
+}
+
+/* Capped so a long trip list scrolls inside the dialog rather than pushing the
+   actions off the bottom of the screen. */
+.tripChoicesScroll {
+	max-height: 240px;
+	overflow-y: auto;
+	margin-top: 6px;
 }
 
 .tripBookingMeta {

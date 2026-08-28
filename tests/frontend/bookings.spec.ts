@@ -137,6 +137,19 @@ describe('sortBookings', () => {
 		expect(sortBookings(pairs, 'provider', 'desc', now).at(-1)?.id).toBe(2)
 	})
 
+	it('sorts by trip name, unlinked bookings last', () => {
+		const names = { 1: 'zermatt', 2: 'Alps' }
+		const linked = [
+			booking({ id: 1, tripId: 1 }),
+			booking({ id: 2, tripId: null }),
+			booking({ id: 3, tripId: 2 }),
+		]
+		// On the name shown, not the id — and an unlinked booking has no value
+		// at all, so it sinks rather than sorting as "trip zero".
+		expect(sortBookings(linked, 'trip', 'asc', now, names).map((b) => b.id)).toEqual([3, 1, 2])
+		expect(sortBookings(linked, 'trip', 'desc', now, names).at(-1)?.id).toBe(2)
+	})
+
 	it('does not mutate the input', () => {
 		const copy = [...pool]
 		sortBookings(pool, 'travel', 'asc', now)

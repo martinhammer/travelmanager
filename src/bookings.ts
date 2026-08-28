@@ -205,7 +205,10 @@ export const filterByReviewState = (items: Booking[], reviewState: string): Book
 	reviewState === 'all' ? items : items.filter((item) => item.reviewState === reviewState)
 
 /** The Bookings grid's sortable columns — one per column heading. */
-export type BookingSort = 'title' | 'type' | 'provider' | 'reference' | 'travel' | 'added' | 'reviewState'
+export type BookingSort = 'title' | 'trip' | 'type' | 'provider' | 'reference' | 'travel' | 'added' | 'reviewState'
+
+/** Trip names by id, for the columns that show or sort on a booking's trip. */
+export type TripNames = Record<number, string>
 
 /**
  * The Bookings grid's columns, in display order. Same contract as
@@ -217,6 +220,7 @@ export type BookingSort = 'title' | 'type' | 'provider' | 'reference' | 'travel'
  */
 export const BOOKING_COLUMNS: SortColumn<BookingSort>[] = [
 	{ key: 'title', defaultDirection: 'asc' },
+	{ key: 'trip', defaultDirection: 'asc' },
 	{ key: 'type', defaultDirection: 'asc' },
 	{ key: 'provider', defaultDirection: 'asc' },
 	{ key: 'reference', defaultDirection: 'asc' },
@@ -240,10 +244,14 @@ const byDateDesc = (a: string | null, b: string | null): number => {
 }
 
 // The value a column sorts on; strings lowercased so case never splits a group.
-const sortValue = (item: Booking, sort: BookingSort): string | null => {
+const sortValue = (item: Booking, sort: BookingSort, tripNames: TripNames): string | null => {
 	switch (sort) {
 	case 'title':
 		return item.title?.toLowerCase() || null
+	case 'trip':
+		// Sorts on the name shown, not the id: an unlinked booking has no value
+		// at all and sinks, rather than sorting as "trip zero".
+		return item.tripId === null ? null : (tripNames[item.tripId]?.toLowerCase() || null)
 	case 'type':
 		return item.type.toLowerCase()
 	case 'provider':
@@ -272,12 +280,14 @@ const sortValue = (item: Booking, sort: BookingSort): string | null => {
  * @param sort the column to order by
  * @param direction 'asc' or 'desc'
  * @param now reference point for "past"; injectable so tests do not depend on today
+ * @param tripNames trip names by id, needed only by the 'trip' column
  */
 export const sortBookings = (
 	items: Booking[],
 	sort: BookingSort,
 	direction: SortDirection = 'asc',
 	now: Date = new Date(),
+	tripNames: TripNames = {},
 ): Booking[] => {
 	const copy = [...items]
 
@@ -308,8 +318,8 @@ export const sortBookings = (
 
 	const sign = direction === 'asc' ? 1 : -1
 	return copy.sort((a, b) => {
-		const av = sortValue(a, sort)
-		const bv = sortValue(b, sort)
+		const av = sortValue(a, sort, tripNames)
+		const bv = sortValue(b, sort, tripNames)
 		if (av === bv) {
 			return 0
 		}

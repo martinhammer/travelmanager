@@ -31,8 +31,8 @@ TaskSuccessfulEvent / TaskFailedEvent
        ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
        └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
 UI (Vue, OCS API) — three views: Bookings | Trips | Messages
-  ├─ Bookings: sortable grid (Title | Type | Provider | Reference | Travel
-  │            dates | Added | Status), rows expand to the type-specific fields;
+  ├─ Bookings: sortable grid (Title | Trip | Type | Provider | Reference |
+  │            Travel dates | Added | Status), rows expand to type-specific fields;
   │            filter by review state + type;
   │            confirm / edit / discard / archive / restore
   ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
@@ -182,6 +182,33 @@ code follows the overrides.
     `end_date` + a cooling period is deferred, and is the intended trigger for
     hard-deleting retained email bodies once message-body persistence lands.
   - Review transitions all go through `POST /api/bookings/{id}/review`.
+  - **Confirming a draft asks for a trip first.** Confirmation is the moment a
+    booking becomes one you have decided to keep, so it is the natural point to
+    group it. The dialog is a **single radio group** over two sections —
+    *Suggested* (`suggestedTrips`: trips whose derived span overlaps the
+    booking's, ±2 days, so a flight home landing after checkout still matches;
+    max 3, nearest first) and *All trips* (`searchTrips` + a `Create "…"` row from
+    `canCreateTrip`, plus a pinned `No trip`). **Nothing is pre-selected** and
+    Confirm stays disabled until you choose — a pre-selected suggestion would
+    link silently on a wrong guess. Typing hides the Suggested section: once you
+    search you are browsing deliberately. The section is simply absent when the
+    booking has no dates, so the dialog degrades to a plain searchable list.
+    The same dialog is reachable from a **Trip** button on any confirmed booking
+    — primary with no trip (filing it is the outstanding task), secondary once it
+    has one. There it only links (no review change) and re-words to "Add to a
+    trip" / "Change trip". A booking that already has a trip opens with it
+    **selected**; a draft still opens with nothing selected. `No trip` appears
+    only where it does something (confirming, or unlinking an existing trip), and
+    one `assignBookingToTrip` call covers link/move/unlink — skipped entirely
+    when the choice equals the current trip, so opening the dialog just to look
+    writes nothing and shows no toast. Button variants follow the target,
+    not the position: `archived`/`discarded` are never the obvious next action so
+    they are always secondary, while confirm/restore are primary.
+    The link is applied **before** the review change, so a failed link leaves the
+    booking a draft (press Confirm again) rather than confirmed but orphaned.
+    Only `draft → confirmed` opens it: *restoring* a discarded booking also
+    targets `confirmed` but is not a first decision, hence the `reviewState`
+    check in `onReviewAction`, not a target check alone.
 - **Failed extractions are retried per message, not by wiping.** `messages`
   retains the email body, so `IngestionService::retryMessage` rebuilds the prompt
   and schedules a fresh task **bypassing the dedup check** (the message is
@@ -326,7 +353,10 @@ Consequences to preserve:
   `end_date`** (`tripRows`/`tripSpan` in `src/trips.ts`): the stored columns are
   user-entered and go stale the moment a booking is linked or unlinked, so the
   grid would disagree with the rows underneath it. A booking with no end date
-  contributes its start, so a one-day hire still extends the trip. `TripPeriod`
+  contributes its start, so a one-day hire still extends the trip. A trip's
+  bookings are listed in **travel order** (`inTravelOrder`, undated last): the
+  API returns them `created_at DESC`, which is the order the *emails* arrived and
+  says nothing about the trip. `TripPeriod`
   keeps **`undated`** as its own case — such trips appear under **All only**,
   because filing them under a period would make the period filters lie.
 - Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
