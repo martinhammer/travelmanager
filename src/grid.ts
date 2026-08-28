@@ -41,6 +41,20 @@ export const nextSortDirection = <K extends string>(
 }
 
 /**
+ * The ▲/▼ next to the column currently sorted on, empty for the others. Shared
+ * by every grid — they differ only in which state they pass in.
+ * @param active the column the grid is sorted on
+ * @param column the column being rendered
+ * @param direction the direction currently applied
+ */
+export const sortMarker = (active: string, column: string, direction: SortDirection): string => {
+	if (active !== column) {
+		return ''
+	}
+	return direction === 'asc' ? '▲' : '▼'
+}
+
+/**
  * Today as a local YYYY-MM-DD, for comparing against travel dates.
  *
  * Deliberately *not* `toISOString().slice(0, 10)`: that is the UTC date, which is

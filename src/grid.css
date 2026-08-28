@@ -1,0 +1,339 @@
+/*
+ * The app's grid: the shared look of the Bookings, Trips and Messages lists.
+ *
+ * Plain prefixed classes rather than a CSS module, because all three view
+ * components need them and `<style module>` is per-SFC. Treat this as a small
+ * design system: a change here changes every grid, which is the point. Anything
+ * specific to one view — above all its `grid-template-columns` and the
+ * `nth-child` rules that drop columns at a breakpoint — stays in that view's own
+ * `<style module>`.
+ *
+ * The `tm-` prefix keeps these out of Nextcloud's way; nothing here is meant to
+ * apply outside the app page.
+ */
+
+.tm-content {
+	/* Nextcloud floats the app-navigation toggle over the top-left of the content
+	   area, so start below it — otherwise it lands on the heading. */
+	padding: 44px 16px 16px;
+	max-width: none;
+}
+
+.tm-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+	flex-wrap: wrap;
+}
+
+.tm-toolbar-heading {
+	margin: 0;
+}
+
+.tm-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 12px;
+}
+
+/* --- lozenges ------------------------------------------------------------ */
+
+.tm-badge {
+	font-size: 0.8em;
+	padding: 2px 8px;
+	border-radius: var(--border-radius-pill);
+	background-color: var(--color-background-dark);
+}
+
+.tm-badges {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+/* Amber lozenge: needs the dark warning text colour, not white — matches the
+   log level badges in Personal settings. */
+.tm-badge-warning {
+	color: var(--color-warning-text, #8a6d00);
+	background-color: var(--color-warning, #fdf7e6);
+	font-weight: bold;
+}
+
+/* Discarded/archived rows stay visible but recede. */
+.tm-muted {
+	opacity: 0.65;
+}
+
+/* --- the grid ------------------------------------------------------------ */
+
+/* Horizontal rules only — no enclosing box. The grid already reads as a unit
+   through its column alignment; a border round it just adds a second frame
+   inside the app content area. */
+.tm-rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	border-block: 1px solid var(--color-border);
+}
+
+.tm-rows > li + li {
+	border-top: 1px solid var(--color-border);
+}
+
+/* Shared by every grid; only the column template differs, and that lives in the
+   view. The heading row carries the same pair of classes, which is what keeps
+   headings over their own columns. */
+.tm-row-summary {
+	display: grid;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	cursor: pointer;
+	list-style: none;
+}
+
+.tm-row-summary::-webkit-details-marker {
+	display: none;
+}
+
+.tm-grid-header {
+	cursor: default;
+	padding-block: 0;
+	border-bottom: none;
+}
+
+/* Headings are buttons, so they need their chrome stripped back to text. Scoped
+   under .tm-grid-header for the specificity: the server's own `button:not(…)`
+   rules outrank a bare class and would put a filled pill behind every heading. */
+.tm-grid-header .tm-column-heading {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	overflow: hidden;
+	height: auto;
+	/* Padded so the hover highlight reads as a target rather than a bare strip,
+	   pulled back by the same amount so the label still sits on its column's
+	   left edge, over the values below it. */
+	margin: 0 -8px;
+	padding: 6px 8px;
+	border: none;
+	border-radius: var(--border-radius);
+	background-color: transparent;
+	/* `font: inherit` first: a button does not inherit the page font, and 0.85em
+	   here made the headings visibly smaller than every other control. */
+	font: inherit;
+	font-weight: bold;
+	color: var(--color-text-maxcontrast);
+	text-align: start;
+	cursor: pointer;
+}
+
+/* :focus and :active are included to defeat the server's own blue button
+   states, not for their own sake. */
+.tm-grid-header .tm-column-heading:hover,
+.tm-grid-header .tm-column-heading:focus,
+.tm-grid-header .tm-column-heading:active {
+	background-color: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+.tm-grid-header .tm-column-heading:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 2px;
+}
+
+.tm-grid-header .tm-column-heading-active {
+	color: var(--color-main-text);
+}
+
+/* The label is its own element because the heading is a flex container, and
+   text-overflow does not apply to a bare text node on a flex line — without this
+   a long heading spills into the next column instead of truncating. */
+.tm-heading-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Never squeezed out: the arrow is the only thing saying which way the column
+   is sorted. */
+.tm-sort-marker {
+	flex-shrink: 0;
+	font-size: 0.75em;
+	line-height: 1;
+}
+
+/* The row whose entity the sidebar is showing. Set on the row rather than its
+   summary so the expanded body is tinted too, and so the hover rule below still
+   wins while you point at it. */
+.tm-row-selected {
+	background-color: var(--color-primary-element-light);
+}
+
+/* Data rows only: the heading row highlights per column, not as a whole —
+   hovering it is aiming at one heading, not selecting the row. */
+.tm-row-summary:not(.tm-grid-header):hover {
+	background-color: var(--color-background-hover);
+}
+
+.tm-row summary:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: -2px;
+}
+
+/* --- cells --------------------------------------------------------------- */
+
+/* Three cell types: free text that may overrun its column, secondary metadata
+   (dates, counts), and the status lozenges. */
+.tm-cell-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Left-aligned: values sit under their own heading, and a right-aligned column
+   under a left-aligned heading reads as a misalignment rather than a choice. */
+.tm-cell-meta {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Left-aligned in a fixed column so the lozenges start on a common edge. */
+.tm-cell-status {
+	justify-self: start;
+}
+
+/* The primary cell doubles as the way into the detail panel. Styled as text
+   rather than a button so the row still reads as a row; the underline on hover
+   is what says it is clickable. Scoped for the specificity — the server's own
+   `button:not(…)` rules outrank a bare class. */
+.tm-row-summary .tm-open-link {
+	/* min-height too, not just height: the server gives every button a 44px
+	   clickable-area floor, which silently made every grid row that tall. */
+	height: auto;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	border: none;
+	background-color: transparent;
+	font: inherit;
+	color: inherit;
+	text-align: start;
+	cursor: pointer;
+}
+
+.tm-row-summary .tm-open-link:hover,
+.tm-row-summary .tm-open-link:focus {
+	background-color: transparent;
+	text-decoration: underline;
+}
+
+.tm-row-summary .tm-open-link:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 2px;
+}
+
+.tm-chevron {
+	color: var(--color-text-maxcontrast);
+	transition: transform 0.15s ease;
+	flex-shrink: 0;
+}
+
+.tm-row[open] .tm-chevron {
+	transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tm-chevron {
+		transition: none;
+	}
+}
+
+/* --- expanded row -------------------------------------------------------- */
+
+/* One rhythm inside an expanded row: 14px above the first section, between the
+   last section and the actions, and below the actions before the separator. */
+.tm-row-body {
+	padding: 14px 14px 14px 42px;
+}
+
+/* The first child brings its own top margin, which would stack on the padding. */
+.tm-row-body > *:first-child {
+	margin-block-start: 0;
+}
+
+.tm-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+/* Scoped: .tm-actions is used in dialogs too, whose spacing is not ours. */
+.tm-row-body .tm-actions {
+	margin-block-start: 14px;
+}
+
+/* NcNoteCard ships with a large block margin meant for full-page forms; inside a
+   row it only needs to clear its neighbours. Scoped for the specificity — its own
+   .notecard rule is a single class and loads after ours. */
+.tm-row-body .tm-notice {
+	margin: 8px 0;
+}
+
+/* --- lists inside rows and dialogs --------------------------------------- */
+
+.tm-list {
+	list-style: none;
+	margin: 0 0 8px;
+	padding: 0;
+}
+
+.tm-list-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 0;
+	border-top: 1px solid var(--color-border);
+}
+
+/* The action button, which must never shrink: as a flex item it otherwise gives
+   up width to a long booking title and ends up rendering as "Li…". The title is
+   the thing with room to give — .tm-list-item-info carries the min-width: 0 that
+   lets it wrap instead. */
+.tm-list-item > *:last-child {
+	flex-shrink: 0;
+}
+
+.tm-list-item-info {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.tm-meta {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+}
+
+.tm-empty {
+	color: var(--color-text-maxcontrast);
+	margin: 8px 0;
+}
+
+@media (max-width: 620px) {
+	.tm-content {
+		padding-block-start: 16px;
+	}
+
+	.tm-row-body {
+		padding-inline-start: 14px;
+	}
+}

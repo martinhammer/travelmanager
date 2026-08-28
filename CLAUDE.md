@@ -38,9 +38,11 @@ UI (Vue, OCS API) — three views: Bookings | Trips | Messages
   ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
   │            lozenges derived from the linked bookings; filter All/Current/
   │            Future/Past; rows expand to link/unlink and edit
-  └─ Messages: the ingestion ledger as a sortable grid (Subject | From | Date
-               received | Last processed | Attempts | Status), rows expand for
-               details; filter by status, retry failed extractions
+  ├─ Messages: the ingestion ledger as a sortable grid (Subject | From | Date
+  │            received | Last processed | Attempts | Status), rows expand for
+  │            details; filter by status, retry failed extractions
+  └─ Detail sidebar: any one booking/trip/message in full, addressed by
+               location.hash, linking to whatever it relates to
 ```
 
 Key classes (all under `OCA\TravelManager`, `lib/`):
@@ -279,9 +281,17 @@ debug panel for iterating without waiting for cron:
   dropped`, so a rejected booking is distinguishable from an email that held none.
 - ✅ **Retry**: `messages` retains subject/body, and the **Messages view** lists
   the ingestion ledger with a per-message "Retry extraction" (app version 1.4.0).
-- ✅ **Messages grid**: sortable column headings (From | Subject | Date received |
-  Last processed | Attempts | Status) over expandable rows; `messages.sender`
-  captured from the IMAP envelope (app version 1.6.0).
+- ✅ **One grid for all three views**, sortable column headings over expandable
+  rows; `messages.sender` captured from the IMAP envelope (app version 1.6.0).
+- ✅ **Provenance**: `DetailSidebar` + hash routing, so a booking, trip or message
+  can be opened from anywhere and links back to what it relates to; `related`
+  messages carry `related_booking_ids` (app version 1.8.0). See the provenance
+  section below.
+- ✅ **Trip picker on confirm**: confirming a draft asks which trip it belongs to,
+  with date-based suggestions.
+- ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view
+  SFCs, `store.ts`, `navigation.ts`, `labels.ts` and `grid.css`. See "Frontend
+  layout" below. No behaviour change intended.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -338,29 +348,57 @@ this* and *is about this* are different claims and merging them would misreport
 what the app did. No backfill: the old rows' ids are recoverable only by parsing
 prose, and re-running the message fills the column properly.
 
-**UI structure (§2).** `view` selects one of the three views; each view owns its
-filter/sort refs. Do not conflate the two again — the original single `filter`
-ref made "All bookings" a status and "Trips" a view, which is why adding a
-Messages view needed this untangling. All filtering/sorting is **client-side and
-pure** (`sortBookings`/`filterBookings` in `src/bookings.ts`,
-`sortMessages`/`filterMessagesByStatus` in `src/messages.ts`,
-`sortTrips`/`filterTripsByPeriod`/`tripRows` in `src/trips.ts`, shared helpers in
-`src/grid.ts`) so it stays unit-testable without `@nextcloud/*` runtime
-imports (§7).
+### Frontend layout (`src/`)
 
-**All three views are the same grid**, built from one set of CSS classes
-(`.rows`, `.rowSummary`, `.gridHeader`, `.columnHeading`, `.chevron`, `.rowBody`,
-`.cellText`/`.cellMeta`/`.cellStatus`) plus a per-view column template
-(`.messageColumns` / `.bookingColumns` / `.tripColumns`). Sort behaviour shared
-via **`src/grid.ts`** (`SortColumn`, `SortDirection`, `nextSortDirection`,
-`formatSpan`, `formatTimestamp`) so no view's module imports another's. Keep them
-in step: a change to one grid's look belongs in the shared classes, not copied
-into a second set.
+```
+App.vue              shell only: nav, which view is showing, the detail panel
+├─ BookingsView.vue  + its delete-booking dialog
+│   └─ TripPickerDialog.vue   confirm-a-draft / add-to-trip
+├─ TripsView.vue     + its new/edit, link and delete dialogs
+├─ MessagesView.vue
+└─ DetailSidebar.vue  one panel for booking | trip | message
+   └─ BookingDetails.vue   a booking's type-specific body, shared with the row
+
+grid.css        the look every grid shares (see below)
+store.ts        bookings / trips / messages / loading / reload + derived counts
+navigation.ts   the route, open/close/back, hash + history plumbing
+labels.ts       how the domain is worded
+grid.ts messages.ts bookings.ts trips.ts detail.ts   pure logic, unit-tested
+```
+
+Adding a fourth view (the calendar) should mean one new SFC and one nav item in
+`App.vue` — nothing else.
+
+- **`store.ts` holds module-level refs**, not provide/inject or prop threading.
+  Every view, the sidebar and most dialogs need the same three collections and
+  the same `reload()`. Safe because the app mounts once; revisit if that changes.
+- **`labels.ts` is the one module that may import `@nextcloud/l10n`** and so is
+  *not* unit-testable (§7). That is the trade for every view wording things
+  identically. Keep decisions out of it — anything with a branch belongs in a
+  pure module where it gets tested.
+- **Each view owns its own filter/sort refs.** Do not conflate view and filter
+  again — the original single `filter` ref made "All bookings" a status and
+  "Trips" a view. All filtering/sorting is client-side and pure
+  (`sortBookings`/`filterBookings`, `sortMessages`/`filterMessagesByStatus`,
+  `sortTrips`/`filterTripsByPeriod`/`tripRows`, shared helpers in `src/grid.ts`).
+
+**All three views are the same grid.** The shared look lives in **`src/grid.css`**
+as plain `tm-`-prefixed classes (`.tm-rows`, `.tm-row`, `.tm-row-summary`,
+`.tm-grid-header`, `.tm-column-heading`, `.tm-chevron`, `.tm-row-body`,
+`.tm-cell-text`/`.tm-cell-meta`/`.tm-cell-status`, `.tm-open-link`, `.tm-badge…`,
+`.tm-list…`), imported once by `App.vue`. Plain CSS rather than a module because
+`<style module>` is per-SFC and all three views need these. Each view's own
+`<style module>` holds **only** its `grid-template-columns` (`.columns`) and the
+`nth-child` rules that drop columns at a breakpoint. Sort behaviour is shared via
+**`src/grid.ts`** (`SortColumn`, `SortDirection`, `nextSortDirection`,
+`sortMarker`, `formatSpan`, `formatTimestamp`, `localDate`) so no view's module
+imports another's. A change to how every grid looks belongs in `grid.css`, never
+copied into a second set.
 
 It is a CSS grid, not a `<table>`: each row is a native `<details>`, which a
 table's two-`<tr>` row pair cannot be without hand-rolling the open/closed state.
 Consequences to preserve:
-- The heading row and each data row use the **same `.rowSummary` + column-template
+- The heading row and each data row use the **same `.tm-row-summary` + `.columns`
   pair and the same cell order**, so one set of `nth-child` rules hides a column
   in both at a breakpoint. The heading's chevron cell is a real (empty) element
   for exactly this reason — do not replace it with an offset. Reordering columns
@@ -393,11 +431,11 @@ Consequences to preserve:
   because filing them under a period would make the period filters lie.
 - Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
   + `aria-sort`: grid ARIA would promise a table structure the markup does not
-  have. Sort state is `messageSort` + `messageSortDirection`; `MESSAGE_COLUMNS`
+  have. Sort state is a `sort` + `direction` ref per view; the `*_COLUMNS` array
   holds order and each column's default direction, and `nextSortDirection`
   implements "default on a new column, flip on the same one".
-- Column **labels live in `App.vue`** as literal `t()` calls (extractable),
-  keyed off `MESSAGE_COLUMNS`; `src/messages.ts` stays `@nextcloud/*`-free.
+- Column **labels live in the view SFC** as literal `t()` calls (extractable),
+  keyed off its `*_COLUMNS` array; the logic modules stay `@nextcloud/*`-free.
 - Rows with no value for the sorted column sink to the bottom in **both**
   directions — unsortable, not "smallest".
 - An expanded row opens with `NcNoteCard` notices from `messageNotices()`:
@@ -552,7 +590,7 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   component (with `NcTextField`/`NcButton` in the `#actions` slot) controlled by a
   reactive `open` ref — never `window.prompt`/`window.confirm`/`window.alert`
   (they render as ugly browser-chrome dialogs). See the "New trip" dialog in
-  `App.vue`.
+  `src/TripsView.vue`.
 - **Settings panels must load BOTH script and style.** In an `ISettings::getForm()`
   call **`Util::addScript('travelmanager', 'travelmanager-<entry>')` AND
   `Util::addStyle('travelmanager', 'travelmanager-<entry>')`**. The
@@ -564,7 +602,9 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   run via `npm run test:frontend` / `make test`. Keep testable logic in plain
   `.ts` modules (e.g. `src/bookings.ts`) and use `import type` for cross-module
   types so the test doesn't pull `@nextcloud/*` runtime imports. `vitest.config.ts`
-  is intentionally separate from `vite.config.ts`.
+  is intentionally separate from `vite.config.ts`. **`labels.ts` and `store.ts`
+  are the deliberate exceptions** — they import `@nextcloud/*` and are therefore
+  untested; keep them free of anything worth testing.
 - **`package-lock.json` is committed** because the Makefile/CI use `npm ci`
   (which requires it). Run `npm install` (not `npm ci`) when changing deps, then
   commit the updated lockfile.

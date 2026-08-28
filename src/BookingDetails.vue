@@ -111,8 +111,18 @@ defineProps<{ booking: Booking }>()
 	border-top: 1px solid var(--color-border);
 }
 
+/* No rule above the first leg — it would read as a divider from the passengers
+   rather than as a separator between legs. */
+.segment:first-child {
+	border-top: none;
+	padding-top: 4px;
+}
+
 .segmentIndex {
+	display: block;
+	font-size: 0.85em;
+	font-weight: bold;
 	color: var(--color-text-maxcontrast);
-	font-size: 0.9em;
+	margin-bottom: 4px;
 }
 </style>
