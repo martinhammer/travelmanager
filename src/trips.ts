@@ -1,6 +1,7 @@
 import type { Booking, Trip } from './api'
 import type { SortColumn, SortDirection } from './grid'
 import { bookingTypes, bookingsForTrip } from './bookings'
+import { localDate } from './grid'
 
 /**
  * Where a trip sits relative to now. 'undated' is its own case rather than being
@@ -65,8 +66,9 @@ export const tripSpan = (items: Booking[]): { start: string | null, end: string 
 }
 
 /**
- * Which period a span falls in, compared against local wall-clock (V8: booking
- * times carry no offset, so this is a string comparison, not a date one).
+ * Which period a span falls in, compared by **calendar date** against the
+ * viewer's own today (see localDate). Comparing full timestamps instead put a
+ * trip departing at 15:20 today under "Future" all morning.
  * @param start start of the span, or null
  * @param end end of the span, or null
  * @param now reference point; injectable so tests do not depend on today
@@ -75,11 +77,11 @@ export const tripPeriod = (start: string | null, end: string | null, now: Date):
 	if (!start) {
 		return 'undated'
 	}
-	const today = now.toISOString().slice(0, 19)
-	if ((end ?? start) < today) {
+	const today = localDate(now)
+	if ((end ?? start).slice(0, 10) < today) {
 		return 'past'
 	}
-	return start > today ? 'future' : 'current'
+	return start.slice(0, 10) > today ? 'future' : 'current'
 }
 
 /**

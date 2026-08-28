@@ -138,6 +138,10 @@ class Booking extends Entity implements \JsonSerializable {
 			'status' => $this->status,
 			'reviewState' => $this->reviewState,
 			'confidence' => $this->confidence,
+			// The RFC Message-ID of the email that created this booking. Nothing
+			// updates an existing booking (one message = one booking), so this
+			// genuinely means "created by" — it is the trail back to the source.
+			'sourceMessageId' => $this->sourceMessageId,
 			'details' => $this->decodedDetails(),
 			// Local wall-clock span: emit without timezone offset (see V8).
 			'startDate' => $this->startDate?->format('Y-m-d\TH:i:s'),

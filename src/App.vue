@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import NcAppContent from '@nextcloud/vue/components/NcAppContent'
 import NcAppNavigation from '@nextcloud/vue/components/NcAppNavigation'
 import NcAppNavigationItem from '@nextcloud/vue/components/NcAppNavigationItem'
@@ -22,6 +22,7 @@ import {
 	deleteBooking,
 	deleteTrip,
 	fetchMessageBody,
+	findMessageBySourceId,
 	listBookings,
 	listMessages,
 	listTrips,
@@ -50,20 +51,27 @@ import {
 import {
 	type BookingSort,
 	BOOKING_COLUMNS,
-	bookingHeaderFields,
 	bookingSpan,
 	bookingTypes,
-	carFields,
 	decodeHtmlEntities,
 	draftCount as countDrafts,
 	filterBookings,
-	flightSegmentFields,
-	hotelFields,
 	linkDialogBookings,
-	passengerLines,
 	reviewActions,
 	sortBookings,
 } from './bookings'
+import BookingDetails from './BookingDetails.vue'
+import DetailSidebar from './DetailSidebar.vue'
+import {
+	type DetailType,
+	type Route,
+	byId,
+	detailLabel,
+	detailRoute,
+	formatRoute,
+	matchRoute,
+	parseRoute,
+} from './detail'
 import {
 	type TripSort,
 	TRIP_COLUMNS,
@@ -78,9 +86,112 @@ import {
 const bookings = ref<Booking[]>([])
 const trips = ref<Trip[]>([])
 const messages = ref<Message[]>([])
-// The view, and each view's own filter/sort state — previously one `filter` ref
-// did double duty as both, which made "All bookings" a status and Trips a view.
-const view = ref<'bookings' | 'trips' | 'messages'>('bookings')
+// What is open, mirrored in location.hash so the detail panel is linkable and
+// the browser's Back button walks the trail (see src/detail.ts). Each view keeps
+// its own filter/sort state below — previously one `filter` ref did double duty
+// as view and status, which made "All bookings" a status and Trips a view.
+const route = ref<Route>(parseRoute(window.location.hash))
+
+const view = computed({
+	get: () => route.value.view,
+	// Switching view closes the panel: a booking id means nothing under Messages.
+	set: (value: Route['view']) => navigate({ view: value, detail: null }),
+})
+
+/**
+ * Go somewhere, pushing a history entry so Back returns here. `fromLabel` rides
+ * along in history.state rather than in a ref of our own, so the back button's
+ * caption survives the browser's own Back and Forward.
+ * @param next where to go
+ * @param fromLabel what to call the place being left, if it should be offered
+ */
+const navigate = (next: Route, fromLabel: string | null = null) => {
+	route.value = next
+	const hash = formatRoute(next)
+	if (hash !== window.location.hash) {
+		window.history.pushState({ fromLabel }, '', hash)
+	}
+}
+
+const backLabel = ref<string | null>(null)
+
+const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
+	switch (type) {
+	case 'booking':
+		return bookings.value
+	case 'trip':
+		return trips.value
+	case 'message':
+		return messages.value
+	}
+}
+
+const onOpenDetail = (type: DetailType, id: number) => {
+	// Name the place being left, so the panel can offer a way back to it.
+	const current = route.value.detail
+	const item = current === null ? null : byId(entitiesFor(current.type), current.id)
+	const from = current === null || item === null ? null : detailLabel(current.type, item)
+	navigate(detailRoute(type, id), from)
+	backLabel.value = from
+}
+
+/**
+ * Whether this row is the one the sidebar is showing — so the panel is visibly
+ * anchored to a row rather than floating free of the list.
+ * @param type the kind of entity the row holds
+ * @param id the row's id
+ */
+const isOpen = (type: DetailType, id: number): boolean =>
+	route.value.detail?.type === type && route.value.detail.id === id
+
+const closeDetail = () => {
+	navigate({ view: route.value.view, detail: null })
+	backLabel.value = null
+}
+
+// Delegated to the browser so our trail and its history are the same thing —
+// popstate then restores both the route and the caption.
+const goBack = () => window.history.back()
+
+/**
+ * A booking's source email may predate the message list's page (it caps at 200),
+ * in which case the trail back would silently vanish. Fetch that one message and
+ * fold it into the loaded set.
+ */
+const ensureSourceMessage = async () => {
+	const detail = route.value.detail
+	if (detail?.type !== 'booking') {
+		return
+	}
+	const booking = byId(bookings.value, detail.id)
+	const sourceId = booking?.sourceMessageId
+	if (!sourceId || messages.value.some((m) => m.messageId === sourceId)) {
+		return
+	}
+	try {
+		const found = await findMessageBySourceId(sourceId)
+		if (found !== null) {
+			messages.value = [...messages.value, found]
+		}
+	} catch (e) {
+		// Best-effort: the panel simply does not offer the source link.
+	}
+}
+
+watch(() => route.value.detail, ensureSourceMessage)
+
+// The browser's Back and Forward move the route, and carry the back button's
+// caption with them — history.state survives both, a ref would not.
+const onPopState = () => {
+	const next = matchRoute(window.location.hash)
+	if (next === null) {
+		// Not one of ours: put our own address back rather than following it.
+		window.history.replaceState(window.history.state, '', formatRoute(route.value))
+		return
+	}
+	route.value = next
+	backLabel.value = (window.history.state as { fromLabel?: string | null } | null)?.fromLabel ?? null
+}
 const bookingFilter = ref('all')
 const bookingType = ref('all')
 // 'travel' ascending is the default: what is coming up next, first.
@@ -169,8 +280,8 @@ const tripSummary = (tripId: number): string => {
 // Literal t() calls so the strings are extractable; order and default direction
 // come from MESSAGE_COLUMNS so the two cannot drift apart.
 const columnLabels: Record<MessageSort, string> = {
-	sender: t('travelmanager', 'From'),
 	subject: t('travelmanager', 'Subject'),
+	sender: t('travelmanager', 'From'),
 	received: t('travelmanager', 'Date received'),
 	processed: t('travelmanager', 'Last processed'),
 	attempts: t('travelmanager', 'Attempts'),
@@ -629,7 +740,17 @@ const confirmDeleteTrip = async () => {
 	}
 }
 
-onMounted(reload)
+onMounted(async () => {
+	// Stamp the initial entry so history.state is never null on the way back,
+	// and normalise a bare or malformed hash to the route we actually rendered.
+	window.history.replaceState({ fromLabel: null }, '', formatRoute(route.value))
+	window.addEventListener('popstate', onPopState)
+	await reload()
+	// The route may already name a booking whose source email is not in the page.
+	await ensureSourceMessage()
+})
+
+onUnmounted(() => window.removeEventListener('popstate', onPopState))
 </script>
 
 <template>
@@ -640,21 +761,21 @@ onMounted(reload)
 				     navigation choice. Counters show what awaits you, not totals. -->
 				<NcAppNavigationItem :name="t('travelmanager', 'Bookings')"
 					:active="view === 'bookings'"
-					@click="view = 'bookings'">
+					@click.prevent="view = 'bookings'">
 					<template #counter>
 						{{ draftCount }}
 					</template>
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Trips')"
 					:active="view === 'trips'"
-					@click="view = 'trips'">
+					@click.prevent="view = 'trips'">
 					<template #counter>
 						{{ trips.length }}
 					</template>
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Messages')"
 					:active="view === 'messages'"
-					@click="view = 'messages'">
+					@click.prevent="view = 'messages'">
 					<template #counter>
 						{{ attentionCount }}
 					</template>
@@ -691,7 +812,7 @@ onMounted(reload)
 						type="button"
 						:class="[$style.columnHeading, { [$style.columnHeadingActive]: tripSort === column.key }]"
 						@click="onSortTripColumn(column.key)">
-						{{ column.label }}
+						<span :class="$style.headingLabel">{{ column.label }}</span>
 						<span :class="$style.sortMarker" aria-hidden="true">
 							{{ sortMarker(tripSort, column.key, tripSortDirection) }}
 						</span>
@@ -699,7 +820,7 @@ onMounted(reload)
 				</div>
 				<ol v-if="visibleTrips.length > 0" :class="$style.rows">
 					<li v-for="row in visibleTrips" :key="row.trip.id">
-						<details :class="$style.row">
+						<details :class="[$style.row, { [$style.rowSelected]: isOpen('trip', row.trip.id) }]">
 							<summary :class="[$style.rowSummary, $style.tripColumns]">
 								<svg :class="$style.chevron"
 									viewBox="0 0 24 24"
@@ -713,7 +834,11 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
-								<span :class="$style.cellText">{{ tripLabel(row.trip) }}</span>
+								<button type="button"
+									:class="[$style.cellText, $style.openLink]"
+									@click.stop.prevent="onOpenDetail('trip', row.trip.id)">
+									{{ tripLabel(row.trip) }}
+								</button>
 								<span :class="$style.cellMeta">{{ formatSpan(row.start, row.end) }}</span>
 								<!-- Count plus one lozenge per distinct type: what the trip is
 								     made of, without opening it. -->
@@ -788,7 +913,7 @@ onMounted(reload)
 						type="button"
 						:class="[$style.columnHeading, { [$style.columnHeadingActive]: messageSort === column.key }]"
 						@click="onSortColumn(column.key)">
-						{{ column.label }}
+						<span :class="$style.headingLabel">{{ column.label }}</span>
 						<span :class="$style.sortMarker" aria-hidden="true">
 							{{ sortMarker(messageSort, column.key, messageSortDirection) }}
 						</span>
@@ -798,7 +923,7 @@ onMounted(reload)
 				     top/bottom rules would otherwise collapse into a stray line. -->
 				<ol v-if="visibleMessages.length > 0" :class="$style.rows">
 					<li v-for="item in visibleMessages" :key="item.id">
-						<details :class="$style.row">
+						<details :class="[$style.row, { [$style.rowSelected]: isOpen('message', item.id) }]">
 							<summary :class="[$style.rowSummary, $style.messageColumns]">
 								<svg :class="$style.chevron"
 									viewBox="0 0 24 24"
@@ -812,8 +937,12 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
+								<button type="button"
+									:class="[$style.cellText, $style.openLink]"
+									@click.stop.prevent="onOpenDetail('message', item.id)">
+									{{ item.subject || t('travelmanager', '(no subject)') }}
+								</button>
 								<span :class="$style.cellText">{{ item.sender }}</span>
-								<span :class="$style.cellText">{{ item.subject || t('travelmanager', '(no subject)') }}</span>
 								<span :class="$style.cellMeta">{{ formatTimestamp(item.sentAt) }}</span>
 								<span :class="$style.cellMeta">{{ formatTimestamp(item.processedAt) }}</span>
 								<span :class="$style.cellMeta">{{ item.attempts }}</span>
@@ -923,7 +1052,7 @@ onMounted(reload)
 						type="button"
 						:class="[$style.columnHeading, { [$style.columnHeadingActive]: bookingSort === column.key }]"
 						@click="onSortBookingColumn(column.key)">
-						{{ column.label }}
+						<span :class="$style.headingLabel">{{ column.label }}</span>
 						<span :class="$style.sortMarker" aria-hidden="true">
 							{{ sortMarker(bookingSort, column.key, bookingSortDirection) }}
 						</span>
@@ -931,7 +1060,10 @@ onMounted(reload)
 				</div>
 				<ol v-if="filtered.length > 0" :class="$style.rows">
 					<li v-for="item in filtered" :key="item.id">
-						<details :class="[$style.row, { [$style.mutedCard]: item.reviewState === 'discarded' || item.reviewState === 'archived' }]">
+						<details :class="[$style.row, {
+							[$style.mutedCard]: item.reviewState === 'discarded' || item.reviewState === 'archived',
+							[$style.rowSelected]: isOpen('booking', item.id),
+						}]">
 							<summary :class="[$style.rowSummary, $style.bookingColumns]">
 								<svg :class="$style.chevron"
 									viewBox="0 0 24 24"
@@ -945,9 +1077,16 @@ onMounted(reload)
 										stroke-linecap="round"
 										stroke-linejoin="round" />
 								</svg>
-								<span :class="$style.cellText">{{ item.title || typeName(item.type) }}</span>
+								<button type="button"
+									:class="[$style.cellText, $style.openLink]"
+									@click.stop.prevent="onOpenDetail('booking', item.id)">
+									{{ item.title || typeName(item.type) }}
+								</button>
 								<span :class="$style.cellText">{{ tripNameFor(item.tripId) }}</span>
-								<span :class="$style.cellText">{{ typeName(item.type) }}</span>
+								<!-- A lozenge, matching the type lozenges on a trip row. -->
+								<span :class="[$style.badges, $style.cellStatus]">
+									<span :class="$style.badge">{{ typeName(item.type) }}</span>
+								</span>
 								<span :class="$style.cellText">{{ item.provider }}</span>
 								<span :class="$style.cellText">{{ item.bookingReference }}</span>
 								<span :class="$style.cellMeta">{{ bookingSpan(item) }}</span>
@@ -960,52 +1099,7 @@ onMounted(reload)
 								</span>
 							</summary>
 							<div :class="$style.rowBody">
-								<!-- Only what is not already a column above. -->
-								<div v-if="bookingHeaderFields(item).length > 0" :class="$style.fields">
-									<template v-for="field in bookingHeaderFields(item)" :key="field.label">
-										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-										<span :class="$style.fieldValue">{{ field.value }}</span>
-									</template>
-								</div>
-
-								<!-- Flight: passengers + one row per leg -->
-								<template v-if="item.type === 'flight'">
-									<div v-if="passengerLines(item.details).length > 0" :class="[$style.fields, $style.typeFields]">
-										<span :class="$style.fieldLabel">{{ t('travelmanager', 'Passengers') }}</span>
-										<span :class="$style.fieldValue">
-											<span v-for="(line, i) in passengerLines(item.details)" :key="i" :class="$style.passenger">
-												{{ line }}
-											</span>
-										</span>
-									</div>
-									<ul :class="$style.segments">
-										<li v-for="(seg, i) in (item.details.segments ?? [])" :key="i" :class="$style.segment">
-											<span v-if="(item.details.segments ?? []).length > 1" :class="$style.segmentIndex">
-												{{ t('travelmanager', 'Leg {n}', { n: i + 1 }) }}
-											</span>
-											<div :class="$style.fields">
-												<template v-for="field in flightSegmentFields(seg)" :key="field.label">
-													<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-													<span :class="$style.fieldValue">{{ field.value }}</span>
-												</template>
-											</div>
-										</li>
-									</ul>
-								</template>
-
-								<!-- Car rental / accommodation: a single labelled detail block -->
-								<div v-else-if="item.type === 'car_rental'" :class="[$style.fields, $style.typeFields]">
-									<template v-for="field in carFields(item.details)" :key="field.label">
-										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-										<span :class="$style.fieldValue">{{ field.value }}</span>
-									</template>
-								</div>
-								<div v-else-if="item.type === 'accommodation'" :class="[$style.fields, $style.typeFields]">
-									<template v-for="field in hotelFields(item.details)" :key="field.label">
-										<span :class="$style.fieldLabel">{{ t('travelmanager', field.label) }}</span>
-										<span :class="$style.fieldValue">{{ field.value }}</span>
-									</template>
-								</div>
+								<BookingDetails :booking="item" />
 
 								<div :class="$style.actions">
 									<!-- Primary while the booking has no trip — filing it is then the
@@ -1034,6 +1128,21 @@ onMounted(reload)
 				</ol>
 			</div>
 		</NcAppContent>
+
+		<!-- One panel for every kind of thing, openable from any view and later
+		     from the calendar. Keyed so switching target rebuilds it rather than
+		     leaving the previous entity's scroll position behind. -->
+		<DetailSidebar v-if="route.detail !== null"
+			:id="route.detail.id"
+			:key="`${route.detail.type}-${route.detail.id}`"
+			:type="route.detail.type"
+			:bookings="bookings"
+			:trips="trips"
+			:messages="messages"
+			:back-label="backLabel"
+			@close="closeDetail"
+			@back="goBack"
+			@open="onOpenDetail" />
 
 		<NcDialog v-model:open="newTripOpen"
 			:name="editTripTarget ? t('travelmanager', 'Edit trip') : t('travelmanager', 'New trip')"
@@ -1268,10 +1377,10 @@ onMounted(reload)
    content-sized columns would land at a different x on each row and the grid
    would read as ragged.
 
-   From and Subject share the flexible space 2:3 — the subject is the longer
+   Subject and From share the flexible space 3:2 — the subject is the longer
    string and the one you read; the sender only needs to be recognisable. */
 .messageColumns {
-	grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 180px 80px 200px;
+	grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 180px 180px 80px 200px;
 }
 
 /* Title takes the lion's share for the same reason Subject does; Trip and
@@ -1301,6 +1410,7 @@ onMounted(reload)
 	align-items: center;
 	gap: 4px;
 	min-width: 0;
+	overflow: hidden;
 	height: auto;
 	/* Padded so the hover highlight reads as a target rather than a bare strip,
 	   pulled back by the same amount so the label still sits on its column's
@@ -1337,13 +1447,33 @@ onMounted(reload)
 	color: var(--color-main-text);
 }
 
+/* The label is its own element because the heading is a flex container, and
+   text-overflow does not apply to a bare text node on a flex line — without this
+   a long heading spills into the next column instead of truncating. */
+.headingLabel {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Never squeezed out: the arrow is the only thing saying which way the column
+   is sorted. */
 .sortMarker {
+	flex-shrink: 0;
 	font-size: 0.75em;
 	line-height: 1;
 }
 
 .rowSummary::-webkit-details-marker {
 	display: none;
+}
+
+/* The row whose entity the sidebar is showing. Set on the row rather than its
+   summary so the expanded body is tinted too, and so the hover rule below still
+   wins while you point at it. */
+.rowSelected {
+	background-color: var(--color-primary-element-light);
 }
 
 /* Message rows only: the heading row highlights per column, not as a whole —
@@ -1363,6 +1493,36 @@ onMounted(reload)
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* The primary cell doubles as the way into the detail panel. Styled as text
+   rather than a button so the row still reads as a row; the underline on hover
+   is what says it is clickable. Scoped for the specificity — the server's own
+   `button:not(…)` rules outrank a bare class. */
+.rowSummary .openLink {
+	/* min-height too, not just height: the server gives every button a 44px
+	   clickable-area floor, which silently made every grid row that tall. */
+	height: auto;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	border: none;
+	background-color: transparent;
+	font: inherit;
+	color: inherit;
+	text-align: start;
+	cursor: pointer;
+}
+
+.rowSummary .openLink:hover,
+.rowSummary .openLink:focus {
+	background-color: transparent;
+	text-decoration: underline;
+}
+
+.rowSummary .openLink:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 2px;
 }
 
 /* Left-aligned, unlike the old card layout: values now sit under their own
@@ -1422,7 +1582,7 @@ onMounted(reload)
    the heading's chevron column is a real (empty) element rather than an offset. */
 @media (max-width: 1100px) {
 	.messageColumns {
-		grid-template-columns: 16px minmax(0, 2fr) minmax(0, 3fr) 180px 200px;
+		grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 180px 200px;
 	}
 
 	/* Last processed, Attempts. */
@@ -1448,7 +1608,7 @@ onMounted(reload)
 	}
 
 	/* From, Date received — the subject and the status are what you scan for. */
-	.messageColumns > *:nth-child(2),
+	.messageColumns > *:nth-child(3),
 	.messageColumns > *:nth-child(4) {
 		display: none;
 	}

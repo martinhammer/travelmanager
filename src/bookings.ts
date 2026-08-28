@@ -1,5 +1,5 @@
 import type { SortColumn, SortDirection } from './grid'
-import { formatSpan } from './grid'
+import { formatSpan, localDate } from './grid'
 import type {
 	Booking,
 	CarDetails,
@@ -292,13 +292,14 @@ export const sortBookings = (
 	const copy = [...items]
 
 	if (sort === 'travel' && direction === 'asc') {
-		// Compare against local wall-clock (V8: booking times carry no offset).
-		const today = now.toISOString().slice(0, 19)
+		// By calendar date, matching tripPeriod: anything travelling today counts
+		// as upcoming, not past, however late in the day it is read.
+		const today = localDate(now)
 		const rank = (item: Booking): number => {
 			if (!item.startDate) {
 				return 2
 			}
-			return item.startDate >= today ? 0 : 1
+			return item.startDate.slice(0, 10) >= today ? 0 : 1
 		}
 		return copy.sort((a, b) => {
 			const ra = rank(a)

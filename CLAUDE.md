@@ -38,7 +38,7 @@ UI (Vue, OCS API) — three views: Bookings | Trips | Messages
   ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
   │            lozenges derived from the linked bookings; filter All/Current/
   │            Future/Past; rows expand to link/unlink and edit
-  └─ Messages: the ingestion ledger as a sortable grid (From | Subject | Date
+  └─ Messages: the ingestion ledger as a sortable grid (Subject | From | Date
                received | Last processed | Attempts | Status), rows expand for
                details; filter by status, retry failed extractions
 ```
@@ -59,7 +59,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   per-type `details` JSON column on `bookings`, adds `confirmation_number` +
   `start_date`/`end_date`) + `Version1300Date2026081400…` (splits `status` into
   `status` + `review_state`) + `Version1600Date2026082700…` (adds `messages.sender`)
-  + `Version1700Date2026082710…` (adds `messages.issue_reasons`).
+  + `Version1700Date2026082710…` (adds `messages.issue_reasons`)
+  + `Version1800Date2026082800…` (adds `messages.related_booking_ids`).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -72,8 +73,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   below — `dropped` is the retry-worthy one), `failure_kind` =
   schedule/provider/validation, `issue_reasons` = comma-separated
   `ExtractionIssue::REASON_*` slugs from the last attempt (the branchable form of
-  what `error` says in prose; cleared on retry), `attempts` counts extraction
-  runs. Holds
+  what `error` says in prose; cleared on retry), `related_booking_ids` =
+  comma-separated ids of the bookings a `related` email matched but did not touch
+  (same rationale; cleared on retry), `attempts` counts extraction runs. Holds
   `subject`, `sender` (display form of the From header — grid metadata only,
   never a dedup or classification input; null on rows ingested before it was
   captured, since the envelope is not retained and cannot be backfilled),
@@ -155,9 +157,10 @@ code follows the overrides.
   Calendar/Notes until the user confirms (Calendar/Notes projection is deferred).
 - **One message = one booking (MVP).** The *first* email about a booking creates
   it. A later email matching the natural key is **reported, never applied**:
-  `applyOne` returns a description instead of writing, `applyExtraction` returns
-  an `AppliedExtraction` (created + related), and the message lands in
-  `messages.status = related` with the matched booking named in its notes.
+  `applyOne` returns a `RelatedBooking` (id + description) instead of writing,
+  `applyExtraction` returns an `AppliedExtraction` (created + related), and the
+  message lands in `messages.status = related` — named in its notes *and* linked
+  by id in `related_booking_ids`, so the UI can open the booking it matched.
   **Why:** an extraction is a full replacement, not a patch — the old code
   overwrote every column including nulls, so a follow-up email that omitted the
   confirmation number erased it, and a change email listing one leg of a two-leg
@@ -290,31 +293,50 @@ Build/implement order from here: end-to-end flight extraction (single user) →
 prompt tuning on real emails → **archive sweep + `body_text`/`last_response` GC**
 → multi-user fan-out.
 
-### Provenance: message ↔ booking ↔ trip (standing consideration, not yet built)
+### Provenance: message ↔ booking ↔ trip
 
 **The user must always be able to see where a piece of information came from.**
 Treat navigable links between the three entities as a first-class goal, and weigh
 any design decision against whether it preserves or destroys that trail — this is
 a recurring consideration, not a one-off feature request.
 
-State of the linkage as of 2026-08-27 (assessed, deliberately parked):
-- `bookings.source_message_id` (RFC Message-ID) is written on every insert and,
-  because nothing updates an existing booking, genuinely means *created by*. It
-  is **not** in `Booking::jsonSerialize()`/`TravelManagerBooking`, so the UI has
-  never seen it — exposing it is the one-line prerequisite for either direction.
-- **Booking → message** is the easy direction: one-to-one, key on the booking, no
-  schema change. Caveat: `findAllForUser` caps the message list at 200, so an old
-  booking's message may not be in the loaded set.
-- **Message → booking** is one-to-**many** (one email can yield a flight *and* a
-  hotel), and the `related` rows — the case where you would most want the jump —
-  record the matched booking's id **only as prose** inside `messages.error`
-  (`describeRelated`: "matches the existing booking #12"). Same shape of problem
-  that `issue_reasons` solved: it would want a real `related_booking_id` column.
-- There is **no vue-router and no hash routing**; `view` is a plain ref, so a
-  booking is not addressable. A `focusBookingId` ref would work but must bypass
-  the review-state filter (or jumping to a discarded booking lands on an empty
-  list), and risks re-creating the view/filter conflation warned about below.
-  Real routing is the honest foundation if deep links are ever wanted.
+**Built (phase 1).** `DetailSidebar.vue` is the one place a booking, trip or
+message is shown in full, openable from any view — and later from the calendar,
+which is why *what is open* is a value rather than a component's internal state:
+- **Addressing lives in `location.hash`** (`src/detail.ts`: `parseRoute` /
+  `formatRoute` / `detailRoute`) — `#/bookings/42`, `#/trips/7`, `#/messages/19`.
+  No vue-router; the route set is tiny and fixed. A malformed hash falls back to
+  `DEFAULT_ROUTE` rather than rendering nothing.
+- **Back is the browser's own history**, not a second stack: navigating pushes an
+  entry, the panel's "←" calls `history.back()`, and its caption rides in
+  `history.state.fromLabel` so it survives Back *and* Forward. A ref would
+  desync the moment someone used the browser's button.
+- **`NcAppNavigationItem` renders `<a href="#">`** when given no `href`/`to`, so
+  every nav click appends a bare `#` to the history and fires `popstate`. Two
+  defences, keep both: the nav items use **`@click.prevent`**, and `onPopState`
+  uses **`matchRoute`** (null for anything unrecognised) rather than `parseRoute`
+  (which falls back to Bookings). Without them, clicking Trips switched the view
+  and the stray hash switched it straight back — the view nav silently stopped
+  working.
+- `sourceMessageId` is on the booking payload; **`GET /api/messages?messageId=`**
+  looks up a source email older than the list's 200-row page (a query param, not
+  a path segment — an RFC Message-ID contains `@` and angle brackets, and our OCS
+  helper does not escape path segments).
+- `BookingDetails.vue` renders a booking's type-specific body for **both** the
+  expanded grid row and the sidebar, so the two cannot drift.
+- The panel deliberately has **no tabs**: cross-links are the whole point of the
+  feature, and a tab would hide them behind a click.
+
+**Built (phase 2).** `related` messages now carry the ids of the bookings they
+matched in **`messages.related_booking_ids`** (`Version1800Date2026082800…`,
+comma-separated like `issue_reasons`; cleared on retry). `BookingService::applyOne`
+returns a **`RelatedBooking`** DTO (id + description) instead of a bare string, so
+the relationship survives as data rather than only inside the sentence
+`describeRelated` writes into `messages.error`. The sidebar's message panel shows
+it under **"Relates to"**, kept separate from "Bookings from this email" — *made
+this* and *is about this* are different claims and merging them would misreport
+what the app did. No backfill: the old rows' ids are recoverable only by parsing
+prose, and re-running the message fills the column properly.
 
 **UI structure (§2).** `view` selects one of the three views; each view owns its
 filter/sort refs. Do not conflate the two again — the original single `filter`
@@ -341,7 +363,12 @@ Consequences to preserve:
 - The heading row and each data row use the **same `.rowSummary` + column-template
   pair and the same cell order**, so one set of `nth-child` rules hides a column
   in both at a breakpoint. The heading's chevron cell is a real (empty) element
-  for exactly this reason — do not replace it with an offset.
+  for exactly this reason — do not replace it with an offset. Reordering columns
+  means editing three things in step: the `*_COLUMNS` array, the cell order in
+  the template, and the `nth-child` breakpoint rules.
+- **The first data column is the row's identity and the link into the sidebar**
+  in all three grids (Subject / Title / Trip). Keep it first if columns are
+  reordered.
 - **`sortBookings('travel', 'asc')` is deliberately not a plain date sort**: next
   trip first, then further-off ones, *then past travel in reverse*, undated last.
   Ascending by date would bury what is coming up under everything that already
@@ -353,7 +380,12 @@ Consequences to preserve:
   `end_date`** (`tripRows`/`tripSpan` in `src/trips.ts`): the stored columns are
   user-entered and go stale the moment a booking is linked or unlinked, so the
   grid would disagree with the rows underneath it. A booking with no end date
-  contributes its start, so a one-day hire still extends the trip. A trip's
+  contributes its start, so a one-day hire still extends the trip. **Period and
+  upcoming/past comparisons are by calendar date, via `localDate(now)`** — never
+  by full timestamp (a 15:20 departure showed as "Future" all morning) and never
+  via `toISOString()` (that is the UTC date, wrong either side of midnight for
+  most of the world; travel times are local wall-clock with no offset, V8). A
+  trip's
   bookings are listed in **travel order** (`inTravelOrder`, undated last): the
   API returns them `created_at DESC`, which is the order the *emails* arrived and
   says nothing about the trip. `TripPeriod`

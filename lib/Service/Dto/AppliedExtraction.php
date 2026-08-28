@@ -17,8 +17,8 @@ namespace OCA\TravelManager\Service\Dto;
 class AppliedExtraction {
 	/**
 	 * @param int $created bookings newly stored from this message
-	 * @param list<string> $related one line per booking that matched an existing
-	 *                              one and was therefore left alone
+	 * @param list<RelatedBooking> $related one entry per booking that matched an
+	 *                                      existing one and was left alone
 	 */
 	public function __construct(
 		public readonly int $created,
@@ -28,6 +28,22 @@ class AppliedExtraction {
 
 	/** One line per skipped booking, for the activity log and the message row. */
 	public function describeRelated(): string {
-		return implode("\n", array_map(static fn (string $line): string => '- ' . $line, $this->related));
+		return implode("\n", array_map(
+			static fn (RelatedBooking $entry): string => '- ' . $entry->description,
+			$this->related,
+		));
+	}
+
+	/**
+	 * The ids of the bookings this message relates to, for storing on the message
+	 * so the UI can offer to open them.
+	 *
+	 * @return list<int>
+	 */
+	public function relatedBookingIds(): array {
+		return array_values(array_unique(array_map(
+			static fn (RelatedBooking $entry): int => $entry->bookingId,
+			$this->related,
+		)));
 	}
 }

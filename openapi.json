@@ -33,6 +33,7 @@
                     "status",
                     "reviewState",
                     "confidence",
+                    "sourceMessageId",
                     "details",
                     "startDate",
                     "endDate",
@@ -78,6 +79,10 @@
                     "confidence": {
                         "type": "number",
                         "format": "double",
+                        "nullable": true
+                    },
+                    "sourceMessageId": {
+                        "type": "string",
                         "nullable": true
                     },
                     "details": {
@@ -168,6 +173,7 @@
                     "status",
                     "failureKind",
                     "issueReasons",
+                    "relatedBookingIds",
                     "error",
                     "lastResponse",
                     "attempts",
@@ -205,6 +211,13 @@
                         "type": "array",
                         "items": {
                             "type": "string"
+                        }
+                    },
+                    "relatedBookingIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "format": "int64"
                         }
                     },
                     "error": {
@@ -1734,6 +1747,16 @@
                         "name": "status",
                         "in": "query",
                         "description": "Only return messages with this status (processing, processed, failed, no_booking, dropped)",
+                        "schema": {
+                            "type": "string",
+                            "nullable": true,
+                            "default": null
+                        }
+                    },
+                    {
+                        "name": "messageId",
+                        "in": "query",
+                        "description": "Return only the message with this RFC Message-ID, if the user has it",
                         "schema": {
                             "type": "string",
                             "nullable": true,

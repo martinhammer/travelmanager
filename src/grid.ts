@@ -41,6 +41,24 @@ export const nextSortDirection = <K extends string>(
 }
 
 /**
+ * Today as a local YYYY-MM-DD, for comparing against travel dates.
+ *
+ * Deliberately *not* `toISOString().slice(0, 10)`: that is the UTC date, which is
+ * the wrong day either side of midnight for most of the world. Travel times are
+ * local wall-clock with no offset (V8), so the only coherent comparison is
+ * against the viewer's own calendar date.
+ *
+ * Day granularity, not instant: a trip that starts later today has started as
+ * far as anyone is concerned, and asking "is it current?" at 09:55 about a
+ * 15:20 flight should not answer "no, that is the future".
+ * @param now the reference point; injectable so tests do not depend on today
+ */
+export const localDate = (now: Date = new Date()): string => {
+	const pad = (value: number): string => String(value).padStart(2, '0')
+	return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/**
  * Format a travel span for a grid column: the start date, plus the end date when
  * it differs. Dates only — the time of day belongs in the expanded row, and a
  * column has to stay scannable.

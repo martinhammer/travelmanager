@@ -20,6 +20,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	status: 'processed',
 	failureKind: null,
 	issueReasons: [],
+	relatedBookingIds: [],
 	error: null,
 	lastResponse: null,
 	attempts: 1,

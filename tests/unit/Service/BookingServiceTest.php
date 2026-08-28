@@ -92,8 +92,11 @@ final class BookingServiceTest extends TestCase {
 
 		$this->assertSame(0, $applied->created);
 		$this->assertCount(1, $applied->related);
-		$this->assertStringContainsString('#12', $applied->related[0]);
-		$this->assertStringContainsString('not supported yet', $applied->related[0]);
+		$this->assertStringContainsString('#12', $applied->related[0]->description);
+		$this->assertStringContainsString('not supported yet', $applied->related[0]->description);
+		// The id, not only the sentence: this is what lets the Messages view
+		// offer to open the booking rather than merely name it.
+		$this->assertSame([12], $applied->relatedBookingIds());
 	}
 
 	public function testACancellationIsCalledOutByNameInTheReport(): void {
@@ -103,8 +106,8 @@ final class BookingServiceTest extends TestCase {
 
 		$applied = $this->service->applyExtraction('alice', '<m3@example.com>', [$this->extracted('cancelled')]);
 
-		$this->assertStringContainsString('CANCELLED', $applied->related[0]);
-		$this->assertStringContainsString('yourself', $applied->related[0]);
+		$this->assertStringContainsString('CANCELLED', $applied->related[0]->description);
+		$this->assertStringContainsString('yourself', $applied->related[0]->description);
 	}
 
 	public function testACancellationInAFirstMessageStillCreatesACancelledBooking(): void {

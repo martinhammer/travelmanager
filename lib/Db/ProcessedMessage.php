@@ -33,6 +33,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setFailureKind(?string $failureKind)
  * @method string|null getIssueReasons()
  * @method void setIssueReasons(?string $issueReasons)
+ * @method string|null getRelatedBookingIds()
+ * @method void setRelatedBookingIds(?string $relatedBookingIds)
  * @method string|null getError()
  * @method void setError(?string $error)
  * @method string|null getLastResponse()
@@ -91,6 +93,11 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 	 * branchable form of what `error` says in prose — see Version1700.
 	 */
 	protected ?string $issueReasons = null;
+	/**
+	 * Comma-separated ids of the bookings this email matched but did not touch.
+	 * The branchable form of what `error` says in prose — see Version1800.
+	 */
+	protected ?string $relatedBookingIds = null;
 	protected ?string $error = null;
 	/** Raw model output from the last attempt, truncated — the thing you read to diagnose a failure. */
 	protected ?string $lastResponse = null;
@@ -124,6 +131,9 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 			'issueReasons' => $this->issueReasons === null || $this->issueReasons === ''
 				? []
 				: array_values(array_filter(explode(',', $this->issueReasons))),
+			'relatedBookingIds' => $this->relatedBookingIds === null || $this->relatedBookingIds === ''
+				? []
+				: array_values(array_map('intval', array_filter(explode(',', $this->relatedBookingIds)))),
 			'error' => $this->error,
 			'lastResponse' => $this->lastResponse,
 			'attempts' => $this->attempts,

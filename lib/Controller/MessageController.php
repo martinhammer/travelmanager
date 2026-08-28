@@ -40,13 +40,23 @@ class MessageController extends OCSController {
 	 * List the messages ingested for the current user
 	 *
 	 * @param string|null $status Only return messages with this status (processing, processed, failed, no_booking, dropped)
+	 * @param string|null $messageId Return only the message with this RFC Message-ID, if the user has it
 	 * @return DataResponse<Http::STATUS_OK, list<TravelManagerMessage>, array{}>
 	 *
 	 * 200: Messages returned
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'GET', url: '/api/messages')]
-	public function index(?string $status = null): DataResponse {
+	public function index(?string $status = null, ?string $messageId = null): DataResponse {
+		// Looking one up by Message-ID is how a booking finds the email that
+		// created it when that email is older than the list's page. A query
+		// parameter rather than a path segment: an RFC Message-ID contains '@'
+		// and angle brackets, and our OCS URL helper does not escape path
+		// segments (see base() in src/api.ts).
+		if ($messageId !== null) {
+			$found = $this->mapper->findByMessageId($this->uid(), $messageId);
+			return new DataResponse($found === null ? [] : [$found->jsonSerialize()]);
+		}
 		$messages = $this->mapper->findAllForUser($this->uid(), $status);
 		$out = array_values(array_map(static fn ($m): array => $m->jsonSerialize(), $messages));
 		return new DataResponse($out);

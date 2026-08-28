@@ -32,6 +32,7 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 	status: 'active',
 	reviewState: 'draft',
 	confidence: null,
+	sourceMessageId: null,
 	details: {},
 	startDate: null,
 	endDate: null,
@@ -114,6 +115,17 @@ describe('sortBookings', () => {
 		// 2 and 4 are ahead (soonest first); 5 and 1 are past (most recent
 		// first); 3 has no date at all.
 		expect(sortBookings(pool, 'travel', 'asc', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
+	})
+
+	it('counts a booking travelling today as upcoming, however late it is read', () => {
+		// Matches tripPeriod: day granularity, not instant. An 08:00 flight read
+		// at 18:00 is still today's travel, not history.
+		const evening = new Date('2026-08-28T18:00:00')
+		const sameDay = [
+			booking({ id: 1, startDate: '2026-08-28T08:00:00' }),
+			booking({ id: 2, startDate: '2026-08-27T08:00:00' }),
+		]
+		expect(sortBookings(sameDay, 'travel', 'asc', evening).map((b) => b.id)).toEqual([1, 2])
 	})
 
 	it('falls back to plain reverse chronology descending — looking back, not ahead', () => {

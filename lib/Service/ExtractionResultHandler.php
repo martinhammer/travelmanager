@@ -71,6 +71,9 @@ class ExtractionResultHandler {
 			// the issues that produced it, and the UI branches on these slugs.
 			$this->setIssueReasons($message, $result->reasonSlugs());
 			$applied = $this->bookingService->applyExtraction($userId, $map->getMessageId(), $result->bookings);
+			// Kept as ids, not only as prose in the notes: this is the link the
+			// Messages view offers to open.
+			$this->setRelatedBookingIds($message, $applied->relatedBookingIds());
 			$count = $applied->created;
 			$dropped = $result->droppedCount();
 
@@ -178,8 +181,10 @@ class ExtractionResultHandler {
 				? null
 				: (string)json_encode($output, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
 		);
-		// Nothing was validated, so any slugs on the row belong to an earlier run.
+		// Nothing was validated, so any slugs or links on the row belong to an
+		// earlier run.
 		$this->setIssueReasons($message, []);
+		$this->setRelatedBookingIds($message, []);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $error, ProcessedMessage::FAILURE_PROVIDER);
 		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}
@@ -301,6 +306,16 @@ class ExtractionResultHandler {
 			return;
 		}
 		$message->setIssueReasons($reasons === [] ? null : mb_substr(implode(',', $reasons), 0, 255));
+	}
+
+	/**
+	 * @param list<int> $ids
+	 */
+	private function setRelatedBookingIds(?ProcessedMessage $message, array $ids): void {
+		if ($message === null) {
+			return;
+		}
+		$message->setRelatedBookingIds($ids === [] ? null : mb_substr(implode(',', $ids), 0, 255));
 	}
 
 	private function setLastResponse(?ProcessedMessage $message, ?string $response): void {

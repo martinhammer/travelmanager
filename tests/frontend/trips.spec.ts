@@ -33,6 +33,7 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 	status: 'active',
 	reviewState: 'draft',
 	confidence: null,
+	sourceMessageId: null,
 	details: {},
 	startDate: null,
 	endDate: null,
@@ -73,6 +74,20 @@ describe('tripPeriod', () => {
 		expect(tripPeriod('2026-09-01T00:00:00', '2026-09-10T00:00:00', now)).toBe('future')
 		// Started but not finished — the case the "Current" filter exists for.
 		expect(tripPeriod('2026-08-01T00:00:00', '2026-08-20T00:00:00', now)).toBe('current')
+	})
+
+	it('calls a trip that starts later today current, not future', () => {
+		// The regression: comparing full timestamps put a 15:20 departure under
+		// "Future" until 15:20 had passed. It is today; it is current.
+		const morning = new Date('2026-08-28T09:55:00')
+		expect(tripPeriod('2026-08-28T15:20:00', '2026-08-30T18:00:00', morning)).toBe('current')
+		// ...and still current once the day is over but the trip is not.
+		expect(tripPeriod('2026-08-28T06:00:00', '2026-08-30T18:00:00', morning)).toBe('current')
+	})
+
+	it('keeps a trip that ends today out of the past', () => {
+		const evening = new Date('2026-08-30T23:00:00')
+		expect(tripPeriod('2026-08-28T15:20:00', '2026-08-30T18:00:00', evening)).toBe('current')
 	})
 
 	it('treats an undated trip as its own case, not as future', () => {

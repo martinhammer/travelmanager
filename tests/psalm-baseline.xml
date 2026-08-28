@@ -12,7 +12,6 @@
   </file>
   <file src="lib/Db/Booking.php">
     <PossiblyUnusedProperty>
-      <code><![CDATA[$sourceMessageId]]></code>
       <code><![CDATA[$userId]]></code>
     </PossiblyUnusedProperty>
   </file>
@@ -125,6 +124,11 @@
   <file src="lib/Migration/Version1700Date20260827100000.php">
     <UnusedClass>
       <code><![CDATA[Version1700Date20260827100000]]></code>
+    </UnusedClass>
+  </file>
+  <file src="lib/Migration/Version1800Date20260828000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version1800Date20260828000000]]></code>
     </UnusedClass>
   </file>
   <file src="lib/Service/BookingService.php">

@@ -81,6 +81,8 @@ export interface Booking {
 	/** What the user decided: draft, confirmed, discarded or archived. */
 	reviewState: ReviewState
 	confidence: number | null
+	/** RFC Message-ID of the email that created this booking — the trail back to it. */
+	sourceMessageId: string | null
 	details: BookingDetails
 	startDate: string | null
 	endDate: string | null
@@ -101,6 +103,8 @@ export interface Message {
 	failureKind: string | null
 	/** ExtractionIssue reason slugs from the last attempt, e.g. 'repaired_json'. */
 	issueReasons: string[]
+	/** Bookings this email matched but did not touch — see the 'related' status. */
+	relatedBookingIds: number[]
 	error: string | null
 	/** Raw model output from the last attempt (truncated server-side). */
 	lastResponse: string | null
@@ -157,6 +161,17 @@ export const assignBookingToTrip = async (id: number, tripId: number | null): Pr
 export const listMessages = async (status?: string): Promise<Message[]> => {
 	const res = await axios.get(base('messages'), { params: status ? { status } : {} })
 	return unwrap(res.data)
+}
+
+/**
+ * Find the ingested message with a given RFC Message-ID, or null. Used when a
+ * booking's source email is older than the message list's page, so it was never
+ * loaded — the list caps at 200 rows.
+ * @param messageId the RFC Message-ID to look up
+ */
+export const findMessageBySourceId = async (messageId: string): Promise<Message | null> => {
+	const res = await axios.get(base('messages'), { params: { messageId } })
+	return unwrap<Message[]>(res.data)[0] ?? null
 }
 
 /**

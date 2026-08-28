@@ -156,8 +156,10 @@ class IngestionService {
 		$record->setStatus(ProcessedMessage::STATUS_PROCESSING);
 		$record->setError(null);
 		$record->setFailureKind(null);
-		// The previous attempt's issues describe a response we are about to replace.
+		// The previous attempt's issues and links describe a response we are about
+		// to replace.
 		$record->setIssueReasons(null);
+		$record->setRelatedBookingIds(null);
 		$record->setProcessedAt($this->timeFactory->getDateTime());
 		$this->processedMessageMapper->update($record);
 

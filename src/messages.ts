@@ -61,8 +61,10 @@ export type MessageSort = 'sender' | 'subject' | 'received' | 'processed' | 'att
 
 /** The Messages grid's columns, in display order. See SortColumn in ./grid. */
 export const MESSAGE_COLUMNS: SortColumn<MessageSort>[] = [
-	{ key: 'sender', defaultDirection: 'asc' },
+	// Subject leads: the first column is the one that opens the sidebar, and it
+	// should be the row's own identity in every grid.
 	{ key: 'subject', defaultDirection: 'asc' },
+	{ key: 'sender', defaultDirection: 'asc' },
 	{ key: 'received', defaultDirection: 'desc' },
 	{ key: 'processed', defaultDirection: 'desc' },
 	{ key: 'attempts', defaultDirection: 'desc' },

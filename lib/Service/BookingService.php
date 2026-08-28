@@ -10,6 +10,7 @@ use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Service\Dto\AppliedExtraction;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
+use OCA\TravelManager\Service\Dto\RelatedBooking;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IDBConnection;
@@ -40,7 +41,7 @@ class BookingService {
 	 */
 	public function applyExtraction(string $userId, string $messageId, array $bookings): AppliedExtraction {
 		$created = 0;
-		/** @var list<string> $related */
+		/** @var list<RelatedBooking> $related */
 		$related = [];
 		$this->db->beginTransaction();
 		try {
@@ -61,10 +62,11 @@ class BookingService {
 	}
 
 	/**
-	 * @return string|null null when the booking was stored; otherwise a
-	 *                     description of the existing booking it matched
+	 * @return RelatedBooking|null null when the booking was stored; otherwise the
+	 *                             existing booking it matched, with its id so the
+	 *                             relationship survives as data and not only prose
 	 */
-	private function applyOne(string $userId, string $messageId, ExtractedBooking $extracted): ?string {
+	private function applyOne(string $userId, string $messageId, ExtractedBooking $extracted): ?RelatedBooking {
 		$existing = $this->bookingMapper->findByReference(
 			$userId,
 			$extracted->type,
@@ -72,7 +74,7 @@ class BookingService {
 			$extracted->bookingReference,
 		);
 		if ($existing !== null) {
-			return $this->describeRelated($existing, $extracted);
+			return new RelatedBooking($existing->getId(), $this->describeRelated($existing, $extracted));
 		}
 
 		$now = $this->timeFactory->getDateTime();
