@@ -1,0 +1,387 @@
+/*
+ * The month calendar: the grid, its day cells, and the bars drawn across them.
+ *
+ * Plain prefixed classes rather than a CSS module, for the same reason grid.css
+ * is: two components need them (CalendarView draws the grid, CalendarBar draws
+ * what sits on it) and `<style module>` is per-SFC. A CSS module would also hash
+ * the names, and the bar is positioned by the *view* via inline grid-column /
+ * grid-row, so the two files have to agree about the same element.
+ *
+ * The `tm-cal-` prefix keeps these out of Nextcloud's way and apart from the
+ * three list grids in grid.css, which share nothing with this beyond the app.
+ */
+
+.tm-cal {
+	/* One container query context for everything inside, so bars react to the
+	   space the *calendar* has rather than to the viewport. The detail sidebar
+	   shrinks the content area without moving the viewport, so a media query
+	   would never fire when the panel opens — which is exactly when the grid
+	   most needs to compact. */
+	container-type: inline-size;
+	container-name: tm-cal;
+
+	/* Fill the app content area rather than ending wherever the last week does.
+	   A month grid is a fixed number of rows over a known span, so trailing
+	   whitespace is dead space — the rows should take it instead. NcAppContent
+	   and its wrapper are both height:100%, so this chains all the way up. */
+	box-sizing: border-box;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+
+	/* Mid-tone fills, chosen to carry white text at ~5:1 in either theme: a
+	   solid bar's contrast is against its own text, not against the page, so
+	   one value works light and dark alike. */
+	--tm-cal-flight: #2b6cb0;
+	--tm-cal-accommodation: #6b46c1;
+	--tm-cal-car-rental: #2f7d5b;
+
+	/* The lane geometry, in one place and as **explicit lengths** rather than
+	   whatever a line box happens to round to. CalendarView reads these four back
+	   out with getComputedStyle to work out how many lanes fit the space it has,
+	   so CSS stays the single source of truth and the two cannot drift. */
+	--tm-cal-bar-height: 20px;
+	--tm-cal-lane-gap: 2px;
+	--tm-cal-head: 22px;
+	--tm-cal-foot: 3px;
+
+	/* The floor an *empty* week sits at, so a quiet month still reads as a grid:
+	   four lanes plus the day-number row. Busy weeks grow past it — see
+	   grid-auto-rows. */
+	--tm-cal-week-min: 114px;
+}
+
+/* --- the frame ----------------------------------------------------------- */
+
+.tm-cal-summary {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 12px;
+	color: var(--color-text-maxcontrast);
+}
+
+.tm-cal-month {
+	/* Sits ahead of the paging buttons, so it needs its own breathing room —
+	   the nav's 4px gap is meant for the buttons sitting against each other. */
+	margin: 0 8px 0 0;
+
+	/* Every child occupies the same cell, so the box is as wide as the widest of
+	   them: the visible label plus one hidden copy per month name. That keeps the
+	   buttons at a fixed x while paging, without hard-coding a width that a
+	   different locale or font would make wrong. */
+	display: grid;
+	grid-template-areas: 'month';
+
+	/* Digits share a width, so the box does not twitch when the year changes. */
+	font-variant-numeric: tabular-nums;
+}
+
+.tm-cal-month > * {
+	grid-area: month;
+	white-space: nowrap;
+}
+
+/* visibility, not display:none — a hidden box still takes part in sizing, which
+   is the entire point. It also keeps them out of the accessibility tree, so the
+   heading reads as one month rather than twelve. */
+.tm-cal-month-ghost {
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.tm-cal-nav {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.tm-cal-weekdays,
+.tm-cal-week-bg,
+.tm-cal-week-fg {
+	display: grid;
+	/* minmax(0, 1fr) rather than 1fr: a long bar's text must be allowed to
+	   truncate instead of forcing its column wider than a seventh of the row. */
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.tm-cal-weekdays {
+	padding-bottom: 4px;
+	font-size: 0.8125rem;
+	font-weight: bold;
+	color: var(--color-text-maxcontrast);
+}
+
+.tm-cal-weekday {
+	/* Right-aligned to sit over the day numbers, which are right-aligned so the
+	   figure stays put as it goes from one digit to two. */
+	padding-inline: 6px;
+	text-align: end;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tm-cal-grid {
+	border-block: 1px solid var(--color-border);
+
+	/* Rows take at least their content, then share what is left over.
+	   **`min-content`, never a fixed minimum.** A `1fr` *maximum* is a flexible
+	   track: it is sized by distributing free space and never by what is in it,
+	   so `minmax(100px, 1fr)` lets a week with more lanes than its share silently
+	   overflow into the week below — bars landing on the next row's day numbers.
+	   With `min-content` the row's floor is what the week actually needs, and the
+	   flex share still fills the screen when there is room.
+	   The per-week floor lives on .tm-cal-week instead, where it feeds into that
+	   min-content rather than capping it.
+
+	   When even the minimums do not fit (a short window, or six weeks), the grid
+	   scrolls inside itself instead of pushing the toolbar off the top, which is
+	   what `min-height: 0` on the flex item allows. */
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	grid-auto-rows: minmax(min-content, 1fr);
+	overflow-y: auto;
+}
+
+/* The week is a positioning context so the day backgrounds can be one layer and
+   the content another. Stacking them beats putting the cells in the same grid:
+   a background that spans every lane would need the lane count baked into
+   grid-template-rows, and `repeat()` cannot take a custom property. */
+.tm-cal-week {
+	position: relative;
+
+	/* Contributes to the row's min-content, so a week with nothing in it still
+	   reads as a week rather than collapsing to its day numbers. */
+	min-height: var(--tm-cal-week-min);
+}
+
+.tm-cal-week + .tm-cal-week {
+	border-top: 1px solid var(--color-border);
+}
+
+.tm-cal-week-bg {
+	position: absolute;
+	inset: 0;
+}
+
+.tm-cal-day {
+	border-inline-start: 1px solid var(--color-border);
+}
+
+.tm-cal-day:first-child {
+	border-inline-start: none;
+}
+
+/* Days belonging to the neighbouring month recede rather than disappear: a
+   booking really does sit on them, and hiding the number would leave the bar
+   floating on an unlabelled cell. */
+.tm-cal-day-outside {
+	background-color: var(--color-background-dark);
+}
+
+.tm-cal-week-fg {
+	position: relative;
+	row-gap: var(--tm-cal-lane-gap);
+	padding-bottom: var(--tm-cal-foot);
+	align-content: start;
+}
+
+.tm-cal-daynum {
+	grid-row: 1;
+	display: flex;
+	justify-content: flex-end;
+
+	/* Fixed, so the lane arithmetic above holds exactly rather than depending on
+	   how a line box rounds. */
+	height: var(--tm-cal-head);
+	align-items: center;
+	padding: 0 6px;
+	font-size: 0.75rem;
+}
+
+.tm-cal-daynum-outside {
+	color: var(--color-text-maxcontrast);
+}
+
+.tm-cal-daynum > span {
+	min-width: 18px;
+	height: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--border-radius-pill);
+}
+
+.tm-cal-daynum-today > span {
+	background-color: var(--color-primary-element);
+	color: var(--color-primary-element-text);
+	font-weight: bold;
+}
+
+/* --- bars ---------------------------------------------------------------- */
+
+/* Scoped under .tm-cal for the specificity: the server's own `button` rules
+   outrank a bare class and would put a filled pill behind every bar. */
+.tm-cal .tm-cal-bar {
+	--tm-cal-fill: var(--color-text-maxcontrast);
+	/* The edge/icon colour, pulled toward the page's own text so it stays
+	   legible against the background in both themes — the fill cannot do that
+	   job, since a draft bar shows it on the page rather than under white text. */
+	--tm-cal-accent: color-mix(in srgb, var(--tm-cal-fill) 68%, var(--color-main-text) 32%);
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	min-width: 0;
+	margin: 0 2px;
+	text-decoration: none;
+
+	/* An explicit height rather than padding plus a line box: the lane cap is
+	   computed from it, so it has to be a number both sides agree on. */
+	height: var(--tm-cal-bar-height);
+	padding: 0 6px;
+	border: 1px solid transparent;
+	border-radius: var(--border-radius, 6px);
+	background-color: var(--tm-cal-fill);
+	color: #fff;
+	font-size: 0.75rem;
+	line-height: 1.35;
+	text-align: start;
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.tm-cal .tm-cal-bar[data-type='flight'] {
+	--tm-cal-fill: var(--tm-cal-flight);
+}
+
+.tm-cal .tm-cal-bar[data-type='accommodation'] {
+	--tm-cal-fill: var(--tm-cal-accommodation);
+}
+
+.tm-cal .tm-cal-bar[data-type='car_rental'] {
+	--tm-cal-fill: var(--tm-cal-car-rental);
+}
+
+/* A trip is the grouping its bookings sit under, so it takes the app's own
+   accent rather than a type colour — it is not one more kind of booking.
+   That accent is a blue, though, and so is the flight fill, so the two are also
+   separated by *shape*: a trip is a slim pill, a booking a full-height rounded
+   rectangle. Colour alone would leave the pair hardest to tell apart at a
+   glance, which is precisely the glance this view exists for. */
+.tm-cal .tm-cal-bar[data-kind='trip'] {
+	--tm-cal-fill: var(--color-primary-element);
+	--tm-cal-accent: var(--color-primary-element);
+	border-radius: var(--border-radius-pill);
+	color: var(--color-primary-element-text);
+	font-weight: bold;
+}
+
+/* Draft: outlined and dashed, never merely a paler fill. The cue has to survive
+   greyscale and colour-blindness, so it is a difference in *shape*; the text
+   takes the page's own colour so contrast holds in either theme. */
+.tm-cal .tm-cal-bar-draft {
+	background-color: transparent;
+	border-color: var(--tm-cal-accent);
+	border-style: dashed;
+	color: var(--color-main-text);
+}
+
+.tm-cal .tm-cal-bar-draft .tm-cal-bar-icon {
+	color: var(--tm-cal-accent);
+}
+
+/* Continuation: the edge that runs into the next week loses its corner, so a
+   split bar reads as one thing crossing a boundary rather than two bookings. */
+.tm-cal .tm-cal-bar.tm-cal-bar-continues-left {
+	border-start-start-radius: 0;
+	border-end-start-radius: 0;
+	margin-inline-start: 0;
+}
+
+.tm-cal .tm-cal-bar.tm-cal-bar-continues-right {
+	border-start-end-radius: 0;
+	border-end-end-radius: 0;
+	margin-inline-end: 0;
+}
+
+.tm-cal .tm-cal-bar:hover,
+.tm-cal .tm-cal-bar:focus-visible {
+	filter: brightness(1.08);
+}
+
+.tm-cal .tm-cal-bar-selected {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 1px;
+}
+
+.tm-cal-bar-icon {
+	display: flex;
+	flex-shrink: 0;
+}
+
+.tm-cal-bar-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* --- overflow ------------------------------------------------------------ */
+
+/* "+N more" *is* a button — it expands the week rather than going anywhere — so
+   it does need the server's reset undone. The doubled class is load-bearing:
+   `button:not(.button-vue, [class^="vs__"]):not(.app-navigation-entry-button)`
+   is (0,2,1) and outranks a plain `.tm-cal .tm-cal-more`, leaving the row 34px
+   tall with a 3px margin. */
+.tm-cal .tm-cal-more.tm-cal-more {
+	height: var(--tm-cal-bar-height);
+	min-height: 0;
+	width: auto;
+	margin: 0 2px;
+	font: inherit;
+	padding: 0 6px;
+	border: none;
+	border-radius: var(--border-radius, 6px);
+	background-color: transparent;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.75rem;
+	line-height: 1.35;
+	text-align: start;
+	cursor: pointer;
+}
+
+.tm-cal .tm-cal-more.tm-cal-more:hover,
+.tm-cal .tm-cal-more.tm-cal-more:focus-visible {
+	background-color: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+/* --- compaction ---------------------------------------------------------- */
+
+/* Below roughly 90px per day column the label is a character or two of nothing.
+   Drop to the icon alone: the bar keeps its span, colour and draft cue, which is
+   what the month view is actually for, and the title attribute still names it.
+   This is the width the calendar has, not the window's — see container-type. */
+@container tm-cal (max-width: 640px) {
+	.tm-cal-bar-label {
+		display: none;
+	}
+
+	.tm-cal .tm-cal-bar {
+		justify-content: center;
+		padding-inline: 2px;
+	}
+
+	.tm-cal {
+		--tm-cal-week-min: 106px;
+	}
+}
+
+@container tm-cal (max-width: 420px) {
+	.tm-cal-weekday {
+		font-size: 0.75rem;
+		padding-inline: 2px;
+	}
+}

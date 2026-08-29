@@ -7,6 +7,7 @@ import NcContent from '@nextcloud/vue/components/NcContent'
 import { t } from '@nextcloud/l10n'
 import AppDialogs from './AppDialogs.vue'
 import BookingsView from './BookingsView.vue'
+import CalendarView from './CalendarView.vue'
 import DetailSidebar from './DetailSidebar.vue'
 import MessagesView from './MessagesView.vue'
 import TripsView from './TripsView.vue'
@@ -22,6 +23,7 @@ import {
 } from './navigation'
 import { attentionCount, bookings, draftBookingCount, messages, reload, trips } from './store'
 import './grid.css'
+import './calendar.css'
 
 /**
  * The shell: navigation, which view is showing, and the detail panel.
@@ -29,8 +31,9 @@ import './grid.css'
  * Everything else lives elsewhere on purpose — the views own their own filters,
  * `store.ts` owns the data, `navigation.ts` owns what is open, `AppDialogs.vue`
  * owns the dialogs (raised from the panel and from a toolbar, so no view owns
- * them), and `grid.css` owns the look the three grids share. Adding a fourth view
- * (the calendar) should mean a new SFC and one nav item here, nothing more.
+ * them), `grid.css` owns the look the three list grids share and `calendar.css`
+ * the month grid's. Adding the calendar cost exactly what it was meant to: one
+ * SFC and one nav item here.
  */
 
 let stopNavigation = (): void => {}
@@ -49,10 +52,15 @@ onUnmounted(() => stopNavigation())
 	<NcContent app-name="travelmanager">
 		<NcAppNavigation>
 			<template #list>
-				<!-- Three views; what to show within each is a filter, not a
-				     navigation choice. Counters show what awaits you, not totals.
+				<!-- Four views; what to show within each is a filter, not a
+				     navigation choice. Counters show what awaits you, not totals —
+				     the calendar has none, because its own summary line answers that
+				     for the month on screen, which a global count cannot.
 				     `@click.prevent` because NcAppNavigationItem renders <a href="#">,
 				     whose stray hash would otherwise bounce the route back. -->
+				<NcAppNavigationItem :name="t('travelmanager', 'Calendar')"
+					:active="view === 'calendar'"
+					@click.prevent="view = 'calendar'" />
 				<NcAppNavigationItem :name="t('travelmanager', 'Bookings')"
 					:active="view === 'bookings'"
 					@click.prevent="view = 'bookings'">
@@ -80,12 +88,13 @@ onUnmounted(() => stopNavigation())
 		<NcAppContent>
 			<TripsView v-if="view === 'trips'" />
 			<MessagesView v-else-if="view === 'messages'" />
-			<BookingsView v-else />
+			<BookingsView v-else-if="view === 'bookings'" />
+			<CalendarView v-else />
 		</NcAppContent>
 
-		<!-- One panel for every kind of thing, openable from any view and later
-		     from the calendar. Keyed so switching target rebuilds it rather than
-		     leaving the previous entity's scroll position behind. -->
+		<!-- One panel for every kind of thing, openable from any view including the
+		     calendar. Keyed so switching target rebuilds it rather than leaving the
+		     previous entity's scroll position behind. -->
 		<DetailSidebar v-if="route.detail !== null"
 			:id="route.detail.id"
 			:key="`${route.detail.type}-${route.detail.id}`"

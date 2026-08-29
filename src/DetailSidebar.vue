@@ -343,6 +343,12 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' =>
 <style module>
 .body {
 	padding-inline-start: 10px;
+
+	/* The panel scrolls itself (`.app-sidebar` is overflow-y: auto), and a scroll
+	   container's last child otherwise ends flush against the bottom edge — which
+	   is where the Actions buttons sit. The calendar made this visible: the app
+	   content used to scroll the page, so the sidebar rarely scrolled on its own. */
+	padding-block-end: 16px;
 }
 
 .back {

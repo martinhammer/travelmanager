@@ -7,6 +7,7 @@ import {
 	detailLabel,
 	detailRoute,
 	formatRoute,
+	keepsView,
 	matchRoute,
 	messageForBooking,
 	parseRoute,
@@ -71,6 +72,31 @@ describe('parseRoute', () => {
 		expect(parseRoute('')).toEqual(DEFAULT_ROUTE)
 		expect(parseRoute('#/nonsense/1')).toEqual(DEFAULT_ROUTE)
 	})
+
+	it('starts on the calendar, which is the overview the rest hang off', () => {
+		expect(DEFAULT_ROUTE).toEqual({ view: 'calendar', detail: null })
+	})
+
+	it('reads an entity shown over a view that is not its own', () => {
+		// The three-segment form is how the calendar keeps its month on screen
+		// while the panel is open.
+		expect(parseRoute('#/calendar/bookings/42'))
+			.toEqual({ view: 'calendar', detail: { type: 'booking', id: 42 } })
+		expect(parseRoute('#/calendar/trips/7'))
+			.toEqual({ view: 'calendar', detail: { type: 'trip', id: 7 } })
+	})
+
+	it('gives the calendar no rows of its own to address', () => {
+		// '#/calendar/42' is not a broken booking id — the calendar simply has no
+		// entity type, so the two-segment shorthand means nothing there.
+		expect(parseRoute('#/calendar/42')).toEqual({ view: 'calendar', detail: null })
+		expect(parseRoute('#/calendar')).toEqual({ view: 'calendar', detail: null })
+	})
+
+	it('keeps the view when the trailing entity is unusable', () => {
+		expect(parseRoute('#/calendar/bookings/abc')).toEqual({ view: 'calendar', detail: null })
+		expect(parseRoute('#/calendar/nonsense/42')).toEqual({ view: 'calendar', detail: null })
+	})
 })
 
 describe('matchRoute', () => {
@@ -98,9 +124,19 @@ describe('matchRoute', () => {
 
 describe('formatRoute', () => {
 	it('round-trips through parseRoute', () => {
-		for (const hash of ['#/bookings', '#/bookings/42', '#/trips/7', '#/messages/19']) {
+		const hashes = [
+			'#/bookings', '#/bookings/42', '#/trips/7', '#/messages/19',
+			'#/calendar', '#/calendar/bookings/42', '#/calendar/trips/7',
+		]
+		for (const hash of hashes) {
 			expect(formatRoute(parseRoute(hash))).toBe(hash)
 		}
+	})
+
+	it('collapses to the shorthand when the entity is shown over its own list', () => {
+		// So the URLs people already have keep being the ones we generate.
+		expect(formatRoute({ view: 'bookings', detail: { type: 'booking', id: 42 } }))
+			.toBe('#/bookings/42')
 	})
 })
 
@@ -110,6 +146,20 @@ describe('detailRoute', () => {
 		// panel leaves you somewhere coherent rather than on an unrelated list.
 		expect(detailRoute('booking', 42)).toEqual({ view: 'bookings', detail: { type: 'booking', id: 42 } })
 		expect(detailRoute('trip', 7).view).toBe('trips')
+	})
+
+	it('stays put when asked to, so the calendar is not taken off screen', () => {
+		expect(detailRoute('booking', 42, 'calendar'))
+			.toEqual({ view: 'calendar', detail: { type: 'booking', id: 42 } })
+	})
+
+	it('marks only the calendar as a view that holds its ground', () => {
+		// The lists are each about one kind of thing, so opening a different kind
+		// there genuinely means you have left; the calendar is what you work from.
+		expect(keepsView('calendar')).toBe(true)
+		expect(keepsView('bookings')).toBe(false)
+		expect(keepsView('trips')).toBe(false)
+		expect(keepsView('messages')).toBe(false)
 	})
 })
 

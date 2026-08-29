@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 import type { Booking, Message, Trip } from './api'
 import { findMessageBySourceId } from './api'
 import type { DetailType, Route } from './detail'
-import { byId, detailLabel, detailRoute, formatRoute, matchRoute, parseRoute } from './detail'
+import { byId, detailLabel, detailRoute, formatRoute, keepsView, matchRoute, parseRoute } from './detail'
 import { bookings, messages, trips } from './store'
 
 /**
@@ -43,6 +43,10 @@ export const navigate = (next: Route, fromLabel: string | null = null): void => 
 	}
 }
 
+// The view to stay on while a detail is open, or null to hand over to the
+// entity's own list. Only the calendar holds its ground — see keepsView.
+const within = (): Route['view'] | null => keepsView(route.value.view) ? route.value.view : null
+
 const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
 	switch (type) {
 	case 'booking':
@@ -55,7 +59,8 @@ const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
 }
 
 /**
- * Open one thing in the detail panel **from a list row**, discarding any trail.
+ * Open one thing in the detail panel **from a row or a calendar bar**, discarding
+ * any trail.
  *
  * Picking another row is not navigating *from* whatever the panel happened to be
  * showing — offering "← Trip 1" after clicking Trip 2 in the list describes a
@@ -65,7 +70,7 @@ const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
  * @param id its id
  */
 export const openDetail = (type: DetailType, id: number): void => {
-	navigate(detailRoute(type, id))
+	navigate(detailRoute(type, id, within()))
 	backLabel.value = null
 }
 
@@ -80,9 +85,22 @@ export const openLinked = (type: DetailType, id: number): void => {
 	const current = route.value.detail
 	const item = current === null ? null : byId(entitiesFor(current.type), current.id)
 	const from = current === null || item === null ? null : detailLabel(current.type, item)
-	navigate(detailRoute(type, id), from)
+	navigate(detailRoute(type, id, within()), from)
 	backLabel.value = from
 }
+
+/**
+ * The address a detail opens at, for controls that are genuinely links rather
+ * than buttons — the calendar's bars.
+ *
+ * Shares `within()` with openDetail deliberately: an href and the click handler
+ * beside it must never describe different destinations, and they would drift the
+ * moment one of them grew a special case.
+ * @param type the kind of entity
+ * @param id its id
+ */
+export const detailHref = (type: DetailType, id: number): string =>
+	formatRoute(detailRoute(type, id, within()))
 
 export const closeDetail = (): void => {
 	navigate({ view: route.value.view, detail: null })

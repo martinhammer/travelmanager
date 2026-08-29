@@ -30,7 +30,11 @@ TaskSuccessfulEvent / TaskFailedEvent
   └─ ExtractionResultHandler  (correlates by task_id → TaskMap → user+message)
        ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
        └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
-UI (Vue, OCS API) — three views: Bookings | Trips | Messages
+UI (Vue, OCS API) — four views: Calendar | Bookings | Trips | Messages
+  ├─ Calendar: **the default view**. Month grid, trips and bookings drawn as
+  │            bars across the days they cover; ‹ › Today paging, a month-scoped
+  │            summary, and a toggle for archived/discarded. Clicking a bar opens
+  │            the sidebar *without leaving the calendar*
   ├─ Bookings: sortable grid (Title | Trip | Type | Provider | Reference |
   │            Travel dates | Added | Status); filter by review state + type;
   │            rows do not expand — clicking one opens the detail sidebar
@@ -292,6 +296,10 @@ debug panel for iterating without waiting for cron:
 - ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view
   SFCs, `store.ts`, `navigation.ts`, `labels.ts` and `grid.css`. See "Frontend
   layout" below. No behaviour change intended.
+- ✅ **Calendar view** (2026-08-29, app version 1.9.0): the app's **default**
+  view. A month grid where trips and bookings are bars across the days they
+  cover. See "Calendar" below. No backend work — it is a pure client-side view
+  over data `store.ts` already holds.
 - ✅ **One card, not two** (2026-08-29): Bookings and Trips rows no longer expand;
   the sidebar is the only place either is shown in full or acted on, via a new
   **Actions** section. Dialogs moved to `AppDialogs.vue` + `dialogs.ts`, since the
@@ -358,10 +366,140 @@ this* and *is about this* are different claims and merging them would misreport
 what the app did. No backfill: the old rows' ids are recoverable only by parsing
 prose, and re-running the message fills the column properly.
 
+### Calendar
+
+The month grid, and the view the app opens on. Built on the same principle as the
+rest: *what is open* is a value in the URL, the layout maths is pure and tested,
+and the wording lives in `labels.ts`.
+
+- **Clicking a bar does not leave the calendar.** The hash grammar therefore has
+  a second form: `#/calendar/bookings/42` alongside the existing `#/bookings/42`
+  shorthand. `detail.ts` grew `ViewName`, a three-segment branch in `matchRoute`,
+  a `within` argument on `detailRoute`, and **`keepsView(view)`** — true only for
+  the calendar. `formatRoute` **collapses back to the shorthand** whenever the
+  entity is shown over its own list, so existing URLs keep working *and* keep
+  being the ones we generate. **Why the calendar is special:** the lists are each
+  about one kind of thing, so opening a different kind there genuinely means you
+  have left; the month is the thing you work *from*, and taking it off screen on
+  every click makes stepping through a trip a round trip through the Bookings
+  list each time. `DEFAULT_ROUTE` is now `#/calendar`.
+- **`NcAppSidebar` shrinks the content area, it does not cover it**
+  (`position: relative`, `width: clamp(300px, 27vw, 500px)`, and `.app-content`
+  has `min-width: 0`; below 512px it becomes a full-screen overlay). At a 1512px
+  viewport the grid keeps ~800px with the panel open. That squeeze is safe *here*
+  in a way it is not for the list grids: every bar's day and lane are fixed by its
+  dates, so nothing moves to another day — only the label truncates.
+- **Compaction is a `@container` query, not a media query.** The viewport does not
+  change when the sidebar opens, so a media query never fires at the one moment
+  the grid most needs to compact. `.tm-cal` is the container; below 640px the bar
+  labels drop and the icon carries the meaning. This is why every bar has an
+  **`aria-label`**: `display: none` takes the visible label out of the
+  accessibility tree too, so the button would otherwise be unnamed exactly when it
+  is hardest to identify by sight.
+- **Both cues are non-colour.** Type is an icon as well as a fill
+  (`vue-material-design-icons`: plane / bed / car, MapMarker as the fallback);
+  **draft is a dashed outline**, not a paler shade, so it survives greyscale and
+  colour-blindness. A **trip is a slim pill** while a booking is a full-height
+  rounded rectangle — the trip fill is `--color-primary-element`, which is a blue,
+  and so is the flight fill, so those two are separated by *shape* as well.
+- **Solid fills are one value for both themes** (contrast is against the bar's own
+  white text, not the page). The edge/icon colour for draft bars is
+  `color-mix(… var(--color-main-text))`, which self-adapts: it pulls toward white
+  on a dark theme and toward black on a light one, with no theme hook to keep in
+  step.
+- **A multi-leg flight draws one bar per leg**, each spanning that leg's own
+  departure→arrival dates (`bookingItems`/`flightLegItems`). `bookings.start_date`
+  /`end_date` is the *whole itinerary*, so a return trip drawn from it is a single
+  bar covering the fortnight you were away — which says nothing about when you were
+  flying and buries every other booking under it. Consequences:
+  - `CalendarItem.id` is **not unique** (all four legs carry the booking's id, so
+    any leg opens it and all four highlight together); **`CalendarItem.key`** is,
+    and is what the `v-for` keys on and what `compareItems` breaks ties by. An
+    id-based tiebreak is not a total order and let legs swap lanes between renders.
+  - **`monthSummary` counts distinct ids, not bars** — a four-leg flight is one
+    booking you have to make one decision about.
+  - Each leg is labelled by `segmentLabel` ("EY42 AMS → AUH"), not by the booking
+    title, which would otherwise repeat a long subject line four times. The flight
+    number is preferred over the carrier because it already carries the airline
+    code. Single-leg flights get the same treatment, for consistency and because
+    a route beats a truncated email subject in a ~150px cell.
+  - Falls back to the stored span when a flight has no readable segments, and
+    skips an individual leg with no `departureLocal` (the field extraction
+    validates a segment by). Hotels and car rentals are never split — a stay is
+    one continuous thing.
+- **Trip bars use the derived span** (`tripRows`/`tripSpan`), never
+  `trips.start_date` — same rule as the Trips grid, so the two cannot disagree.
+  A trip with no dated bookings has no span and simply is not on the calendar.
+- **Discarded and archived are hidden by default.** On a list they merely sit
+  there; here they would take lanes from the bookings that matter. One toolbar
+  toggle reveals them.
+- **The month summary is scoped to the month on screen** ("2 trips · 5 bookings ·
+  1 draft"), which is the one count the navigation's global counters cannot give.
+  The draft count is a **button** that opens the earliest draft in the month, so
+  it is something you act on rather than a number you carry elsewhere.
+- **Week rows are `minmax(min-content, 1fr)`, never `minmax(<length>, 1fr)`.** A
+  `1fr` *maximum* is a flexible track: it is sized by distributing free space and
+  never by what is in it, so a fixed minimum lets a week with more lanes than its
+  share overflow into the week below — bars landing on the next row's day numbers,
+  with no warning. Measured: a row needing 226px given 119px spills 107px. With
+  `min-content` the floor is what the week actually needs and the flex share still
+  fills the screen. `--tm-cal-week-min` moved onto `.tm-cal-week` accordingly,
+  where it feeds that min-content instead of capping it, and now means only "the
+  floor an empty week sits at".
+- **The lane geometry is declared once, in CSS, as explicit lengths.**
+  `--tm-cal-bar-height: 20px`, `--tm-cal-lane-gap: 2px`, `--tm-cal-head: 22px`
+  (the day-number row) and `--tm-cal-foot: 3px` are set on `.tm-cal` and *applied*
+  as real `height`s, not left to however a line box rounds. `CalendarView` reads
+  all four back with `getComputedStyle` to work out how many lanes fit, so the
+  arithmetic and the pixels cannot drift. Change the bar height and everything
+  follows; hard-code a pitch in JS and it will not.
+- **The lane cap is measured, not a constant** (`lanesForHeight`). A week row is
+  `minmax(min-content, 1fr)`, so its height depends on the window and on how many
+  weeks the month has — anywhere from ~114px to ~250px. A fixed cap says "+3 more"
+  over visible empty space on a tall screen. `CalendarView` observes the grid with
+  a `ResizeObserver` and feeds the *equal share* (grid height ÷ weeks) in; a
+  measured row would be circular, since the cap decides the content and the content
+  decides the row. Observing the grid is safe because its height comes from the
+  window (it is the `flex: 1` child that scrolls), so the cap never feeds back.
+  - **`MIN_LANES` (6) is a floor the share can only raise.** Because a row grows
+    past its share and the grid scrolls, capping at the nominal share would hide
+    bookings the layout was perfectly willing to draw.
+  - `DEFAULT_MAX_LANES` is now only the value for the first render, before the
+    observer has reported.
+- **`+N more` expands the week in place** rather than opening a popover: the
+  hidden items stay on the day they belong to and there is no floating layer to
+  dismiss. `layoutMonth` takes a per-week lane cap for exactly this. The cap is
+  **soft** — a week needing one lane more keeps it, since "+1 more" would occupy
+  the very row it saved.
+- **The grid stays even when empty** — a calendar with no days is not a calendar —
+  so the empty case is a line in the summary, not an `NcEmptyContent` replacing
+  the view as the lists do.
+- **Day backgrounds are their own layer** (`.tm-cal-week-bg` absolutely positioned
+  under `.tm-cal-week-fg`). A cell spanning every lane inside one grid would need
+  the lane count in `grid-template-rows`, and `repeat()` cannot take a custom
+  property.
+- **The month heading's hidden `.tm-cal-month-ghost` spans are load-bearing.**
+  The `<h2>` is a one-cell grid holding the visible label *and* a hidden copy of
+  every `getMonthNames()` entry, so it is always as wide as the widest month it
+  could show and the ‹ › Today buttons never shift as you page (measured: 12
+  distinct button positions before, 1 after). `visibility: hidden`, never
+  `display: none` — a hidden box still sizes the grid, which is the whole point,
+  and it stays out of the accessibility tree so the heading reads as one month.
+  A hard-coded `min-width` cannot replace this: month-name lengths differ wildly
+  by locale and font. `tabular-nums` stops the box twitching on a year change.
+- Week start and day/month names come from `@nextcloud/l10n` (`getFirstDay`,
+  `getDayNamesMin`, `getMonthNames`), so a Sunday-first locale is right for free;
+  `calendar.ts` takes `firstDay` as a **parameter** so it stays pure and tested.
+- The displayed month is a component ref, **not** in the hash. It survives view
+  switches (the module stays mounted) but not a reload — deliberate for now; put
+  it in the route if month links ever need sharing.
+
 ### Frontend layout (`src/`)
 
 ```
 App.vue              shell only: nav, which view is showing, the detail panel
+├─ CalendarView.vue  the month grid, its toolbar and month summary
+│   └─ CalendarBar.vue    one trip/booking bar: its icon, colour and draft cue
 ├─ BookingsView.vue  grid only — no dialogs, no actions
 ├─ TripsView.vue     grid + the "Create trip" button
 ├─ MessagesView.vue  grid + the expandable diagnostic body
@@ -370,16 +508,23 @@ App.vue              shell only: nav, which view is showing, the detail panel
 └─ AppDialogs.vue    every dialog, rendered once
     └─ TripPickerDialog.vue   confirm-a-draft / add-to-trip
 
-grid.css        the look every grid shares (see below)
+grid.css        the look every list grid shares (see below)
+calendar.css    the month grid's own look, shared by the two calendar SFCs
 store.ts        bookings / trips / messages / loading / reload + derived counts
 navigation.ts   the route, open/close/back, hash + history plumbing
 dialogs.ts      which dialog is open, on what, and the openX() calls
 labels.ts       how the domain is worded
-grid.ts messages.ts bookings.ts trips.ts detail.ts   pure logic, unit-tested
+grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts   pure, unit-tested
 ```
 
-Adding a fourth view (the calendar) should mean one new SFC and one nav item in
-`App.vue` — nothing else.
+Adding the fourth view (the calendar) cost exactly what that promised: one nav
+item and one SFC in `App.vue` (plus the bar it delegates to, its pure layout
+module and its stylesheet). Hold a fifth to the same bar.
+
+`calendar.css` is plain CSS rather than a `<style module>` for the same reason
+`grid.css` is: **two** components need it — `CalendarView` draws the grid and
+`CalendarBar` draws what sits on it, positioned by the *view* via inline
+`grid-column`/`grid-row`, so both files have to agree about the same element.
 
 - **`store.ts` holds module-level refs**, not provide/inject or prop threading.
   Every view, the sidebar and most dialogs need the same three collections and
@@ -399,7 +544,8 @@ Adding a fourth view (the calendar) should mean one new SFC and one nav item in
   (`sortBookings`/`filterBookings`, `sortMessages`/`filterMessagesByStatus`,
   `sortTrips`/`filterTripsByPeriod`/`tripRows`, shared helpers in `src/grid.ts`).
 
-**All three views are the same grid.** The shared look lives in **`src/grid.css`**
+**All three list views are the same grid** (the calendar is not one of them — see
+"Calendar" above). The shared look lives in **`src/grid.css`**
 as plain `tm-`-prefixed classes (`.tm-rows`, `.tm-row`, `.tm-row-summary`,
 `.tm-grid-header`, `.tm-column-heading`, `.tm-chevron`, `.tm-row-body`,
 `.tm-cell-text`/`.tm-cell-meta`/`.tm-cell-status`, `.tm-open-link`, `.tm-badge…`,
@@ -602,6 +748,39 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
     → the control won't toggle. **Runtime-only failure — not caught by vue-tsc.**
   - When in doubt, check the component's `update:*` emit in
     `node_modules/@nextcloud/vue/dist/chunks/Nc*.mjs`.
+- **Nextcloud's core stylesheet styles every bare `<button>`, hard.**
+  `core/css/inputs.scss` matches
+  `button:not(.button-vue, [class^="vs__"]):not(.app-navigation-entry-button)` —
+  **(0,2,1)**, which outranks any plain two-class app selector — and sets
+  `min-height: var(--default-clickable-area)` (34px in the stable34 theme),
+  `margin: 3px`, `width: 130px`, padding, font-size, background and border. Its
+  `:hover`/`:focus` variants reach **(0,4,1)**. Symptoms are a control silently
+  far taller than its own CSS says (this made every calendar bar 34px against an
+  18px design, and once did the same to grid rows — see `.tm-open-link`).
+  - Where a control is genuinely a **link**, make it an `<a href>`: the server
+    styles bare anchors *not at all*, which ends the arms race permanently rather
+    than escalating specificity against rules that can change under us. The
+    calendar's bars do this — they navigate to a route, so it is also the honest
+    element. Keep `@click.prevent` and handle the click in JS: our router listens
+    for `popstate` and a fragment link fires only `hashchange`.
+  - Where it is genuinely a **button** (`.tm-cal-more` expands a week), undo the
+    reset explicitly and **double the class** to clear (0,2,1).
+- **Verify CSS against the server's own stylesheets, not just its variables.**
+  A harness that defines `--color-*` and `--default-clickable-area` but omits
+  `core/css/inputs.css` will happily measure a design that the real page does not
+  produce — that is precisely how the 18px bar was "confirmed" while shipping at
+  34px. A server checkout lives at
+  `~/Code/nextcloud-docker-dev/workspace/stable34`; link its `core/css/inputs.css`
+  and `apps.css` into any layout harness before trusting a measurement.
+- **`vue-material-design-icons` ships types TypeScript cannot see.** Declarations
+  sit beside each component (`Airplane.d.vue.ts`), but the package's
+  `exports` map does not list them, so every icon import is an implicit `any` and
+  `vue-tsc` fails under `noImplicitAny`. Fixed by a wildcard shim,
+  **`src/vue-material-design-icons.d.ts`** (`declare module
+  'vue-material-design-icons/*.vue'`) — every icon in the set takes the same three
+  props (`title`, `fillColor` defaulting to `currentColor`, `size`). Delete the
+  shim if the package ever fixes its exports map. Note `fillColor`'s default is
+  what lets CSS `color` drive an icon, which the calendar's bars rely on.
 - **`@nextcloud/dialogs` must be ^7** (v6 pins a `@nextcloud/vue ^8` peer that
   conflicts with v9 and blocks `npm install`). v7 dropped the `@nextcloud/vue`
   peer. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5

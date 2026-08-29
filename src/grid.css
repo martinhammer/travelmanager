@@ -290,11 +290,25 @@
 	margin-block-start: 14px;
 }
 
-/* NcNoteCard ships with a large block margin meant for full-page forms; inside a
-   row it only needs to clear its neighbours. Scoped for the specificity — its own
-   .notecard rule is a single class and loads after ours. */
-.tm-row-body .tm-notice {
-	margin: 8px 0;
+/* NcNoteCard ships with a large block margin (1rem) meant for full-page forms;
+   inside a row it only needs to clear its neighbours.
+
+   **The doubled class is load-bearing.** NcNoteCard's own rule is
+   `.notecard[data-v-6be9fa31]` — a class *and an attribute*, so 0,2,0, the same
+   as `.tm-row-body .tm-notice` would be. Vue's scoped CSS lands in a later chunk
+   than grid.css (`travelmanager-main.css` imports the main chunk first, then
+   `_plugin-vue_export-helper`), so an equal-specificity rule here loses the tie
+   and its 1rem margin stays. Repeating the class takes us to 0,3,0, which wins
+   on specificity rather than on chunk order — the ordering is the bundler's to
+   decide and could change under us.
+
+   Bottom margin only, so a row that opens with a notice starts at exactly the
+   same height as one that opens straight onto the Raw message chevron. Zeroing
+   the top via `> *:first-child` above would not do it either: that rule is 0,2,0
+   and loses the same tie. Each notice spacing itself from what *follows*
+   separates stacked notices just the same, and needs no first-child exception. */
+.tm-row-body .tm-notice.tm-notice {
+	margin: 0 0 8px;
 }
 
 /* --- label / value pairs ------------------------------------------------- */
