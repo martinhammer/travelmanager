@@ -5,6 +5,7 @@ import NcAppNavigation from '@nextcloud/vue/components/NcAppNavigation'
 import NcAppNavigationItem from '@nextcloud/vue/components/NcAppNavigationItem'
 import NcContent from '@nextcloud/vue/components/NcContent'
 import { t } from '@nextcloud/l10n'
+import AppDialogs from './AppDialogs.vue'
 import BookingsView from './BookingsView.vue'
 import DetailSidebar from './DetailSidebar.vue'
 import MessagesView from './MessagesView.vue'
@@ -14,7 +15,7 @@ import {
 	closeDetail,
 	ensureSourceMessage,
 	goBack,
-	openDetail,
+	openLinked,
 	route,
 	startNavigation,
 	view,
@@ -25,10 +26,11 @@ import './grid.css'
 /**
  * The shell: navigation, which view is showing, and the detail panel.
  *
- * Everything else lives elsewhere on purpose — the views own their own filters
- * and dialogs, `store.ts` owns the data, `navigation.ts` owns what is open, and
- * `grid.css` owns the look the three grids share. Adding a fourth view (the
- * calendar) should mean a new SFC and one nav item here, nothing more.
+ * Everything else lives elsewhere on purpose — the views own their own filters,
+ * `store.ts` owns the data, `navigation.ts` owns what is open, `AppDialogs.vue`
+ * owns the dialogs (raised from the panel and from a toolbar, so no view owns
+ * them), and `grid.css` owns the look the three grids share. Adding a fourth view
+ * (the calendar) should mean a new SFC and one nav item here, nothing more.
  */
 
 let stopNavigation = (): void => {}
@@ -94,6 +96,8 @@ onUnmounted(() => stopNavigation())
 			:back-label="backLabel"
 			@close="closeDetail"
 			@back="goBack"
-			@open="openDetail" />
+			@open="openLinked" />
+
+		<AppDialogs />
 	</NcContent>
 </template>

@@ -55,11 +55,27 @@ const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
 }
 
 /**
- * Open one thing in the detail panel, from anywhere.
+ * Open one thing in the detail panel **from a list row**, discarding any trail.
+ *
+ * Picking another row is not navigating *from* whatever the panel happened to be
+ * showing — offering "← Trip 1" after clicking Trip 2 in the list describes a
+ * journey the user did not take. Browser Back still returns to the previous
+ * panel; it is the panel's own back affordance that has to reset.
  * @param type the kind of entity
  * @param id its id
  */
 export const openDetail = (type: DetailType, id: number): void => {
+	navigate(detailRoute(type, id))
+	backLabel.value = null
+}
+
+/**
+ * Open one thing **from inside the panel**, following a cross-link, keeping a
+ * way back to where the link was followed from.
+ * @param type the kind of entity
+ * @param id its id
+ */
+export const openLinked = (type: DetailType, id: number): void => {
 	// Name the place being left, so the panel can offer a way back to it.
 	const current = route.value.detail
 	const item = current === null ? null : byId(entitiesFor(current.type), current.id)

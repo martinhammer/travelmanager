@@ -32,17 +32,17 @@ TaskSuccessfulEvent / TaskFailedEvent
        └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
 UI (Vue, OCS API) — three views: Bookings | Trips | Messages
   ├─ Bookings: sortable grid (Title | Trip | Type | Provider | Reference |
-  │            Travel dates | Added | Status), rows expand to type-specific fields;
-  │            filter by review state + type;
-  │            confirm / edit / discard / archive / restore
+  │            Travel dates | Added | Status); filter by review state + type;
+  │            rows do not expand — clicking one opens the detail sidebar
   ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
   │            lozenges derived from the linked bookings; filter All/Current/
-  │            Future/Past; rows expand to link/unlink and edit
+  │            Future/Past; rows open the sidebar
   ├─ Messages: the ingestion ledger as a sortable grid (Subject | From | Date
   │            received | Last processed | Attempts | Status), rows expand for
-  │            details; filter by status, retry failed extractions
+  │            the prompt + raw model response; filter by status, retry
   └─ Detail sidebar: any one booking/trip/message in full, addressed by
-               location.hash, linking to whatever it relates to
+               location.hash, linking to whatever it relates to, and the only
+               place a booking or trip is acted on (its Actions section)
 ```
 
 Key classes (all under `OCA\TravelManager`, `lib/`):
@@ -292,6 +292,10 @@ debug panel for iterating without waiting for cron:
 - ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view
   SFCs, `store.ts`, `navigation.ts`, `labels.ts` and `grid.css`. See "Frontend
   layout" below. No behaviour change intended.
+- ✅ **One card, not two** (2026-08-29): Bookings and Trips rows no longer expand;
+  the sidebar is the only place either is shown in full or acted on, via a new
+  **Actions** section. Dialogs moved to `AppDialogs.vue` + `dialogs.ts`, since the
+  panel now raises them. Messages keeps its expander (see "Frontend layout").
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -321,6 +325,11 @@ which is why *what is open* is a value rather than a component's internal state:
   entry, the panel's "←" calls `history.back()`, and its caption rides in
   `history.state.fromLabel` so it survives Back *and* Forward. A ref would
   desync the moment someone used the browser's button.
+- **Two ways in, and they differ.** `openDetail` (a list row) clears the trail;
+  `openLinked` (a cross-link inside the panel) keeps it. Clicking Trip 2 in the
+  list while Trip 1 is open must not offer "← Trip 1" — that describes a journey
+  the user did not take. Browser Back still returns either way; it is only the
+  panel's own back affordance that resets.
 - **`NcAppNavigationItem` renders `<a href="#">`** when given no `href`/`to`, so
   every nav click appends a bare `#` to the history and fires `popstate`. Two
   defences, keep both: the nav items use **`@click.prevent`**, and `onPopState`
@@ -332,8 +341,9 @@ which is why *what is open* is a value rather than a component's internal state:
   looks up a source email older than the list's 200-row page (a query param, not
   a path segment — an RFC Message-ID contains `@` and angle brackets, and our OCS
   helper does not escape path segments).
-- `BookingDetails.vue` renders a booking's type-specific body for **both** the
-  expanded grid row and the sidebar, so the two cannot drift.
+- `BookingDetails.vue` renders a booking's type-specific body. It was shared with
+  the expanded grid row until that row was removed; keep it a separate component
+  anyway — the calendar will want the same body.
 - The panel deliberately has **no tabs**: cross-links are the whole point of the
   feature, and a tab would hide them behind a click.
 
@@ -352,16 +362,18 @@ prose, and re-running the message fills the column properly.
 
 ```
 App.vue              shell only: nav, which view is showing, the detail panel
-├─ BookingsView.vue  + its delete-booking dialog
-│   └─ TripPickerDialog.vue   confirm-a-draft / add-to-trip
-├─ TripsView.vue     + its new/edit, link and delete dialogs
-├─ MessagesView.vue
-└─ DetailSidebar.vue  one panel for booking | trip | message
-   └─ BookingDetails.vue   a booking's type-specific body, shared with the row
+├─ BookingsView.vue  grid only — no dialogs, no actions
+├─ TripsView.vue     grid + the "Create trip" button
+├─ MessagesView.vue  grid + the expandable diagnostic body
+├─ DetailSidebar.vue  one panel for booking | trip | message, incl. its Actions
+│   └─ BookingDetails.vue   a booking's type-specific body
+└─ AppDialogs.vue    every dialog, rendered once
+    └─ TripPickerDialog.vue   confirm-a-draft / add-to-trip
 
 grid.css        the look every grid shares (see below)
 store.ts        bookings / trips / messages / loading / reload + derived counts
 navigation.ts   the route, open/close/back, hash + history plumbing
+dialogs.ts      which dialog is open, on what, and the openX() calls
 labels.ts       how the domain is worded
 grid.ts messages.ts bookings.ts trips.ts detail.ts   pure logic, unit-tested
 ```
@@ -372,6 +384,11 @@ Adding a fourth view (the calendar) should mean one new SFC and one nav item in
 - **`store.ts` holds module-level refs**, not provide/inject or prop threading.
   Every view, the sidebar and most dialogs need the same three collections and
   the same `reload()`. Safe because the app mounts once; revisit if that changes.
+- **`dialogs.ts` is the same pattern for *what is open*, and `AppDialogs.vue`
+  renders the lot.** Most dialogs are now raised from the detail panel and one
+  ("New trip") from the Trips toolbar, so no view owns them; threading them
+  through `App.vue` would put the shell in the middle of every action. It holds
+  only refs and `openX()` calls — what a confirm button *does* lives in the SFC.
 - **`labels.ts` is the one module that may import `@nextcloud/l10n`** and so is
   *not* unit-testable (§7). That is the trade for every view wording things
   identically. Keep decisions out of it — anything with a branch belongs in a
@@ -395,15 +412,27 @@ as plain `tm-`-prefixed classes (`.tm-rows`, `.tm-row`, `.tm-row-summary`,
 imports another's. A change to how every grid looks belongs in `grid.css`, never
 copied into a second set.
 
-It is a CSS grid, not a `<table>`: each row is a native `<details>`, which a
-table's two-`<tr>` row pair cannot be without hand-rolling the open/closed state.
-Consequences to preserve:
+It is a CSS grid, not a `<table>`. Consequences to preserve:
+- **Only Messages rows expand.** Bookings and Trips rows are a plain `<div>`
+  carrying both `.tm-row` and `.tm-row-summary`; clicking anywhere opens the
+  detail sidebar, and every action lives in that panel's **Actions** section.
+  Their row bodies used to be a strictly poorer copy of the panel — two places to
+  keep a field in step, and the one most people saw carried **no cross-links at
+  all**, which is the trail the panel exists to preserve. Messages keeps its
+  `<details>` because its body is a *different thing*, not a second copy of the
+  card: the prompt and up to 20 000 characters of raw model response, which is
+  unreadable in a ~300px sidebar and is the pane prompt-tuning runs on.
+  Do not "finish the job" by moving it there.
+- **The row click is a convenience, the first cell's `<button>` is the control.**
+  Keyboard and screen-reader users get the button; the row handler exists so a
+  mouse does not have to hit the text. Do not promote the row to
+  `role="button"` — that would promise a widget the markup is not.
 - The heading row and each data row use the **same `.tm-row-summary` + `.columns`
   pair and the same cell order**, so one set of `nth-child` rules hides a column
-  in both at a breakpoint. The heading's chevron cell is a real (empty) element
-  for exactly this reason — do not replace it with an offset. Reordering columns
-  means editing three things in step: the `*_COLUMNS` array, the cell order in
-  the template, and the `nth-child` breakpoint rules.
+  in both at a breakpoint. (Messages' heading therefore keeps a real empty
+  element for the chevron cell — do not replace it with an offset.) Reordering
+  columns means editing three things in step: the `*_COLUMNS` array, the cell
+  order in the template, and the `nth-child` breakpoint rules.
 - **The first data column is the row's identity and the link into the sidebar**
   in all three grids (Subject / Title / Trip). Keep it first if columns are
   reordered.
@@ -438,6 +467,15 @@ Consequences to preserve:
   keyed off its `*_COLUMNS` array; the logic modules stay `@nextcloud/*`-free.
 - Rows with no value for the sorted column sink to the bottom in **both**
   directions — unsortable, not "smallest".
+- **Label/value blocks inside one container share a label column** by being
+  flattened into a single grid: mark the container `.tm-fields-group` and its
+  blocks collapse with `display: contents` (`grid.css`). Left as separate grids
+  each sizes to *its own* longest label, so values start at a different x per
+  block; a fixed width aligns them but reserves room for the longest label the
+  app can produce, wasting it on every card where that label is absent. This is
+  why `BookingDetails` uses `tm-` classes on its wrappers and why its separators
+  (`.tm-divider`, `.tm-gap`, `.tm-segment-index`) are **real elements** — a
+  flattened wrapper has no box to hang a border or margin on.
 - An expanded row opens with `NcNoteCard` notices from `messageNotices()`:
   failure kind (error) → outcome for related/no_booking/dropped (info/info/warning)
   → a warning when `issueReasons` contains `repaired_json`. A row can carry

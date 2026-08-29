@@ -101,19 +101,6 @@ const collect = (fields: SegmentField[], label: string, value: string | null | u
 }
 
 /**
- * The cross-type fields that are *not* already grid columns — today only the
- * confirmation number. Type, provider and booking reference used to live here
- * too; they moved to columns, and repeating them in the expanded row would just
- * be the same value twice.
- * @param booking the booking to describe
- */
-export const bookingHeaderFields = (booking: Booking): SegmentField[] => {
-	const fields: SegmentField[] = []
-	collect(fields, 'Confirmation number', booking.confirmationNumber)
-	return fields
-}
-
-/**
  * The booking's travel span for the grid's Travel dates column.
  * @param booking the booking to describe
  */

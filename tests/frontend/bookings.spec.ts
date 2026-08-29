@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Booking } from '../../src/api'
 import {
-	bookingHeaderFields,
 	bookingSpan,
 	bookingTypes,
 	bookingsForTrip,
@@ -237,20 +236,6 @@ describe('formatDateTime', () => {
 
 	it('leaves unrecognised values untouched', () => {
 		expect(formatDateTime('sometime next week')).toBe('sometime next week')
-	})
-})
-
-describe('bookingHeaderFields', () => {
-	it('carries only what the grid does not already show as a column', () => {
-		// Type, provider and reference are columns now; repeating them in the
-		// expanded row would be the same value twice.
-		expect(bookingHeaderFields(booking({ type: 'flight', provider: 'KLM', bookingReference: 'YGUE6T', confirmationNumber: '29276863' }))).toEqual([
-			{ label: 'Confirmation number', value: '29276863' },
-		])
-	})
-
-	it('omits empty fields, leaving nothing to render', () => {
-		expect(bookingHeaderFields(booking({ type: 'car_rental', provider: 'Holiday Autos', confirmationNumber: null }))).toEqual([])
 	})
 })
 

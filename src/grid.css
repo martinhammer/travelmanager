@@ -85,7 +85,14 @@
 
 /* Shared by every grid; only the column template differs, and that lives in the
    view. The heading row carries the same pair of classes, which is what keeps
-   headings over their own columns. */
+   headings over their own columns.
+
+   Bookings and Trips rows are a plain <div> carrying both .tm-row and
+   .tm-row-summary — they have no body to disclose, since a booking or a trip is
+   shown and acted on in the detail panel. Messages rows are still a <details>,
+   whose <summary> takes .tm-row-summary alone: their body is a wide diagnostic
+   pane (the prompt and the raw model response), which is a different thing from
+   the card and does not fit a sidebar. */
 .tm-row-summary {
 	display: grid;
 	align-items: center;
@@ -269,8 +276,11 @@
 	margin-block-start: 0;
 }
 
+/* Wraps because the same set of buttons has to fit the detail panel, which is a
+   good deal narrower than an expanded row was. */
 .tm-actions {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 8px;
 }
@@ -285,6 +295,90 @@
    .notecard rule is a single class and loads after ours. */
 .tm-row-body .tm-notice {
 	margin: 8px 0;
+}
+
+/* --- label / value pairs ------------------------------------------------- */
+
+/* Every attribute of anything is shown this way — a booking's legs, a message's
+   timestamps, a detail panel's header.
+   Spans rather than a <dl>: dt/dd carry spacing of their own, which made an
+   otherwise identical block sit noticeably looser than its neighbours. */
+.tm-fields {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 1px 12px;
+	align-items: baseline;
+	margin: 0;
+	line-height: 1.4;
+}
+
+.tm-field-label {
+	color: var(--color-text-maxcontrast);
+	text-align: start;
+}
+
+.tm-field-value {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.tm-block {
+	margin-top: 4px;
+}
+
+.tm-segment-index {
+	display: block;
+	font-size: 0.85em;
+	font-weight: bold;
+	color: var(--color-text-maxcontrast);
+	margin-bottom: 4px;
+}
+
+.tm-divider {
+	display: block;
+	border-top: 1px solid var(--color-border);
+	margin-block: 8px 6px;
+}
+
+.tm-gap {
+	display: block;
+	height: 8px;
+}
+
+/* --- one shared label column ---------------------------------------------
+   A detail panel stacks several field blocks (header, passengers, one per leg).
+   Left as separate grids, `max-content` sizes each to *its own* longest label
+   and the values start at a different x in each; a fixed width instead aligns
+   them but is sized for the longest label the app can produce, so it wastes a
+   chunk on every card — including cards where that label is absent.
+
+   Marking the container a group flattens the blocks with `display: contents`,
+   so every label/value pair becomes a row of one grid. The column is then
+   exactly the longest label *actually present*, and alignment is not a
+   coincidence to maintain but a property of there being a single grid.
+
+   This is why the blocks carry `tm-` classes and why their separators are real
+   elements: a flattened wrapper has no box to hang a border or a margin on. */
+.tm-fields-group {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 1px 12px;
+	align-items: baseline;
+	line-height: 1.4;
+}
+
+.tm-fields-group .tm-block-group,
+.tm-fields-group .tm-fields,
+.tm-fields-group .tm-segments,
+.tm-fields-group .tm-segment {
+	display: contents;
+}
+
+/* Anything that is not a label/value pair spans both columns. */
+.tm-fields-group .tm-segment-index,
+.tm-fields-group .tm-divider,
+.tm-fields-group .tm-gap {
+	grid-column: 1 / -1;
 }
 
 /* --- lists inside rows and dialogs --------------------------------------- */
