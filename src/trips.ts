@@ -1,7 +1,26 @@
-import type { Booking, Trip } from './api'
+import type { Booking, Trip, TripType } from './api'
 import type { SortColumn, SortDirection } from './grid'
 import { bookingTypes, bookingsForTrip } from './bookings'
 import { localDate } from './grid'
+
+/**
+ * The trip types, in the order they are offered. Work first because it is the
+ * one people file deliberately; leisure is what a trip is when nobody said.
+ *
+ * Kept here rather than in labels.ts because it is a decision (which types exist,
+ * in what order) and this module is the tested one — labels.ts only words things.
+ * It must stay in step with Trip::TYPES server-side, which validates.
+ */
+export const TRIP_TYPES: TripType[] = ['work', 'leisure']
+
+/**
+ * Whether a stored value is a type we know. Guards against a row written by a
+ * newer version, or by hand: an unrecognised slug renders as no lozenge rather
+ * than as itself, since a raw slug in the UI reads as a bug.
+ * @param value the stored type, or null
+ */
+export const isTripType = (value: string | null): value is TripType =>
+	value !== null && (TRIP_TYPES as string[]).includes(value)
 
 /**
  * Where a trip sits relative to now. 'undated' is its own case rather than being
@@ -12,11 +31,12 @@ import { localDate } from './grid'
 export type TripPeriod = 'current' | 'future' | 'past' | 'undated'
 
 /** The Trips grid's sortable columns. */
-export type TripSort = 'name' | 'travel' | 'bookings'
+export type TripSort = 'name' | 'type' | 'travel' | 'bookings'
 
 /** See SortColumn in ./grid. Labels live in the component. */
 export const TRIP_COLUMNS: SortColumn<TripSort>[] = [
 	{ key: 'name', defaultDirection: 'asc' },
+	{ key: 'type', defaultDirection: 'asc' },
 	{ key: 'travel', defaultDirection: 'asc' },
 	{ key: 'bookings', defaultDirection: 'desc' },
 ]
@@ -234,6 +254,11 @@ const sortValue = (row: TripRow, sort: TripSort): string | number | null => {
 	switch (sort) {
 	case 'name':
 		return row.trip.name.toLowerCase() || null
+	case 'type':
+		// The slug, not the label: this module stays free of @nextcloud/l10n, and
+		// the Bookings grid already sorts its own Type column the same way. An
+		// unclassified trip has no value and sinks, rather than sorting as ''.
+		return row.trip.type
 	case 'travel':
 		return row.start
 	case 'bookings':

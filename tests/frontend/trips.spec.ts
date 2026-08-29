@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Booking, Trip } from '../../src/api'
 import {
+	TRIP_TYPES,
 	canCreateTrip,
 	filterTripsByPeriod,
 	searchTrips,
 	sortTrips,
+	isTripType,
 	suggestedTrips,
 	tripPeriod,
 	tripRows,
@@ -16,6 +18,8 @@ const now = new Date('2026-08-14T12:00:00Z')
 const trip = (overrides: Partial<Trip> = {}): Trip => ({
 	id: 1,
 	name: 'Summer',
+	type: null,
+	color: null,
 	startDate: null,
 	endDate: null,
 	notes: null,
@@ -280,5 +284,50 @@ describe('canCreateTrip', () => {
 
 	it('offers nothing for an empty search', () => {
 		expect(canCreateTrip(rows, '   ')).toBe(false)
+	})
+})
+
+describe('trip types', () => {
+	it('offers work before leisure — the one people file deliberately', () => {
+		expect(TRIP_TYPES).toEqual(['work', 'leisure'])
+	})
+
+	it('recognises the types it offers', () => {
+		for (const type of TRIP_TYPES) {
+			expect(isTripType(type)).toBe(true)
+		}
+	})
+
+	it('rejects a slug it does not know, so the UI never renders a raw value', () => {
+		// A row written by a newer version, or by hand.
+		expect(isTripType('sabbatical')).toBe(false)
+		expect(isTripType('')).toBe(false)
+		expect(isTripType('Work')).toBe(false)
+	})
+
+	it('treats an unclassified trip as having no type', () => {
+		expect(isTripType(null)).toBe(false)
+	})
+})
+
+describe('sortTrips by type', () => {
+	const rows = (): ReturnType<typeof tripRows> => tripRows([
+		trip({ id: 1, name: 'Alps', type: 'work' }),
+		trip({ id: 2, name: 'Canary', type: 'leisure' }),
+		trip({ id: 3, name: 'Unclassified', type: null }),
+	], [])
+
+	it('orders by type, ascending', () => {
+		expect(sortTrips(rows(), 'type', 'asc').map((r) => r.trip.id)).toEqual([2, 1, 3])
+	})
+
+	it('sinks unclassified trips in both directions, not just one', () => {
+		// A trip with no type is unsortable on this column, not "smallest".
+		expect(sortTrips(rows(), 'type', 'asc').at(-1)?.trip.id).toBe(3)
+		expect(sortTrips(rows(), 'type', 'desc').at(-1)?.trip.id).toBe(3)
+	})
+
+	it('sorts on the stored slug, keeping the module free of translations', () => {
+		expect(sortTrips(rows(), 'type', 'desc').map((r) => r.trip.type)).toEqual(['work', 'leisure', null])
 	})
 })

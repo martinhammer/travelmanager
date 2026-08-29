@@ -291,6 +291,8 @@
                 "required": [
                     "id",
                     "name",
+                    "type",
+                    "color",
                     "startDate",
                     "endDate",
                     "notes",
@@ -304,6 +306,14 @@
                     },
                     "name": {
                         "type": "string"
+                    },
+                    "type": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "color": {
+                        "type": "string",
+                        "nullable": true
                     },
                     "startDate": {
                         "type": "string",
@@ -2575,6 +2585,18 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "Optional notes"
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Trip type: work or leisure"
+                                    },
+                                    "color": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Trip colour as #rrggbb"
                                     }
                                 }
                             }
@@ -2617,6 +2639,34 @@
                                                 "data": {
                                                     "$ref": "#/components/schemas/Trip"
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown trip type or malformed colour",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
                                             }
                                         }
                                     }
@@ -2688,6 +2738,18 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "New notes"
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "New type: work, leisure, or '' to clear"
+                                    },
+                                    "color": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "New colour as #rrggbb, or '' to clear"
                                     }
                                 }
                             }
@@ -2749,6 +2811,34 @@
                     },
                     "404": {
                         "description": "Trip not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown trip type or malformed colour",
                         "content": {
                             "application/json": {
                                 "schema": {

@@ -9,6 +9,7 @@ import {
 	bookingItems,
 	calendarBookings,
 	compareItems,
+	contrastingText,
 	firstDraft,
 	MIN_LANES,
 	isInMonth,
@@ -53,6 +54,7 @@ const item = (over: Partial<CalendarItem> = {}): CalendarItem => ({
 	key: `booking-${over.id ?? 1}`,
 	type: 'flight',
 	reviewState: 'confirmed',
+	color: null,
 	label: 'BA2551',
 	start: '2026-09-10',
 	end: '2026-09-10',
@@ -191,6 +193,23 @@ describe('what goes on the grid', () => {
 		])
 	})
 
+	it('carries the trip colour onto every leg, for the bar to tint itself', () => {
+		expect(bookingItems(returnTrip, 'x', '#c9349f').map((i) => i.color))
+			.toEqual(['#c9349f', '#c9349f', '#c9349f', '#c9349f'])
+	})
+
+	it('leaves colour null when there is no trip, so the type palette stands', () => {
+		expect(bookingItems(booking({ type: 'accommodation' }), 'Hotel')[0].color).toBeNull()
+	})
+
+	it('takes a trip’s own colour for its bar', () => {
+		const row = {
+			trip: { id: 7, name: 'Lisbon', type: null, color: '#bf678b', startDate: null, endDate: null, notes: null },
+			bookings: [], start: '2026-09-10', end: '2026-09-14', types: [], period: 'future',
+		} as TripRow
+		expect(tripItem(row, 'Lisbon')?.color).toBe('#bf678b')
+	})
+
 	it('gives every leg the same id but a distinct key', () => {
 		const placed = bookingItems(returnTrip, 'x')
 		// One id, so any leg opens the booking and all four highlight together.
@@ -241,7 +260,7 @@ describe('what goes on the grid', () => {
 	it('uses a trip’s derived span, not its stored dates', () => {
 		const row = {
 			// Stored dates deliberately disagree: they are user-entered and stale.
-			trip: { id: 7, name: 'Lisbon', startDate: '2020-01-01', endDate: '2020-01-09', notes: null },
+			trip: { id: 7, name: 'Lisbon', type: null, color: null, startDate: '2020-01-01', endDate: '2020-01-09', notes: null },
 			bookings: [],
 			start: '2026-09-10',
 			end: '2026-09-14',
@@ -253,7 +272,7 @@ describe('what goes on the grid', () => {
 
 	it('drops a trip whose bookings carry no dates', () => {
 		const row = {
-			trip: { id: 8, name: 'Someday', startDate: null, endDate: null, notes: null },
+			trip: { id: 8, name: 'Someday', type: null, color: null, startDate: null, endDate: null, notes: null },
 			bookings: [],
 			start: null,
 			end: null,
@@ -287,6 +306,27 @@ describe('what goes on the grid', () => {
 	it('detects overlap at the boundaries', () => {
 		expect(overlaps(item({ start: '2026-09-01', end: '2026-09-05' }), '2026-09-05', '2026-09-30')).toBe(true)
 		expect(overlaps(item({ start: '2026-09-01', end: '2026-09-04' }), '2026-09-05', '2026-09-30')).toBe(false)
+	})
+})
+
+describe('colour', () => {
+	it('puts dark text on a pale colour and white on a deep one', () => {
+		// Nextcloud's picker offers both; the type palette only ever needed white.
+		expect(contrastingText('#f0e68c')).toBe('#1a1a1a')
+		expect(contrastingText('#2b6cb0')).toBe('#ffffff')
+		expect(contrastingText('#ffffff')).toBe('#1a1a1a')
+		expect(contrastingText('#000000')).toBe('#ffffff')
+	})
+
+	it('weights green over blue, as the eye does', () => {
+		// The same channel value in each: green reads as bright enough to need dark
+		// text, blue nowhere near. A plain mean of the channels would call them equal.
+		expect(contrastingText('#00e000')).toBe('#1a1a1a')
+		expect(contrastingText('#0000e0')).toBe('#ffffff')
+	})
+
+	it('keeps white when it cannot read the colour', () => {
+		expect(contrastingText('rgb(1,2,3)')).toBe('#ffffff')
 	})
 })
 

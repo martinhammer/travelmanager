@@ -56,6 +56,8 @@ namespace OCA\TravelManager;
  * @psalm-type TravelManagerTrip = array{
  *     id: int,
  *     name: string,
+ *     type: string|null,
+ *     color: string|null,
  *     startDate: string|null,
  *     endDate: string|null,
  *     notes: string|null,

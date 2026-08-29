@@ -221,9 +221,13 @@
    rather than a button so the row still reads as a row; the underline on hover
    is what says it is clickable. Scoped for the specificity — the server's own
    `button:not(…)` rules outrank a bare class. */
-.tm-row-summary .tm-open-link {
+.tm-row-summary .tm-open-link.tm-open-link {
 	/* min-height too, not just height: the server gives every button a 44px
-	   clickable-area floor, which silently made every grid row that tall. */
+	   clickable-area floor, which silently made every grid row that tall.
+	   The class is doubled because the rule that sets `margin: 3px` on bare
+	   buttons is `button:not(.button-vue, [class^="vs__"]):not(.app-navigation-entry-button)`
+	   — (0,2,1), which quietly outranked the (0,2,0) this used to be, so the
+	   `margin: 0` below never actually applied. */
 	height: auto;
 	min-height: 0;
 	margin: 0;
@@ -309,6 +313,91 @@
    separates stacked notices just the same, and needs no first-child exception. */
 .tm-row-body .tm-notice.tm-notice {
 	margin: 0 0 8px;
+}
+
+/* --- form rows in dialogs ------------------------------------------------ */
+
+/* A labelled control under the text fields in the trip editor. NcTextField
+   brings its own label; these are for the controls that do not.
+   Border and padding reset because one of them is a <fieldset>, which a browser
+   gives both by default. */
+.tm-form-row {
+	margin-block-start: 16px;
+	margin-inline: 0;
+	padding: 0;
+	border: none;
+}
+
+.tm-form-label {
+	display: block;
+	padding: 0;
+	margin-block-end: 4px;
+	font-weight: bold;
+}
+
+.tm-form-controls {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+/* Radios laid out along the row rather than stacked: NcCheckboxRadioSwitch is a
+   block-level label and has no inline mode of its own. */
+.tm-form-controls > .checkbox-radio-switch {
+	flex: 0 0 auto;
+}
+
+/* The name cell when it carries a swatch: the dot never shrinks, the name is
+   what gives way. Mirrors .tm-linkRow in the detail panel. */
+.tm-cell-name {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+/* The trip's colour, wherever it is shown: in the editor, on a grid row, in the
+   detail panel. A span rather than anything interactive, so it can sit inside a
+   button (see the colour picker trigger) without nesting one in another. */
+.tm-swatch {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border-radius: var(--border-radius-pill);
+	flex-shrink: 0;
+}
+
+/* No colour chosen: an outline, so the control still reads as a colour control
+   rather than as a missing element. For the *editor*, where the swatch is the
+   thing you are setting. */
+.tm-swatch-empty {
+	border: 1px dashed var(--color-border-maxcontrast, var(--color-border));
+}
+
+/* The trip's colour in front of the detail panel's heading.
+   A ::before on Nextcloud's own heading row, because NcAppSidebar takes its name
+   as a string and has no slot before it. The container is a flex row, so the
+   pseudo-element becomes a flex item ahead of the name and is not caught by the
+   heading's own truncation. Depends on `app-sidebar-header__mainname-container`
+   keeping its name — if a Nextcloud upgrade ever drops the dot, that is why. */
+.tm-sidebar-swatch .app-sidebar-header__mainname-container::before {
+	content: '';
+	display: block;
+	width: 14px;
+	height: 14px;
+	margin-inline-end: 10px;
+	border-radius: var(--border-radius-pill);
+	background-color: var(--tm-sidebar-swatch);
+	flex-shrink: 0;
+}
+
+/* No colour chosen, in a *grid row*: hidden but still occupying its space, so
+   trip names start on the same edge whether or not a trip has been coloured.
+   Omitting the element instead left the first column — the row's identity —
+   ragged, which reads as broken alignment rather than as absent data. */
+.tm-swatch-none {
+	visibility: hidden;
 }
 
 /* --- label / value pairs ------------------------------------------------- */

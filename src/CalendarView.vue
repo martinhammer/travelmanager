@@ -24,7 +24,7 @@ import {
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
 import { detailHref, isOpen, openDetail } from './navigation'
-import { allTripRows, bookings, loading } from './store'
+import { allTripRows, bookings, loading, tripColors } from './store'
 
 /**
  * The month grid — the app's default view, and the overview the others hang off.
@@ -63,9 +63,16 @@ const today = computed(() => localDate())
 const items = computed<CalendarItem[]>(() => {
 	const trips = allTripRows.value
 		.map((row) => tripItem(row, tripLabel(row.trip)))
-	// flatMap, because a multi-leg flight draws one bar per leg.
+	// flatMap, because a multi-leg flight draws one bar per leg. Each carries its
+	// trip's colour so the bar can tint itself; a booking with no trip, or in an
+	// uncoloured one, gets null and keeps the booking-type palette.
+	const colors = tripColors.value
 	const placed = calendarBookings(bookings.value, showAll.value)
-		.flatMap((booking) => bookingItems(booking, bookingLabel(booking)))
+		.flatMap((booking) => bookingItems(
+			booking,
+			bookingLabel(booking),
+			booking.tripId === null ? null : (colors[booking.tripId] ?? null),
+		))
 	return [...trips.filter((item): item is CalendarItem => item !== null), ...placed]
 })
 

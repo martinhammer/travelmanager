@@ -6,6 +6,7 @@ import BedIcon from 'vue-material-design-icons/Bed.vue'
 import CarIcon from 'vue-material-design-icons/Car.vue'
 import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
 import type { CalendarItem } from './calendar'
+import { contrastingText } from './calendar'
 import { formatSpan } from './grid'
 import { reviewStateLabel, typeName } from './labels'
 
@@ -46,6 +47,35 @@ const icon = computed(() => props.item.kind === 'trip'
 	: (ICONS[props.item.type ?? ''] ?? MapMarkerIcon))
 
 /**
+ * The trip's colour, when this bar belongs to one.
+ *
+ * Only the raw colour is handed over; **paling is left to CSS**, because a paler
+ * version means one mixed toward the page background and only the stylesheet
+ * knows what that is — mixing toward white here would come out right on a light
+ * theme and glaring on a dark one.
+ *
+ * A trip bar carries the colour outright, so its text has to be computed: a trip
+ * colour comes from Nextcloud's picker, which offers pale yellows that white
+ * would vanish on. A booking bar is pale by construction and takes the page's own
+ * text colour, set in calendar.css.
+ *
+ * Null leaves `--tm-cal-trip` at its default, the theme's own accent, so an
+ * unfiled booking and one in an uncoloured trip look like part of the app rather
+ * than like a third thing. **Colour on this view means one thing only: which
+ * trip.** What kind of booking it is, is carried by the icon — which is why every
+ * bar has one.
+ */
+const tint = computed(() => {
+	const { color, kind } = props.item
+	if (color === null) {
+		return {}
+	}
+	return kind === 'trip'
+		? { '--tm-cal-trip': color, '--tm-cal-text': contrastingText(color) }
+		: { '--tm-cal-trip': color }
+})
+
+/**
  * The bar's accessible name, and its tooltip.
  *
  * Not optional: the visible label is `display: none` at narrow widths, which
@@ -81,6 +111,7 @@ const description = computed(() => {
 		hashchange.
 	-->
 	<a :href="href"
+		:style="tint"
 		class="tm-cal-bar"
 		:class="{
 			'tm-cal-bar-draft': item.reviewState === 'draft',
@@ -89,7 +120,6 @@ const description = computed(() => {
 			'tm-cal-bar-selected': selected,
 		}"
 		:data-kind="item.kind"
-		:data-type="item.type ?? ''"
 		:title="description"
 		:aria-label="description">
 		<component :is="icon" class="tm-cal-bar-icon" :size="12" />

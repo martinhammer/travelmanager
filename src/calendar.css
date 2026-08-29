@@ -29,13 +29,6 @@
 	display: flex;
 	flex-direction: column;
 
-	/* Mid-tone fills, chosen to carry white text at ~5:1 in either theme: a
-	   solid bar's contrast is against its own text, not against the page, so
-	   one value works light and dark alike. */
-	--tm-cal-flight: #2b6cb0;
-	--tm-cal-accommodation: #6b46c1;
-	--tm-cal-car-rental: #2f7d5b;
-
 	/* The lane geometry, in one place and as **explicit lengths** rather than
 	   whatever a line box happens to round to. CalendarView reads these four back
 	   out with getComputedStyle to work out how many lanes fit the space it has,
@@ -226,7 +219,13 @@
 /* Scoped under .tm-cal for the specificity: the server's own `button` rules
    outrank a bare class and would put a filled pill behind every bar. */
 .tm-cal .tm-cal-bar {
-	--tm-cal-fill: var(--color-text-maxcontrast);
+	/* Every bar is coloured by the trip it belongs to. This is the default for a
+	   bar that has none — an unfiled booking, or one in a trip nobody has
+	   coloured — so those read as part of the app rather than as a fourth
+	   colour meaning something else. A trip with a colour overrides it inline;
+	   see CalendarBar. */
+	--tm-cal-trip: var(--color-primary-element);
+	--tm-cal-fill: var(--tm-cal-trip);
 	/* The edge/icon colour, pulled toward the page's own text so it stays
 	   legible against the background in both themes — the fill cannot do that
 	   job, since a draft bar shows it on the page rather than under white text. */
@@ -245,7 +244,11 @@
 	border: 1px solid transparent;
 	border-radius: var(--border-radius, 6px);
 	background-color: var(--tm-cal-fill);
-	color: #fff;
+
+	/* White unless a bar overrides it: the theme accent carries white, but a trip
+	   colour comes from Nextcloud's picker and may be pale, and a booking's pale
+	   fill needs the page's own text. Both override --tm-cal-text. */
+	color: var(--tm-cal-text, #fff);
 	font-size: 0.75rem;
 	line-height: 1.35;
 	text-align: start;
@@ -253,30 +256,30 @@
 	overflow: hidden;
 }
 
-.tm-cal .tm-cal-bar[data-type='flight'] {
-	--tm-cal-fill: var(--tm-cal-flight);
-}
-
-.tm-cal .tm-cal-bar[data-type='accommodation'] {
-	--tm-cal-fill: var(--tm-cal-accommodation);
-}
-
-.tm-cal .tm-cal-bar[data-type='car_rental'] {
-	--tm-cal-fill: var(--tm-cal-car-rental);
-}
-
-/* A trip is the grouping its bookings sit under, so it takes the app's own
-   accent rather than a type colour — it is not one more kind of booking.
-   That accent is a blue, though, and so is the flight fill, so the two are also
-   separated by *shape*: a trip is a slim pill, a booking a full-height rounded
-   rectangle. Colour alone would leave the pair hardest to tell apart at a
-   glance, which is precisely the glance this view exists for. */
+/* A trip states its colour outright while its bookings state a pale version of
+   it, which is what separates the two — along with the bold label and the
+   suitcase icon. It takes the same corner radius as a booking: a pill made the
+   distinction louder than it needs to be, given the fill already carries it. */
 .tm-cal .tm-cal-bar[data-kind='trip'] {
-	--tm-cal-fill: var(--color-primary-element);
-	--tm-cal-accent: var(--color-primary-element);
-	border-radius: var(--border-radius-pill);
-	color: var(--color-primary-element-text);
+	--tm-cal-fill: var(--tm-cal-trip);
+	--tm-cal-accent: var(--tm-cal-trip);
+	/* CalendarBar supplies --tm-cal-text only when the trip has a colour of its
+	   own, which may be a pale one; the theme's own pairing covers the default. */
+	color: var(--tm-cal-text, var(--color-primary-element-text));
 	font-weight: bold;
+}
+
+/* A booking states a **paler** version of its trip's colour: mixed toward the
+   page background, so it pales on a light theme and darkens on a dark one rather
+   than glaring. That also settles the text — a fill this close to the background
+   takes the page's own colour, with no luminance guessing needed.
+   The border is a stronger mix of the same colour, because a fill this soft has
+   no edge of its own and a bar without one floats on the day cell. */
+.tm-cal .tm-cal-bar[data-kind='booking'] {
+	--tm-cal-fill: color-mix(in srgb, var(--tm-cal-trip) 32%, var(--color-main-background));
+	--tm-cal-accent: color-mix(in srgb, var(--tm-cal-trip) 68%, var(--color-main-background));
+	--tm-cal-text: var(--color-main-text);
+	border-color: var(--tm-cal-accent);
 }
 
 /* Draft: outlined and dashed, never merely a paler fill. The cue has to survive

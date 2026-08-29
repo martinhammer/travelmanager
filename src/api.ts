@@ -115,9 +115,16 @@ export interface Message {
 	processedAt: string | null
 }
 
+/** What a trip is for. Open to growth — see Trip::TYPES server-side. */
+export type TripType = 'work' | 'leisure'
+
 export interface Trip {
 	id: number
 	name: string
+	/** null until the user classifies it; never guessed from the bookings. */
+	type: TripType | null
+	/** '#rrggbb', exactly as CSS and NcColorPicker use it, or null. */
+	color: string | null
 	startDate: string | null
 	endDate: string | null
 	notes: string | null
@@ -199,12 +206,24 @@ export const listTrips = async (): Promise<Trip[]> => {
 	return unwrap(res.data)
 }
 
-export const createTrip = async (name: string): Promise<Trip> => {
-	const res = await axios.post(base('trips'), { name })
+/**
+ * Fields a trip's editor can set. Type and colour accept '' to clear them —
+ * undefined means "leave alone", which is a different request.
+ * @see updateTrip
+ */
+export interface TripFields {
+	name?: string
+	notes?: string | null
+	type?: TripType | ''
+	color?: string | ''
+}
+
+export const createTrip = async (name: string, fields: Omit<TripFields, 'name'> = {}): Promise<Trip> => {
+	const res = await axios.post(base('trips'), { name, ...fields })
 	return unwrap(res.data)
 }
 
-export const updateTrip = async (id: number, fields: Partial<Pick<Trip, 'name' | 'notes'>>): Promise<Trip> => {
+export const updateTrip = async (id: number, fields: TripFields): Promise<Trip> => {
 	const res = await axios.put(base(`trips/${id}`), fields)
 	return unwrap(res.data)
 }

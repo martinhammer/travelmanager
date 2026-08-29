@@ -198,19 +198,32 @@ class BookingService {
 		return $this->tripMapper->findAllForUser($userId);
 	}
 
-	public function createTrip(string $userId, string $name, ?string $notes = null): Trip {
+	/**
+	 * @throws \InvalidArgumentException when the type or colour is not one we store
+	 */
+	public function createTrip(string $userId, string $name, ?string $notes = null, ?string $type = null, ?string $color = null): Trip {
 		$now = $this->timeFactory->getDateTime();
 		$trip = new Trip();
 		$trip->setUserId($userId);
 		$trip->setName($name);
 		$trip->setNotes($notes);
+		$trip->setType($this->validTripType($type));
+		$trip->setColor($this->validColor($color));
 		$trip->setCreatedAt($now);
 		$trip->setUpdatedAt($now);
 		return $this->tripMapper->insert($trip);
 	}
 
 	/**
-	 * @param array{name?:string,notes?:string} $values
+	 * Update a trip's user-entered fields.
+	 *
+	 * Keys absent from $values are left alone; a key present with null **clears**
+	 * the field, which is how the colour picker's "clear" and an unset type get
+	 * through. That is why this takes an array rather than nullable parameters —
+	 * with those, "not supplied" and "clear it" are the same value.
+	 *
+	 * @param array{name?:string,notes?:string,type?:string|null,color?:string|null} $values
+	 * @throws \InvalidArgumentException when the type or colour is not one we store
 	 */
 	public function updateTrip(string $userId, int $tripId, array $values): Trip {
 		$trip = $this->tripMapper->find($tripId, $userId);
@@ -220,8 +233,47 @@ class BookingService {
 		if (array_key_exists('notes', $values)) {
 			$trip->setNotes($values['notes']);
 		}
+		if (array_key_exists('type', $values)) {
+			$trip->setType($this->validTripType($values['type']));
+		}
+		if (array_key_exists('color', $values)) {
+			$trip->setColor($this->validColor($values['color']));
+		}
 		$trip->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->tripMapper->update($trip);
+	}
+
+	/**
+	 * An empty string means "no type", so clearing one does not have to be a
+	 * separate request shape from setting one.
+	 *
+	 * @throws \InvalidArgumentException
+	 */
+	private function validTripType(?string $type): ?string {
+		if ($type === null || $type === '') {
+			return null;
+		}
+		if (!in_array($type, Trip::TYPES, true)) {
+			throw new \InvalidArgumentException('Unknown trip type: ' . $type);
+		}
+		return $type;
+	}
+
+	/**
+	 * Colours are stored exactly as CSS and NcColorPicker use them, so the only
+	 * thing to check is that it *is* that form — this value ends up interpolated
+	 * into a style attribute.
+	 *
+	 * @throws \InvalidArgumentException
+	 */
+	private function validColor(?string $color): ?string {
+		if ($color === null || $color === '') {
+			return null;
+		}
+		if (preg_match('/^#[0-9a-fA-F]{6}$/', $color) !== 1) {
+			throw new \InvalidArgumentException('Colour must be #rrggbb: ' . $color);
+		}
+		return strtolower($color);
 	}
 
 	public function deleteTrip(string $userId, int $tripId): void {

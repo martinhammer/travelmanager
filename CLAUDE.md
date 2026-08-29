@@ -38,9 +38,10 @@ UI (Vue, OCS API) — four views: Calendar | Bookings | Trips | Messages
   ├─ Bookings: sortable grid (Title | Trip | Type | Provider | Reference |
   │            Travel dates | Added | Status); filter by review state + type;
   │            rows do not expand — clicking one opens the detail sidebar
-  ├─ Trips:    sortable grid (Trip | Travel dates | Bookings), dates + type
-  │            lozenges derived from the linked bookings; filter All/Current/
-  │            Future/Past; rows open the sidebar
+  ├─ Trips:    sortable grid (Trip | Type | Travel dates | Bookings); the Type
+  │            column is the trip's own work/leisure, the Bookings column its
+  │            dates + booking-type lozenges derived from what is linked; filter
+  │            All/Current/Future/Past; rows open the sidebar
   ├─ Messages: the ingestion ledger as a sortable grid (Subject | From | Date
   │            received | Last processed | Attempts | Status), rows expand for
   │            the prompt + raw model response; filter by status, retry
@@ -92,7 +93,13 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   Messages view can show *what came back* next to the error rather than the error
   alone. `body_text` + `last_response` are the bulky columns: both are meant to be
   dropped once the bookings a message produced are archived.
-- `trips` — user-defined grouping.
+- `trips` — user-defined grouping. Carries a user-entered **`type`** (work /
+  leisure, a slug so the set can grow — validated against `Trip::TYPES`) and
+  **`color`** (`#rrggbb`, stored exactly as CSS and NcColorPicker use it).
+  Both nullable and **never backfilled or inferred**: nothing in an extracted
+  booking says whether a trip was for work, and a guessed lozenge would be a
+  confident lie. An unclassified trip simply shows none
+  (`Version1900Date20260829000000…`).
 - `bookings` — one canonical booking per confirmation; natural key
   `(user_id, type, provider, booking_reference)` drives update/cancel idempotency;
   `trip_id` links to a trip. **Two orthogonal state axes** (see §3):
@@ -296,6 +303,11 @@ debug panel for iterating without waiting for cron:
 - ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view
   SFCs, `store.ts`, `navigation.ts`, `labels.ts` and `grid.css`. See "Frontend
   layout" below. No behaviour change intended.
+- ✅ **Trip type + colour** (2026-08-29, app version 1.10.0): `trips.type` and
+  `trips.color`, set in the trip editor (an `NcRadioGroup` of buttons, and
+  `NcColorPicker`), shown as a lozenge and a swatch on the Trips grid and in the
+  detail panel. The colour is not yet used anywhere else — the calendar keeps its
+  type palette for now.
 - ✅ **Calendar view** (2026-08-29, app version 1.9.0): the app's **default**
   view. A month grid where trips and bookings are bars across the days they
   cover. See "Calendar" below. No backend work — it is a pure client-side view
@@ -396,17 +408,41 @@ and the wording lives in `labels.ts`.
   **`aria-label`**: `display: none` takes the visible label out of the
   accessibility tree too, so the button would otherwise be unnamed exactly when it
   is hardest to identify by sight.
-- **Both cues are non-colour.** Type is an icon as well as a fill
-  (`vue-material-design-icons`: plane / bed / car, MapMarker as the fallback);
-  **draft is a dashed outline**, not a paler shade, so it survives greyscale and
-  colour-blindness. A **trip is a slim pill** while a booking is a full-height
-  rounded rectangle — the trip fill is `--color-primary-element`, which is a blue,
-  and so is the flight fill, so those two are separated by *shape* as well.
-- **Solid fills are one value for both themes** (contrast is against the bar's own
-  white text, not the page). The edge/icon colour for draft bars is
-  `color-mix(… var(--color-main-text))`, which self-adapts: it pulls toward white
-  on a dark theme and toward black on a light one, with no theme hook to keep in
-  step.
+- **A trip's colour takes over its bars.** A trip states its colour outright; its
+  bookings take a **paler** version — `color-mix` toward `--color-main-background`,
+  so it pales on a light theme and darkens on a dark one instead of glaring.
+  `CalendarItem.color` carries the raw colour (its own for a trip, its trip's for a
+  booking, null for an unfiled booking or an uncoloured trip, which then fall back
+  to `--color-primary-element`); `CalendarBar` passes it through as `--tm-cal-trip`
+  and
+  **paling is left to CSS**, since only the stylesheet knows what the background
+  is. Three consequences:
+  - **A trip bar's text colour is computed** (`contrastingText`). The type palette
+    is picked to carry white at ~5:1, but a trip colour comes from Nextcloud's
+    picker, which offers pale yellows — white on those is unreadable. A *booking*
+    bar needs no such computation: a fill that close to the background simply takes
+    `--color-main-text`.
+  - **A pale bar gets a border** of a stronger mix of the same colour. Without one
+    it has no edge and floats on the day cell.
+  - **There is no booking-type palette any more.** Colour on this view means one
+    thing only — which trip — so a bar with no trip colour takes the theme accent
+    rather than a per-type one, and an uncoloured trip and its bookings read as
+    one family exactly as a coloured one does. **This is why every bar has a type
+    icon**: it is now the only thing that says what kind of booking it is.
+- **Type is carried entirely by the icon** (`vue-material-design-icons`: plane /
+  bed / car, MapMarker as the fallback), since colour now means which trip. Every
+  bar has one for exactly that reason.
+- **Draft is a dashed outline**, not a paler shade — a paler shade is what a
+  *booking* already is, and the cue has to survive greyscale and colour-blindness
+  besides.
+- **Trip against booking is fill strength, weight and icon** — full colour, bold,
+  suitcase — **not shape**. Bars all share one corner radius; a pill for trips
+  made the distinction louder than it needs to be once the fill carries it. (The
+  one remaining `--border-radius-pill` in calendar.css is the today circle.)
+- **Colours adapt to the theme rather than being duplicated per theme.** The trip
+  fill is the user's own or `--color-primary-element`; a booking's is mixed toward
+  `--color-main-background` and a draft's edge toward `--color-main-text`, so both
+  follow light and dark with no theme hook to keep in step.
 - **A multi-leg flight draws one bar per leg**, each spanning that leg's own
   departure→arrival dates (`bookingItems`/`flightLegItems`). `bookings.start_date`
   /`end_date` is the *whole itinerary*, so a return trip drawn from it is a single
@@ -748,6 +784,12 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
     → the control won't toggle. **Runtime-only failure — not caught by vue-tsc.**
   - When in doubt, check the component's `update:*` emit in
     `node_modules/@nextcloud/vue/dist/chunks/Nc*.mjs`.
+- **Trip type and colour are cleared with `''`, not `null`.** `TripController::update`
+  filters out nulls so an omitted field keeps its value; that makes null mean
+  "not supplied", so the empty string has to carry "clear it". `BookingService`
+  treats `''` as null on the way in. The frontend keeps `''` throughout for the
+  same reason — except at `NcColorPicker`, which models `string | undefined` and
+  treats `''` as neither a colour nor none, so it is mapped at that one boundary.
 - **Nextcloud's core stylesheet styles every bare `<button>`, hard.**
   `core/css/inputs.scss` matches
   `button:not(.button-vue, [class^="vs__"]):not(.app-navigation-entry-button)` —

@@ -25,6 +25,7 @@ import {
 	reviewLabels,
 	reviewStateLabel,
 	tripLabel,
+	tripTypeLabel,
 	typeName,
 } from './labels'
 import { formatSpan, formatTimestamp } from './grid'
@@ -67,6 +68,9 @@ const message = computed(() => props.type === 'message' ? byId(props.messages, p
 
 /** The entity the route points at, whichever kind it is. */
 const found = computed(() => booking.value ?? trip.value ?? message.value)
+
+/** The colour to mark the panel heading with, if this is a trip that has one. */
+const headerColor = computed(() => trip.value?.color ?? null)
 
 const title = computed(() => {
 	// Through the label helpers, so a stray HTML entity in an extracted title
@@ -117,6 +121,9 @@ const headerFields = computed<Field[]>(() => {
 	if (trip.value !== null) {
 		const span = tripSpan(tripBookings.value)
 		return [
+			// Empty for an unclassified trip, and `field` drops empties — so the row
+			// is absent rather than saying "Type: —".
+			field(t('travelmanager', 'Type'), tripTypeLabel(trip.value.type)),
 			field(t('travelmanager', 'Travel dates'), formatSpan(span.start, span.end)),
 			field(t('travelmanager', 'Bookings'), tripBookings.value.length),
 		].filter((f): f is Field => f !== null)
@@ -191,7 +198,15 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' =>
 </script>
 
 <template>
-	<NcAppSidebar :name="title" @update:open="emit('close')">
+	<!-- The trip's colour rides on the heading rather than sitting in a field of
+	     its own: it identifies the trip, exactly as it does in front of the name
+	     on both grids, and "Colour: #bf678b" is a hex nobody needs to read. Drawn
+	     with a ::before on Nextcloud's own heading row (see .tm-sidebar-swatch in
+	     grid.css) because the panel takes its name as a string. -->
+	<NcAppSidebar :name="title"
+		:class="{ 'tm-sidebar-swatch': headerColor !== null }"
+		:style="{ '--tm-sidebar-swatch': headerColor ?? undefined }"
+		@update:open="emit('close')">
 		<!-- The sidebar's slot runs flush to its edge; the title above it is
 		     inset. Half that inset keeps the text and lozenges off the border
 		     without pretending to line up with the heading. -->

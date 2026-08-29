@@ -13,7 +13,7 @@ import {
 import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import { bookingStatusLabel, reviewStateLabel, typeName } from './labels'
 import { isOpen, openDetail } from './navigation'
-import { availableTypes, bookings, loading, tripNames } from './store'
+import { availableTypes, bookings, loading, tripColors, tripNames } from './store'
 
 // This view's own filter/sort state. 'travel' ascending is the default: what is
 // coming up next, first.
@@ -32,6 +32,9 @@ const filtered = computed(() => sortBookings(
 
 const tripNameFor = (tripId: number | null): string =>
 	tripId === null ? '' : (tripNames.value[tripId] ?? '')
+
+const tripColorFor = (tripId: number | null): string | null =>
+	tripId === null ? null : (tripColors.value[tripId] ?? null)
 
 // Literal t() calls so the strings are extractable; order and default direction
 // come from BOOKING_COLUMNS so the two cannot drift apart.
@@ -126,7 +129,18 @@ const filters: { key: string, label: string }[] = [
 						@click.stop.prevent="openDetail('booking', item.id)">
 						{{ item.title || typeName(item.type) }}
 					</button>
-					<span class="tm-cell-text">{{ tripNameFor(item.tripId) }}</span>
+					<!-- The trip's colour, exactly as on the Trips grid, so the same trip
+					     is recognisable from either list. The swatch is present but
+					     invisible when that trip has no colour, so names line up down
+					     the column; a booking with no trip at all has nothing to align
+					     with and gets an empty cell. -->
+					<span v-if="item.tripId !== null" class="tm-cell-name">
+						<span class="tm-swatch"
+							:class="{ 'tm-swatch-none': !tripColorFor(item.tripId) }"
+							:style="{ backgroundColor: tripColorFor(item.tripId) ?? undefined }" />
+						<span class="tm-cell-text">{{ tripNameFor(item.tripId) }}</span>
+					</span>
+					<span v-else class="tm-cell-text" />
 					<!-- A lozenge, matching the type lozenges on a trip row. -->
 					<span class="tm-badges tm-cell-status">
 						<span class="tm-badge">{{ typeName(item.type) }}</span>

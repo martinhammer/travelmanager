@@ -1,8 +1,9 @@
 import { t } from '@nextcloud/l10n'
-import type { Booking, ReviewState, Trip } from './api'
+import type { Booking, ReviewState, Trip, TripType } from './api'
 import { bookingSpan, decodeHtmlEntities } from './bookings'
 import { formatSpan } from './grid'
 import { allTripRows } from './store'
+import { isTripType } from './trips'
 
 /**
  * How the domain is worded, in one place.
@@ -29,6 +30,20 @@ export const typeName = (type: string): string => {
 		return type
 	}
 }
+
+const tripTypeLabels: Record<TripType, string> = {
+	work: t('travelmanager', 'Work'),
+	leisure: t('travelmanager', 'Leisure'),
+}
+
+/**
+ * What a trip is for. Null — a trip nobody has classified — has no wording at
+ * all rather than an "Unspecified" label: the lozenge is simply absent, which
+ * says the same thing without occupying a row.
+ * @param type the trip type, or null
+ */
+export const tripTypeLabel = (type: string | null): string =>
+	isTripType(type) ? tripTypeLabels[type] : ''
 
 const reviewStateLabels: Record<string, string> = {
 	draft: t('travelmanager', 'Draft'),

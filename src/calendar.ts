@@ -212,6 +212,37 @@ export const isInMonth = (day: string, month: CalendarMonth): boolean => {
 export const overlaps = (item: Spanning, from: string, to: string): boolean =>
 	item.start <= to && item.end >= from
 
+// --- colour ----------------------------------------------------------------
+
+// '#rrggbb' to channels, or null when it is not a colour we wrote.
+const channels = (hex: string): [number, number, number] | null => {
+	const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+	if (match === null) {
+		return null
+	}
+	return [parseInt(match[1]!, 16), parseInt(match[2]!, 16), parseInt(match[3]!, 16)]
+}
+
+// Perceived brightness, 0-1. The sRGB coefficients, not a plain mean: the eye
+// reads green as far brighter than blue at the same value.
+const luminance = (rgb: [number, number, number]): number =>
+	(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255
+
+/**
+ * Text that can be read on a given background.
+ *
+ * The type palette in calendar.css is picked to carry white at ~5:1, but a trip
+ * colour comes from Nextcloud's picker, which offers pale yellows and greens
+ * among others — white on those is unreadable. So the text follows the fill
+ * rather than being assumed.
+ * @param hex the background, '#rrggbb'
+ */
+export const contrastingText = (hex: string): string => {
+	const rgb = channels(hex)
+	// Unparseable: keep white, which is what the built-in palette expects.
+	return rgb !== null && luminance(rgb) > 0.55 ? '#1a1a1a' : '#ffffff'
+}
+
 // --- what goes on the grid -------------------------------------------------
 
 /**
@@ -232,6 +263,12 @@ export interface CalendarItem extends Spanning {
 	type: string | null
 	/** The user's decision, driving the draft/confirmed cue; null for trips. */
 	reviewState: ReviewState | null
+	/**
+	 * The trip colour this bar takes — its own for a trip, its trip's for a
+	 * booking. Null when there is no trip, or the trip has no colour, in which
+	 * case the bar falls back to the booking-type palette.
+	 */
+	color: string | null
 	label: string
 }
 
@@ -256,7 +293,7 @@ export const segmentLabel = (seg: FlightSegment): string => {
 // One bar per flight leg, or [] when this is not a flight we can break up.
 // Anchored on departureLocal, the same field the extraction validates a segment
 // by, so a leg that survived extraction can always be placed.
-const flightLegItems = (booking: Booking, label: string): CalendarItem[] => {
+const flightLegItems = (booking: Booking, label: string, color: string | null): CalendarItem[] => {
 	if (booking.type !== 'flight') {
 		return []
 	}
@@ -273,6 +310,7 @@ const flightLegItems = (booking: Booking, label: string): CalendarItem[] => {
 			key: `booking-${booking.id}-${index}`,
 			type: booking.type,
 			reviewState: booking.reviewState,
+			color,
 			// Falls back to the booking's own title when the leg is too sparse to
 			// name itself — an unlabelled bar would be worse than a repeated one.
 			label: segmentLabel(seg) || label,
@@ -299,9 +337,10 @@ const flightLegItems = (booking: Booking, label: string): CalendarItem[] => {
  * can see and click.
  * @param booking the booking to place
  * @param label its already-worded title, used when a leg cannot name itself
+ * @param color its trip's colour, or null to use the booking-type palette
  */
-export const bookingItems = (booking: Booking, label: string): CalendarItem[] => {
-	const legs = flightLegItems(booking, label)
+export const bookingItems = (booking: Booking, label: string, color: string | null = null): CalendarItem[] => {
+	const legs = flightLegItems(booking, label, color)
 	if (legs.length > 0) {
 		return legs
 	}
@@ -317,6 +356,7 @@ export const bookingItems = (booking: Booking, label: string): CalendarItem[] =>
 		key: `booking-${booking.id}`,
 		type: booking.type,
 		reviewState: booking.reviewState,
+		color,
 		label,
 		start,
 		// An end before the start is meaningless; treat it as a single day.
@@ -344,6 +384,7 @@ export const tripItem = (row: TripRow, label: string): CalendarItem | null => {
 		key: `trip-${row.trip.id}`,
 		type: null,
 		reviewState: null,
+		color: row.trip.color,
 		label,
 		start,
 		end: end > start ? end : start,

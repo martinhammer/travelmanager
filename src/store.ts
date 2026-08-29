@@ -57,6 +57,15 @@ export const tripNames = computed(() => Object.fromEntries(
 	trips.value.map((trip) => [trip.id, decodeHtmlEntities(trip.name)]),
 ))
 
+/**
+ * Trip colours by id, for the swatch the Bookings grid shows beside a trip name.
+ * A lookup for the same reason as tripNames: the grid holds bookings, which
+ * carry a trip *id* and nothing else about the trip.
+ */
+export const tripColors = computed(() => Object.fromEntries(
+	trips.value.map((trip) => [trip.id, trip.color]),
+))
+
 /** Only offer type filters that exist — an empty "Car rental" filter is a dead end. */
 export const availableTypes = computed(() => bookingTypes(bookings.value))
 

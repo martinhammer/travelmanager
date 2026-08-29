@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcColorPicker from '@nextcloud/vue/components/NcColorPicker'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
@@ -20,7 +22,9 @@ import {
 	tripPickerOpen,
 	tripPickerTarget,
 } from './dialogs'
-import { bookingLabel, bookingMeta, tripLabel } from './labels'
+import { bookingLabel, bookingMeta, tripLabel, tripTypeLabel } from './labels'
+import type { TripType } from './api'
+import { TRIP_TYPES } from './trips'
 import { closeDetail, isOpen } from './navigation'
 import { bookings, reload } from './store'
 
@@ -62,11 +66,22 @@ const editName = ref('')
 // Seeded when the dialog opens, not on every target change, so typing is never
 // overwritten. Decoded so a leftover entity (see decodeHtmlEntities) is cleaned
 // up on save.
+// '' rather than null for both: NcRadioGroup and NcColorPicker model strings,
+// and '' is also what the API reads as "clear it", so nothing has to translate
+// between the form's empty and the wire's empty.
+const editType = ref<TripType | ''>('')
+const editColor = ref('')
+
 watch(tripEditorOpen, (open) => {
 	if (open) {
-		editName.value = tripEditorTarget.value === null ? '' : decodeHtmlEntities(tripEditorTarget.value.name)
+		const target = tripEditorTarget.value
+		editName.value = target === null ? '' : decodeHtmlEntities(target.name)
+		editType.value = target?.type ?? ''
+		editColor.value = target?.color ?? ''
 	}
 })
+
+const typeOptions = TRIP_TYPES.map((type) => ({ type, label: tripTypeLabel(type) }))
 
 const submitTrip = async () => {
 	const name = editName.value.trim()
@@ -74,10 +89,13 @@ const submitTrip = async () => {
 		return
 	}
 	try {
+		// Sent on every save, including empty, so clearing a type or colour is a
+		// change like any other rather than something the form cannot express.
+		const fields = { type: editType.value, color: editColor.value }
 		if (tripEditorTarget.value !== null) {
-			await updateTrip(tripEditorTarget.value.id, { name })
+			await updateTrip(tripEditorTarget.value.id, { name, ...fields })
 		} else {
-			await createTrip(name)
+			await createTrip(name, fields)
 		}
 		tripEditorOpen.value = false
 		tripEditorTarget.value = null
@@ -161,6 +179,58 @@ const confirmDeleteTrip = async () => {
 			<NcTextField v-model="editName"
 				:label="t('travelmanager', 'Trip name')"
 				@keydown.enter="submitTrip" />
+
+			<!-- Plain radios in a row rather than Nextcloud's button variant: with
+			     nothing chosen yet — which is every unclassified trip — a pair of
+			     segmented buttons reads as two actions, giving no sign that one of
+			     them is meant to be picked. The circles say so even when empty.
+			     Same shape as the trip picker's list, one line instead of many. -->
+			<fieldset class="tm-form-row">
+				<legend class="tm-form-label">
+					{{ t('travelmanager', 'Type') }}
+				</legend>
+				<div class="tm-form-controls">
+					<NcCheckboxRadioSwitch v-for="option in typeOptions"
+						:key="option.type"
+						v-model="editType"
+						type="radio"
+						name="trip-type"
+						:value="option.type">
+						{{ option.label }}
+					</NcCheckboxRadioSwitch>
+				</div>
+			</fieldset>
+
+			<div class="tm-form-row">
+				<span class="tm-form-label">{{ t('travelmanager', 'Colour') }}</span>
+				<div class="tm-form-controls">
+					<!-- An NcButton as the trigger, not a bare one: Nextcloud's core
+					     stylesheet claims every bare button (see the note in
+					     CalendarBar.vue), and .button-vue is exactly what it excludes.
+					     The swatch is then a plain span and needs no fighting. -->
+					<!-- Not v-model: the picker models `string | undefined`, and '' is
+					     neither a colour nor "none" to it. Mapped at the boundary so the
+					     form can keep using '' throughout, which is also what the API
+					     reads as "clear it". Both events are handled — the palette emits
+					     update:modelValue, the Choose button emits submit. -->
+					<NcColorPicker :model-value="editColor || undefined"
+						@update:model-value="editColor = $event ?? ''"
+						@submit="editColor = $event ?? ''">
+						<NcButton variant="secondary">
+							<template #icon>
+								<span class="tm-swatch"
+									:class="{ 'tm-swatch-empty': !editColor }"
+									:style="editColor ? { backgroundColor: editColor } : {}" />
+							</template>
+							{{ editColor || t('travelmanager', 'Choose a colour') }}
+						</NcButton>
+					</NcColorPicker>
+					<NcButton v-if="editColor" variant="tertiary" @click="editColor = ''">
+						{{ t('travelmanager', 'Clear') }}
+					</NcButton>
+				</div>
+			</div>
+
 			<template #actions>
 				<NcButton variant="tertiary" @click="tripEditorOpen = false; tripEditorTarget = null">
 					{{ t('travelmanager', 'Cancel') }}

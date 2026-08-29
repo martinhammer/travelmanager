@@ -5,7 +5,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import { t } from '@nextcloud/l10n'
 import { openTripEditor } from './dialogs'
 import { type SortDirection, formatSpan, nextSortDirection, sortMarker } from './grid'
-import { tripLabel, typeName } from './labels'
+import { tripLabel, tripTypeLabel, typeName } from './labels'
 import { isOpen, openDetail } from './navigation'
 import { allTripRows, loading, trips } from './store'
 import { type TripSort, TRIP_COLUMNS, filterTripsByPeriod, sortTrips } from './trips'
@@ -22,6 +22,7 @@ const visible = computed(() => sortTrips(
 
 const columnLabels: Record<TripSort, string> = {
 	name: t('travelmanager', 'Trip'),
+	type: t('travelmanager', 'Type'),
 	travel: t('travelmanager', 'Travel dates'),
 	bookings: t('travelmanager', 'Bookings'),
 }
@@ -90,14 +91,29 @@ const onNewTrip = () => openTripEditor(null)
 						'tm-row-selected': isOpen('trip', row.trip.id),
 					}]"
 					@click="openDetail('trip', row.trip.id)">
-					<button type="button"
-						class="tm-cell-text tm-open-link"
-						@click.stop.prevent="openDetail('trip', row.trip.id)">
-						{{ tripLabel(row.trip) }}
-					</button>
+					<!-- The colour rides with the name because it identifies the trip;
+					     the type says what it is for, so it sits with the other
+					     lozenges. -->
+					<span class="tm-cell-name">
+						<span class="tm-swatch"
+							:class="{ 'tm-swatch-none': !row.trip.color }"
+							:style="row.trip.color ? { backgroundColor: row.trip.color } : {}" />
+						<button type="button"
+							class="tm-cell-text tm-open-link"
+							@click.stop.prevent="openDetail('trip', row.trip.id)">
+							{{ tripLabel(row.trip) }}
+						</button>
+					</span>
+					<!-- What the trip is *for*, in its own sortable column. Empty for a
+					     trip nobody has classified, rather than a placeholder lozenge. -->
+					<span class="tm-badges tm-cell-status">
+						<span v-if="tripTypeLabel(row.trip.type)" class="tm-badge">
+							{{ tripTypeLabel(row.trip.type) }}
+						</span>
+					</span>
 					<span class="tm-cell-meta">{{ formatSpan(row.start, row.end) }}</span>
-					<!-- Count plus one lozenge per distinct type: what the trip is made
-					     of, without opening it. -->
+					<!-- Count plus one lozenge per distinct *booking* type: what the trip
+					     is made of, without opening it. -->
 					<span class="tm-badges tm-cell-status">
 						<span class="tm-badge">
 							{{ t('travelmanager', '{n} booking(s)', { n: row.bookings.length }) }}
@@ -113,20 +129,33 @@ const onNewTrip = () => openTripEditor(null)
 </template>
 
 <style module>
-/* Only three columns, so the name takes the stretch and the lozenges get a
-   generous fixed strip — their number varies with the trip's booking types. */
+/* Name | Type | Travel dates | booking lozenges. The name takes the stretch;
+   Type needs only its one word, and the lozenge strip a generous fixed width
+   since its count varies with the trip's booking types. */
 .columns {
-	grid-template-columns: minmax(0, 1fr) 190px 340px;
+	grid-template-columns: minmax(0, 1fr) 110px 190px 340px;
 }
 
-@media (max-width: 800px) {
-	/* The lozenge strip is the widest thing here and the least urgent; the
-	   bookings themselves are one click away in the detail panel. */
+@media (max-width: 900px) {
+	/* The booking-lozenge strip is the widest thing here and the least urgent;
+	   the bookings themselves are one click away in the detail panel. */
+	.columns {
+		grid-template-columns: minmax(0, 1fr) 110px 190px;
+	}
+
+	.columns > *:nth-child(4) {
+		display: none;
+	}
+}
+
+@media (max-width: 680px) {
+	/* Then Type: it is the narrowest, but the name and the dates are what you
+	   scan a trip list for. */
 	.columns {
 		grid-template-columns: minmax(0, 1fr) 190px;
 	}
 
-	.columns > *:nth-child(3) {
+	.columns > *:nth-child(2) {
 		display: none;
 	}
 }
