@@ -384,9 +384,17 @@ The month grid, and the view the app opens on. Built on the same principle as th
 rest: *what is open* is a value in the URL, the layout maths is pure and tested,
 and the wording lives in `labels.ts`.
 
-- **Clicking a bar does not leave the calendar.** The hash grammar therefore has
-  a second form: `#/calendar/bookings/42` alongside the existing `#/bookings/42`
-  shorthand. `detail.ts` grew `ViewName`, a three-segment branch in `matchRoute`,
+- **Clicking a bar does not leave the calendar — except for a message.** The hash
+  grammar therefore has a second form: `#/calendar/bookings/42` alongside the
+  existing `#/bookings/42` shorthand. `keepsView(view, type)` takes the *type* as
+  well as the view for this reason: a message is an email, not something that
+  happens on a day, so holding the month behind one shows a grid with no bearing
+  on the panel. Opening a message hands over to the Messages list, which
+  **expands the row on arrival** (`revealRoutedMessage`) — the prompt and the raw
+  model response live there and nowhere else. That nudge is imperative and
+  `onMounted`-only: a `:open` binding would fight the user's own collapsing, and
+  running it on every route change would merge the list's two deliberately
+  separate affordances (summary click toggles, subject click opens the panel). `detail.ts` grew `ViewName`, a three-segment branch in `matchRoute`,
   a `within` argument on `detailRoute`, and **`keepsView(view)`** — true only for
   the calendar. `formatRoute` **collapses back to the shorthand** whenever the
   entity is shown over its own list, so existing URLs keep working *and* keep
@@ -467,8 +475,11 @@ and the wording lives in `labels.ts`.
   `trips.start_date` — same rule as the Trips grid, so the two cannot disagree.
   A trip with no dated bookings has no span and simply is not on the calendar.
 - **Discarded and archived are hidden by default.** On a list they merely sit
-  there; here they would take lanes from the bookings that matter. One toolbar
-  toggle reveals them.
+  there; here they would take lanes from the bookings that matter. An
+  `NcCheckboxRadioSwitch type="switch"` in the toolbar reveals them — a switch
+  rather than a button because it turns a persistent condition on and off rather
+  than performing an action, and its state then reads directly instead of having
+  to be inferred from a button's variant.
 - **The month summary is scoped to the month on screen** ("2 trips · 5 bookings ·
   1 draft"), which is the one count the navigation's global counters cannot give.
   The draft count is a **button** that opens the earliest draft in the month, so

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import ChevronLeftIcon from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import { getDayNamesMin, getFirstDay, getMonthNames, t } from '@nextcloud/l10n'
@@ -206,9 +207,12 @@ const onOpenDraft = (): void => {
 					{{ t('travelmanager', 'Today') }}
 				</NcButton>
 			</div>
-			<NcButton :variant="showAll ? 'primary' : 'tertiary'" @click="showAll = !showAll">
+			<!-- A switch, not a button: this turns a persistent condition on and off
+			     rather than performing an action, and its state has to be readable
+			     without inferring it from a button's variant. -->
+			<NcCheckboxRadioSwitch v-model="showAll" type="switch">
 				{{ t('travelmanager', 'Show archived & discarded') }}
-			</NcButton>
+			</NcCheckboxRadioSwitch>
 		</div>
 
 		<!-- Scoped to the month on screen, which is the one count the navigation's

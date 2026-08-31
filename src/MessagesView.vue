@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
@@ -18,8 +18,47 @@ import {
 	retryable,
 	sortMessages,
 } from './messages'
-import { isOpen, openDetail } from './navigation'
+import { isOpen, openDetail, route } from './navigation'
 import { loading, messages, reload } from './store'
+
+/**
+ * Open the row the route points at, and bring it into view.
+ *
+ * Arriving here from the calendar's detail panel means the message is the thing
+ * being looked at, and the row body is what this view has that the panel does
+ * not — the prompt and the raw model response. It would be perverse to land on
+ * the list with that still folded away.
+ *
+ * Nudged imperatively rather than bound with `:open`, so it stays a one-shot: a
+ * binding would re-collapse the row the moment anything else re-rendered, and
+ * would fight the user every time they closed it themselves.
+ *
+ * **On arrival only, not on every route change.** Within this view the summary
+ * click already toggles the row and the subject click opens the panel — two
+ * deliberately separate affordances, and expanding on selection would merge
+ * them. App.vue swaps views without keep-alive, so arriving from anywhere else
+ * mounts this component afresh and onMounted is exactly "you just got here".
+ */
+const rows = ref<HTMLElement | null>(null)
+
+const revealRoutedMessage = async (): Promise<void> => {
+	const detail = route.value.detail
+	if (detail?.type !== 'message') {
+		return
+	}
+	// The row may not exist yet on a fresh mount, or may not exist at all if a
+	// filter excludes it — in which case there is nothing to reveal.
+	await nextTick()
+	const row = rows.value?.querySelector<HTMLDetailsElement>(`details[data-message="${detail.id}"]`)
+	if (row === null || row === undefined) {
+		return
+	}
+	row.open = true
+	// 'nearest' so a row already on screen does not jump.
+	row.scrollIntoView({ block: 'nearest' })
+}
+
+onMounted(revealRoutedMessage)
 
 const filter = ref('all')
 const sort = ref<MessageSort>('received')
@@ -136,9 +175,10 @@ const onRetry = async (id: number) => {
 		</div>
 		<!-- Dropped entirely when empty, not just left without rows: its own
 		     top/bottom rules would otherwise collapse into a stray line. -->
-		<ol v-if="visible.length > 0" class="tm-rows">
+		<ol v-if="visible.length > 0" ref="rows" class="tm-rows">
 			<li v-for="item in visible" :key="item.id">
-				<details :class="['tm-row', { 'tm-row-selected': isOpen('message', item.id) }]">
+				<details :data-message="item.id"
+					:class="['tm-row', { 'tm-row-selected': isOpen('message', item.id) }]">
 					<summary :class="['tm-row-summary', $style.columns]">
 						<svg class="tm-chevron"
 							viewBox="0 0 24 24"

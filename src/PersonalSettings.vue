@@ -251,7 +251,7 @@ onMounted(refreshLogs)
 		size="small">
 		{{ t('travelmanager', 'This deletes all your extracted bookings, segments and the record of which messages were already processed, so the same emails will be extracted again on the next run. Your trips are kept. This cannot be undone.') }}
 		<template #actions>
-			<NcButton variant="tertiary" @click="wipeOpen = false">
+			<NcButton variant="secondary" @click="wipeOpen = false">
 				{{ t('travelmanager', 'Cancel') }}
 			</NcButton>
 			<NcButton variant="error" :disabled="wiping" @click="confirmWipe">

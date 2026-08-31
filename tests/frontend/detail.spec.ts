@@ -156,10 +156,19 @@ describe('detailRoute', () => {
 	it('marks only the calendar as a view that holds its ground', () => {
 		// The lists are each about one kind of thing, so opening a different kind
 		// there genuinely means you have left; the calendar is what you work from.
-		expect(keepsView('calendar')).toBe(true)
-		expect(keepsView('bookings')).toBe(false)
-		expect(keepsView('trips')).toBe(false)
-		expect(keepsView('messages')).toBe(false)
+		expect(keepsView('calendar', 'booking')).toBe(true)
+		expect(keepsView('calendar', 'trip')).toBe(true)
+		expect(keepsView('bookings', 'booking')).toBe(false)
+		expect(keepsView('trips', 'trip')).toBe(false)
+		expect(keepsView('messages', 'message')).toBe(false)
+	})
+
+	it('hands over to the list for a message, even from the calendar', () => {
+		// A message is an email, not something that happens on a day: holding the
+		// month behind it would show a grid with no bearing on the panel. The list
+		// can also expand the row, which is where the raw model response lives.
+		expect(keepsView('calendar', 'message')).toBe(false)
+		expect(detailRoute('message', 19, null).view).toBe('messages')
 	})
 })
 

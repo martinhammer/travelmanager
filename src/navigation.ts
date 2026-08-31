@@ -44,8 +44,10 @@ export const navigate = (next: Route, fromLabel: string | null = null): void => 
 }
 
 // The view to stay on while a detail is open, or null to hand over to the
-// entity's own list. Only the calendar holds its ground — see keepsView.
-const within = (): Route['view'] | null => keepsView(route.value.view) ? route.value.view : null
+// entity's own list. Only the calendar holds its ground, and not for messages —
+// see keepsView.
+const within = (type: DetailType): Route['view'] | null =>
+	keepsView(route.value.view, type) ? route.value.view : null
 
 const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
 	switch (type) {
@@ -70,7 +72,7 @@ const entitiesFor = (type: DetailType): (Booking | Trip | Message)[] => {
  * @param id its id
  */
 export const openDetail = (type: DetailType, id: number): void => {
-	navigate(detailRoute(type, id, within()))
+	navigate(detailRoute(type, id, within(type)))
 	backLabel.value = null
 }
 
@@ -85,7 +87,7 @@ export const openLinked = (type: DetailType, id: number): void => {
 	const current = route.value.detail
 	const item = current === null ? null : byId(entitiesFor(current.type), current.id)
 	const from = current === null || item === null ? null : detailLabel(current.type, item)
-	navigate(detailRoute(type, id, within()), from)
+	navigate(detailRoute(type, id, within(type)), from)
 	backLabel.value = from
 }
 
@@ -100,7 +102,7 @@ export const openLinked = (type: DetailType, id: number): void => {
  * @param id its id
  */
 export const detailHref = (type: DetailType, id: number): string =>
-	formatRoute(detailRoute(type, id, within()))
+	formatRoute(detailRoute(type, id, within(type)))
 
 export const closeDetail = (): void => {
 	navigate({ view: route.value.view, detail: null })

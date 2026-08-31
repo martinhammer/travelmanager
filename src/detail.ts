@@ -51,13 +51,21 @@ const toId = (value: string): number | null => {
  * Whether opening a detail should leave this view showing, rather than handing
  * over to the entity's own list.
  *
- * True only for the calendar, and that is the whole reason the three-segment
- * hash exists: the month is the thing you are working *from*, so clicking a bar
- * must not take the grid off screen. The lists are each about one kind of thing,
- * so opening a different kind there genuinely means you have left.
+ * True for the calendar, and that is the whole reason the three-segment hash
+ * exists: the month is the thing you are working *from*, so clicking a bar must
+ * not take the grid off screen. The lists are each about one kind of thing, so
+ * opening a different kind there genuinely means you have left.
+ *
+ * **Except for messages.** A message is not on the calendar and never will be —
+ * it is an email, not something that happens on a day — so holding the month
+ * behind one shows a grid with no bearing on what the panel is describing. The
+ * Messages list can also *expand* the row, which is where the prompt and the raw
+ * model response live; the panel only summarises them.
  * @param view the view currently showing
+ * @param type the kind of entity being opened
  */
-export const keepsView = (view: ViewName): boolean => view === 'calendar'
+export const keepsView = (view: ViewName, type: DetailType): boolean =>
+	view === 'calendar' && type !== 'message'
 
 /**
  * Parse a location hash into a route, or null when it names no view of ours.

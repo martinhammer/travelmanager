@@ -164,7 +164,7 @@ const confirmDeleteTrip = async () => {
 			size="small">
 			{{ t('travelmanager', 'This removes the booking for good. Because no trace is kept, a later email about the same booking will bring it back as a new draft — discarding instead keeps it out of your way permanently. This cannot be undone.') }}
 			<template #actions>
-				<NcButton variant="tertiary" @click="deleteBookingOpen = false">
+				<NcButton variant="secondary" @click="deleteBookingOpen = false">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
 				<NcButton variant="error" @click="confirmDeleteBooking">
@@ -222,7 +222,13 @@ const confirmDeleteTrip = async () => {
 									:class="{ 'tm-swatch-empty': !editColor }"
 									:style="editColor ? { backgroundColor: editColor } : {}" />
 							</template>
-							{{ editColor || t('travelmanager', 'Choose a colour') }}
+							<!-- Not the hex: the swatch already shows the colour, and
+							     "#ddcb55" is a value nobody reads. The two wordings still
+							     say whether one is set, which the swatch alone cannot
+							     convey to a screen reader. -->
+							{{ editColor
+								? t('travelmanager', 'Change colour')
+								: t('travelmanager', 'Choose a colour') }}
 						</NcButton>
 					</NcColorPicker>
 					<NcButton v-if="editColor" variant="tertiary" @click="editColor = ''">
@@ -232,7 +238,7 @@ const confirmDeleteTrip = async () => {
 			</div>
 
 			<template #actions>
-				<NcButton variant="tertiary" @click="tripEditorOpen = false; tripEditorTarget = null">
+				<NcButton variant="secondary" @click="tripEditorOpen = false; tripEditorTarget = null">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
 				<NcButton variant="primary" :disabled="!editName.trim()" @click="submitTrip">
@@ -276,11 +282,11 @@ const confirmDeleteTrip = async () => {
 			size="small">
 			{{ t('travelmanager', 'This deletes the trip. Its bookings are kept and simply unlinked, so you can re-group them later. This cannot be undone.') }}
 			<template #actions>
-				<NcButton variant="tertiary" @click="deleteTripOpen = false">
+				<NcButton variant="secondary" @click="deleteTripOpen = false">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
 				<NcButton variant="error" @click="confirmDeleteTrip">
-					{{ t('travelmanager', 'Delete trip') }}
+					{{ t('travelmanager', 'Delete') }}
 				</NcButton>
 			</template>
 		</NcDialog>

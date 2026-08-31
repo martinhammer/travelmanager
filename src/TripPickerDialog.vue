@@ -197,7 +197,7 @@ const submit = async () => {
 			</p>
 		</div>
 		<template #actions>
-			<NcButton variant="tertiary" :disabled="busy" @click="emit('update:open', false)">
+			<NcButton variant="secondary" :disabled="busy" @click="emit('update:open', false)">
 				{{ t('travelmanager', 'Cancel') }}
 			</NcButton>
 			<!-- Disabled until a choice is made: nothing is pre-selected, so an

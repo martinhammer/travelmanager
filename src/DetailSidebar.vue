@@ -190,11 +190,18 @@ const onReviewAction = (item: Booking, target: ReviewState) => {
 
 /**
  * Archiving and discarding are never the obvious next thing to do, so they never
- * take the primary slot; confirming and restoring are.
+ * take the primary slot; confirming and restoring are. Discarding is the one
+ * that throws work away — it is reversible, so not a destructive *confirmation*,
+ * but it still warrants the warning colour rather than sitting quietly beside
+ * Archive.
  * @param target the review state the button moves the booking to
  */
-const reviewVariant = (target: ReviewState): 'primary' | 'secondary' =>
-	target === 'archived' || target === 'discarded' ? 'secondary' : 'primary'
+const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' => {
+	if (target === 'discarded') {
+		return 'error'
+	}
+	return target === 'archived' ? 'secondary' : 'primary'
+}
 </script>
 
 <template>
@@ -307,14 +314,14 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' =>
 					{{ t('travelmanager', 'Actions') }}
 				</h4>
 				<div class="tm-actions">
-					<NcButton variant="primary" @click="openLinkDialog(trip)">
+					<NcButton variant="secondary" @click="openTripEditor(trip)">
+						{{ t('travelmanager', 'Edit') }}
+					</NcButton>
+					<NcButton variant="secondary" @click="openLinkDialog(trip)">
 						{{ t('travelmanager', 'Bookings') }}
 					</NcButton>
-					<NcButton variant="secondary" @click="openTripEditor(trip)">
-						{{ t('travelmanager', 'Edit trip') }}
-					</NcButton>
 					<NcButton variant="error" @click="askDeleteTrip(trip)">
-						{{ t('travelmanager', 'Delete trip') }}
+						{{ t('travelmanager', 'Delete') }}
 					</NcButton>
 				</div>
 			</template>
