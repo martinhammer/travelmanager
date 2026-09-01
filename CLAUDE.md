@@ -54,6 +54,11 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `Service/ExtractionService` — **pure, dependency-free** prompt build + JSON
   repair + validation, returning `Dto/ExtractionResult` (kept bookings +
   `Dto/ExtractionIssue[]`). This is the most-tested unit.
+- `Service/BookingMatcher` — **pure, dependency-free** duplicate detection: does
+  this extraction describe a booking the user already has? Takes an
+  `ExtractedBooking` plus `Dto/MatchCandidate[]` and returns a `Dto/BookingMatch`
+  or null. Second-most-tested unit after `ExtractionService`, and for the same
+  reason: it is where the judgement calls live.
 - `Service/IngestionService`, `Service/ExtractionResultHandler`, `Service/BookingService`, `Service/ConfigService`.
 - `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy).
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
@@ -67,7 +72,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `start_date`/`end_date`) + `Version1300Date2026081400…` (splits `status` into
   `status` + `review_state`) + `Version1600Date2026082700…` (adds `messages.sender`)
   + `Version1700Date2026082710…` (adds `messages.issue_reasons`)
-  + `Version1800Date2026082800…` (adds `messages.related_booking_ids`).
+  + `Version1800Date2026082800…` (adds `messages.related_booking_ids`)
+  + `Version2000Date2026083100…` (indexes `(user_id, type, start_date)` for the
+  duplicate-detection candidate query).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -100,9 +107,11 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   booking says whether a trip was for work, and a guessed lozenge would be a
   confident lie. An unclassified trip simply shows none
   (`Version1900Date20260829000000…`).
-- `bookings` — one canonical booking per confirmation; natural key
-  `(user_id, type, provider, booking_reference)` drives update/cancel idempotency;
-  `trip_id` links to a trip. **Two orthogonal state axes** (see §3):
+- `bookings` — one canonical booking per confirmation. There is **no natural key
+  column set**: whether a second email describes an existing booking is a
+  judgement made in `BookingMatcher` (see §3), and the DB only supplies
+  candidates (`findMatchCandidates`, indexed by `tm_book_user_ref` and
+  `tm_book_user_type_start`). `trip_id` links to a trip. **Two orthogonal state axes** (see §3):
   `status` = active/cancelled/superseded (the booking *fact*, set from the email)
   and `review_state` = draft/confirmed/discarded/archived (the *user's* decision).
   Cross-type header only (`type, provider, booking_reference,
@@ -169,11 +178,12 @@ code follows the overrides.
 - **Draft-then-confirm**: LLM output is stored as drafts; nothing is pushed to
   Calendar/Notes until the user confirms (Calendar/Notes projection is deferred).
 - **One message = one booking (MVP).** The *first* email about a booking creates
-  it. A later email matching the natural key is **reported, never applied**:
-  `applyOne` returns a `RelatedBooking` (id + description) instead of writing,
-  `applyExtraction` returns an `AppliedExtraction` (created + related), and the
-  message lands in `messages.status = related` — named in its notes *and* linked
-  by id in `related_booking_ids`, so the UI can open the booking it matched.
+  it. A later email describing the same booking is **reported, never applied**:
+  `applyExtraction` returns an `AppliedExtraction` (created + related) holding a
+  `RelatedBooking` (id + description + reason slug + whether it was suppressed)
+  instead of writing, and the message lands in `messages.status = related` —
+  named in its notes *and* linked by id in `related_booking_ids`, so the UI can
+  open the booking it matched.
   **Why:** an extraction is a full replacement, not a patch — the old code
   overwrote every column including nulls, so a follow-up email that omitted the
   confirmation number erased it, and a change email listing one leg of a two-leg
@@ -182,6 +192,58 @@ code follows the overrides.
   own right and is deferred until the simple flow is solid. **Consequence to keep in
   mind:** a cancellation email no longer cancels the booking — it is flagged and
   the user acts. `describeRelated` calls that case out by name.
+- **Whether two emails describe one booking is a judgement, not a key.** The
+  original rule was a single SQL conjunction on
+  `(user_id, type, provider, booking_reference)`. Two real emails walked through
+  it, and both are the reason `BookingMatcher` exists — keep them as the tests
+  they now are:
+  - A hotel booking arrived with `S4RHNGWR` as the reference and `WDP1UANA` as
+    the confirmation number; the follow-up called `WDP1UANA` its *reference*.
+    **Identifier roles are not stable across senders**, so identifiers are
+    compared as a **set intersection**, never positionally.
+  - A car hire arrived as `provider = Holiday Autos` (the broker) and then as
+    `provider = GOLDCAR` (the desk), with *both* identifiers and both dates
+    identical. **`provider` is one column for a two-valued fact**, and `details`
+    already carried both names correctly. So provider comparison is a set
+    intersection too, drawn from the header *and* the per-type detail fields
+    (`supplier`/`rentalCompany`, `propertyName`, segment carriers) — and it is
+    never a required term once identifiers agree.
+
+  The rules, in order (`BookingMatcher::match`):
+  1. **A shared identifier is decisive**, without consulting provider or dates —
+     a rebooking keeps its reference and changes everything else. Identifiers are
+     normalised (uppercase, alphanumerics only), floored at 5 characters and
+     filtered against a placeholder stoplist. A *short all-numeric* shared
+     identifier is the one exception: it must be corroborated by a provider or a
+     date, or it drops to rule 3.
+  2. **Same operator on the same calendar day is decisive** only when at least
+     one side has no usable identifier. Identifiers that *disagree* are positive
+     evidence of two different bookings (two rooms, one hotel, one night) and are
+     never outvoted. Flights need more even then — same flight number or route —
+     because two separately booked one-ways on one airline on one day is a real
+     itinerary. Operator names match exactly or by prefix ("KLM" ⊂ "KLM Royal
+     Dutch Airlines"), refused when the shorter name is only category words, so
+     "Hotel" cannot stand in for "Hotel Sol".
+  3. **Ambiguous evidence stores the booking and flags it.** A match suppresses
+     the incoming booking outright, so a false positive is the *only*
+     irreversible mistake available here — losing a booking beats a duplicate the
+     user can discard. Anything short of decisive yields
+     `BookingMatch::REASON_POSSIBLE`, the booking is written, and the message
+     carries the resemblance in `related_booking_ids` + a warning notice
+     (`messageNotices` derives it from `status = processed` *with* related ids —
+     nothing else produces both).
+
+  **Dates corroborate; they never veto**, and they are compared by **calendar
+  day** — a confirmation gives a 14:00 check-in and the reminder a bare date,
+  which `normalizeDate` renders as 00:00. Local wall-clock throughout (V8), by
+  comparing the stored strings, never timestamps. `BookingMapper::findMatchCandidates`
+  only fetches a **superset** (same type, within ±14 days, or a literal
+  identifier hit so a rebooking outside the window is still seen); it must never
+  encode the decision. The prompt was tightened in the same change — `provider`
+  is defined as the operator that delivers the service, the agency belongs in the
+  per-type detail field, and a lone identifier goes in `booking_reference` — but
+  the matcher must keep tolerating both readings regardless: the wording only
+  lowers the rate, and there is no backfill of existing rows.
 - **Booking state is two orthogonal axes, never one column.** `status` is a fact
   about the booking (`active`/`cancelled`/`superseded`) and is the *only* one the
   extraction writes; `review_state` is the user's decision
@@ -189,9 +251,9 @@ code follows the overrides.
   explicit user action. Flattened into one column these were mutually exclusive —
   a cancelled booking could not also be one you had reviewed. Consequences:
   - **Discard and archive are soft.** The row survives as a tombstone, so the user
-    can undo *and* so a later email matching the same natural key cannot resurrect
-    a discarded booking as a fresh draft (`applyOne` deliberately never touches
-    `review_state` on update). Hard deletion is a separate, explicit action
+    can undo *and* so a later email about the same booking cannot resurrect a
+    discarded booking as a fresh draft (a match never writes to the existing row
+    at all, `review_state` least of all). Hard deletion is a separate, explicit action
     (`BookingService::purge`, `DELETE /api/bookings/{id}`) — and because it leaves
     no tombstone, a later email *will* re-create the booking.
   - **Archiving is manual** (a user button) for now; an automatic sweep on
@@ -298,6 +360,10 @@ debug panel for iterating without waiting for cron:
   can be opened from anywhere and links back to what it relates to; `related`
   messages carry `related_booking_ids` (app version 1.8.0). See the provenance
   section below.
+- ✅ **Duplicate detection is a matcher, not a key** (2026-08-31, app version
+  1.11.0): `BookingMatcher` + `Dto/{MatchCandidate,BookingMatch}`, replacing
+  `BookingMapper::findByReference`. See the decision in §3 for the two emails
+  that motivated it and the rules that came out.
 - ✅ **Trip picker on confirm**: confirming a draft asks which trip it belongs to,
   with date-based suggestions.
 - ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view

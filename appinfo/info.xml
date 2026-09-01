@@ -7,7 +7,7 @@
 	<description><![CDATA[
 Travel Manager automatically extracts relevant information from emails using LLM, and lets you easily manage all your travel itineraries.
 	]]></description>
-	<version>1.10.0</version>
+	<version>1.11.0</version>
 	<licence>AGPL-3.0-or-later</licence>
 	<author mail="me@martinhammer.com" homepage="https://github.com/martinhammer">Martin Hammer</author>
 	<namespace>TravelManager</namespace>

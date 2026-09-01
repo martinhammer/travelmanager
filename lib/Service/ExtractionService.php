@@ -49,7 +49,7 @@ class ExtractionService {
   "bookings": [
     {
       "type": "flight | accommodation | car_rental",
-      "provider": "primary operator or brand, e.g. airline / hotel / rental company | null",
+      "provider": "the company that DELIVERS the service (airline / hotel / rental desk), not the agency or website booked through | null",
       "booking_reference": "string | null",
       "confirmation_number": "string | null",
       "status": "confirmed | cancelled | changed",
@@ -82,8 +82,8 @@ DETAILS when type = "flight":
 
 DETAILS when type = "car_rental":
 {
-  "supplier": "broker/booking site, e.g. Holiday Autos | null",
-  "rentalCompany": "on-site company, e.g. Europcar | null",
+  "supplier": "broker/booking site the hire was arranged through, e.g. Holiday Autos | null",
+  "rentalCompany": "company you collect the car from, e.g. Europcar — this is also the provider | null",
   "carType": "e.g. Compact - VW Golf or similar | null",
   "carFeatures": [ "automatic", "air conditioning", "unlimited mileage" ],
   "driver": { "name": "string | null" },
@@ -109,7 +109,11 @@ JSON;
 			'First classify each booking as flight, accommodation, or car_rental, then output ONLY that type\'s details object.',
 			'Return ONLY a JSON object matching the schema below. No prose, no markdown fences.',
 			'Only include bookings of type flight, accommodation, or car_rental.',
-			'booking_reference and confirmation_number are different identifiers; include both when the email shows both.',
+			'booking_reference and confirmation_number are different identifiers. Include both when the email shows both, '
+				. 'and put a lone identifier in booking_reference with confirmation_number null — never the other way round.',
+			'provider is the operator that delivers the service: the airline, the hotel, the rental desk you collect the car from. '
+				. 'When the email comes from an agency, broker or booking site, that name belongs in the type-specific details field '
+				. 'for it (car_rental.supplier) and NOT in provider.',
 			'A round-trip flight has two segments; multi-leg flights have one segment per leg.',
 			'Times are LOCAL wall-clock at the relevant place. Do NOT convert timezones.',
 			'Use null (or omit) for anything not present in the email. Never invent dates, references or names.',

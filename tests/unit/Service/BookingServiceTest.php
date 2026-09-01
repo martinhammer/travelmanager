@@ -7,7 +7,9 @@ namespace Service;
 use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
 use OCA\TravelManager\Db\TripMapper;
+use OCA\TravelManager\Service\BookingMatcher;
 use OCA\TravelManager\Service\BookingService;
+use OCA\TravelManager\Service\Dto\BookingMatch;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IDBConnection;
@@ -16,7 +18,10 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Covers the one-message-one-booking rule: a message creates a booking, and a
- * later message matching the same natural key is reported instead of applied.
+ * later message about a booking the user already has is reported instead of
+ * applied. Which bookings count as the same one is BookingMatcherTest\'s job —
+ * the real matcher is used here rather than a mock so the two cannot drift, and
+ * the candidate list is what the mapper mock controls.
  *
  * Needs a Nextcloud server checkout to run (mocks QBMapper/OCP types) — see §7
  * of CLAUDE.md.
@@ -34,9 +39,17 @@ final class BookingServiceTest extends TestCase {
 		$this->service = new BookingService(
 			$this->bookingMapper,
 			$this->createMock(TripMapper::class),
+			new BookingMatcher(),
 			$this->createMock(IDBConnection::class),
 			$time,
 		);
+	}
+
+	/**
+	 * @param Booking[] $candidates
+	 */
+	private function candidates(array $candidates): void {
+		$this->bookingMapper->method('findMatchCandidates')->willReturn($candidates);
 	}
 
 	private function extracted(string $status = 'confirmed'): ExtractedBooking {
@@ -61,13 +74,16 @@ final class BookingServiceTest extends TestCase {
 		$booking->setType('flight');
 		$booking->setProvider('KLM');
 		$booking->setBookingReference('YGUE6T');
+		$booking->setConfirmationNumber('29276863');
+		$booking->setDetails('{"segments":[{"departureLocal":"2026-07-25T08:35:00"}]}');
+		$booking->setStartDate(new \DateTime('2026-07-25T08:35:00'));
 		$booking->setStatus(Booking::STATUS_ACTIVE);
 		$booking->setReviewState(Booking::REVIEW_CONFIRMED);
 		return $booking;
 	}
 
 	public function testFirstMessageCreatesADraftBooking(): void {
-		$this->bookingMapper->method('findByReference')->willReturn(null);
+		$this->candidates([]);
 		$this->bookingMapper->expects($this->once())
 			->method('insert')
 			->with($this->callback(static fn (Booking $b): bool => $b->getReviewState() === Booking::REVIEW_DRAFT
@@ -83,7 +99,7 @@ final class BookingServiceTest extends TestCase {
 	}
 
 	public function testSecondMessageForTheSameBookingIsReportedNotApplied(): void {
-		$this->bookingMapper->method('findByReference')->willReturn($this->existing());
+		$this->candidates([$this->existing()]);
 		// The whole point: an existing booking is never written to.
 		$this->bookingMapper->expects($this->never())->method('update');
 		$this->bookingMapper->expects($this->never())->method('insert');
@@ -94,6 +110,9 @@ final class BookingServiceTest extends TestCase {
 		$this->assertCount(1, $applied->related);
 		$this->assertStringContainsString('#12', $applied->related[0]->description);
 		$this->assertStringContainsString('not supported yet', $applied->related[0]->description);
+		$this->assertTrue($applied->related[0]->suppressed);
+		$this->assertSame(BookingMatch::REASON_IDENTIFIER, $applied->related[0]->reason);
+		$this->assertSame(1, $applied->suppressedCount());
 		// The id, not only the sentence: this is what lets the Messages view
 		// offer to open the booking rather than merely name it.
 		$this->assertSame([12], $applied->relatedBookingIds());
@@ -102,7 +121,7 @@ final class BookingServiceTest extends TestCase {
 	public function testACancellationIsCalledOutByNameInTheReport(): void {
 		// Leaving the booking untouched matters most here, so the notice has to
 		// say plainly that the user must act.
-		$this->bookingMapper->method('findByReference')->willReturn($this->existing());
+		$this->candidates([$this->existing()]);
 
 		$applied = $this->service->applyExtraction('alice', '<m3@example.com>', [$this->extracted('cancelled')]);
 
@@ -111,7 +130,7 @@ final class BookingServiceTest extends TestCase {
 	}
 
 	public function testACancellationInAFirstMessageStillCreatesACancelledBooking(): void {
-		$this->bookingMapper->method('findByReference')->willReturn(null);
+		$this->candidates([]);
 		$this->bookingMapper->expects($this->once())
 			->method('insert')
 			->with($this->callback(static fn (Booking $b): bool => $b->getStatus() === Booking::STATUS_CANCELLED
@@ -134,8 +153,8 @@ final class BookingServiceTest extends TestCase {
 			null,
 		);
 		// The flight already exists; the hotel does not.
-		$this->bookingMapper->method('findByReference')->willReturnCallback(
-			fn (string $u, string $type): ?Booking => $type === 'flight' ? $this->existing() : null,
+		$this->bookingMapper->method('findMatchCandidates')->willReturnCallback(
+			fn (string $u, string $type): array => $type === 'flight' ? [$this->existing()] : [],
 		);
 		$this->bookingMapper->expects($this->once())->method('insert');
 
@@ -143,5 +162,52 @@ final class BookingServiceTest extends TestCase {
 
 		$this->assertSame(1, $applied->created);
 		$this->assertCount(1, $applied->related);
+	}
+
+	public function testAPossibleDuplicateIsStoredAndFlaggedRatherThanDropped(): void {
+		// Same airline, same day, but the two references disagree — evidence
+		// both ways. Suppressing would be the one irreversible mistake here.
+		$other = $this->existing();
+		$other->setBookingReference('ZZZZZZ');
+		$other->setConfirmationNumber(null);
+		$this->candidates([$other]);
+		$this->bookingMapper->expects($this->once())->method('insert');
+
+		$applied = $this->service->applyExtraction('alice', '<m6@example.com>', [$this->extracted()]);
+
+		$this->assertSame(1, $applied->created);
+		$this->assertCount(1, $applied->related);
+		$this->assertFalse($applied->related[0]->suppressed);
+		$this->assertSame(BookingMatch::REASON_POSSIBLE, $applied->related[0]->reason);
+		$this->assertSame(0, $applied->suppressedCount());
+		$this->assertStringContainsString('may duplicate', $applied->related[0]->description);
+		// Still linked by id: the flag is worthless if the user cannot open the
+		// booking it is about.
+		$this->assertSame([12], $applied->relatedBookingIds());
+	}
+
+	public function testAConfirmationNumberReusedAsAReferenceIsTheSameBooking(): void {
+		// The observed miss, end to end: the second email calls the first
+		// email\'s confirmation number its booking reference.
+		$this->candidates([$this->existing()]);
+		$this->bookingMapper->expects($this->never())->method('insert');
+
+		$second = new ExtractedBooking(
+			'flight',
+			'KLM',
+			'29276863',
+			null,
+			'confirmed',
+			'AMS → SOU',
+			['segments' => [['departureLocal' => '2026-07-25T08:35:00']]],
+			'2026-07-25T08:35:00',
+			null,
+			null,
+		);
+
+		$applied = $this->service->applyExtraction('alice', '<m7@example.com>', [$second]);
+
+		$this->assertSame(0, $applied->created);
+		$this->assertSame([12], $applied->relatedBookingIds());
 	}
 }

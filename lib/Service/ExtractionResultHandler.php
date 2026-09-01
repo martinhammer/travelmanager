@@ -77,14 +77,17 @@ class ExtractionResultHandler {
 			$count = $applied->created;
 			$dropped = $result->droppedCount();
 
-			// Bookings this email matched but did not touch are always reported,
-			// whatever else happened — that notice is the only signal the user
-			// gets that an update exists which the MVP cannot apply.
+			// Bookings this email matched are always reported, whatever else
+			// happened — that notice is the only signal the user gets that an
+			// update exists which the MVP cannot apply, or that two drafts may
+			// be the same booking.
 			if ($applied->related !== []) {
+				$suppressed = $applied->suppressedCount();
 				$this->activityLog->warning(
 					$userId,
 					IngestionLog::STEP_PERSIST,
-					'Task #' . $taskId . ' relates to ' . count($applied->related) . ' booking(s) you already have — not applied',
+					'Task #' . $taskId . ' relates to ' . count($applied->related) . ' booking(s) you already have'
+						. ($suppressed > 0 ? ' — ' . $suppressed . ' not applied' : ''),
 					$applied->describeRelated(),
 				);
 			}

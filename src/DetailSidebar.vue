@@ -342,8 +342,9 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					</li>
 				</ul>
 
-				<!-- Bookings this email is about but did not create: the 'related'
-				     status, where an earlier email already made the booking. -->
+				<!-- Bookings this email is about but did not create: either the
+				     'related' status, where an earlier email already made the
+				     booking, or one the email's own booking may duplicate. -->
 				<template v-if="messageRelated.length > 0">
 					<h4 :class="$style.heading">
 						{{ t('travelmanager', 'Relates to') }}

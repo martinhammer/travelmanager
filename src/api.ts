@@ -103,7 +103,7 @@ export interface Message {
 	failureKind: string | null
 	/** ExtractionIssue reason slugs from the last attempt, e.g. 'repaired_json'. */
 	issueReasons: string[]
-	/** Bookings this email matched but did not touch — see the 'related' status. */
+	/** Bookings this email matched but did not touch — a duplicate it was not applied over, or one it may duplicate. */
 	relatedBookingIds: number[]
 	error: string | null
 	/** Raw model output from the last attempt (truncated server-side). */

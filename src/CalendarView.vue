@@ -25,7 +25,7 @@ import {
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
 import { detailHref, isOpen, openDetail } from './navigation'
-import { allTripRows, bookings, loading, tripColors } from './store'
+import { allTripRows, bookings, tripColors } from './store'
 
 /**
  * The month grid — the app's default view, and the overview the others hang off.
@@ -227,12 +227,6 @@ const onOpenDraft = (): void => {
 					{{ t('travelmanager', '{n} draft(s) to review', { n: summary.drafts }) }}
 				</NcButton>
 			</template>
-			<!-- The grid stays whatever happens — a calendar with no days is not a
-			     calendar — so the empty case is explained here instead of replacing
-			     the view with an NcEmptyContent as the lists do. -->
-			<span v-if="!loading && items.length === 0">
-				{{ t('travelmanager', 'Nothing dated yet — bookings appear here once they have travel dates.') }}
-			</span>
 		</div>
 
 		<div class="tm-cal-weekdays" aria-hidden="true">

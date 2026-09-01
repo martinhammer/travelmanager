@@ -9,7 +9,9 @@ use OCA\TravelManager\Db\BookingMapper;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Service\Dto\AppliedExtraction;
+use OCA\TravelManager\Service\Dto\BookingMatch;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
+use OCA\TravelManager\Service\Dto\MatchCandidate;
 use OCA\TravelManager\Service\Dto\RelatedBooking;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -17,14 +19,26 @@ use OCP\IDBConnection;
 
 /**
  * Canonical store operations for bookings and trips. Every method is scoped by
- * user id. Persists LLM extractions as drafts, applying update / cancellation
- * idempotency keyed on (type, provider, reference) — see V6. Type-specific
+ * user id. Persists LLM extractions as drafts, deduplicating a second email
+ * about a booking the user already has — see BookingMatcher for the rules and
+ * why the old (type, provider, reference) key was not enough. Type-specific
  * structure is stored verbatim as JSON in the booking's `details` column.
  */
 class BookingService {
+	/**
+	 * How far either side of an incoming booking's start date to look for the
+	 * booking it might duplicate. Wide enough that a reminder email quoting a
+	 * bare date, or a model that read the wrong one of two dates in a
+	 * confirmation, still lands on the original; narrow enough that a whole
+	 * season of travel is not a candidate. Only ever widens the *candidate* set
+	 * — BookingMatcher still has to find agreeing evidence.
+	 */
+	private const MATCH_WINDOW_DAYS = 14;
+
 	public function __construct(
 		private BookingMapper $bookingMapper,
 		private TripMapper $tripMapper,
+		private BookingMatcher $matcher,
 		private IDBConnection $db,
 		private ITimeFactory $timeFactory,
 	) {
@@ -33,9 +47,11 @@ class BookingService {
 	/**
 	 * Persist a set of extracted bookings for one source message.
 	 *
-	 * One message creates a booking at most once. A booking matching an existing
-	 * one by natural key is **not** applied — see AppliedExtraction for why — and
-	 * is reported back so the user can be told.
+	 * One message creates a booking at most once. A booking the matcher
+	 * recognises as one the user already has is **not** applied — see
+	 * AppliedExtraction for why — and is reported back so the user can be told.
+	 * A booking that merely *resembles* one is stored and reported: suppressing
+	 * it would be the only irreversible mistake available here.
 	 *
 	 * @param ExtractedBooking[] $bookings
 	 */
@@ -46,11 +62,15 @@ class BookingService {
 		$this->db->beginTransaction();
 		try {
 			foreach ($bookings as $extracted) {
-				$note = $this->applyOne($userId, $messageId, $extracted);
-				if ($note === null) {
-					$created++;
-				} else {
-					$related[] = $note;
+				$match = $this->matcher->match($extracted, $this->findCandidates($userId, $extracted));
+				if ($match !== null && $match->decisive) {
+					$related[] = $this->report($match, $extracted);
+					continue;
+				}
+				$this->insertBooking($userId, $messageId, $extracted);
+				$created++;
+				if ($match !== null) {
+					$related[] = $this->report($match, $extracted);
 				}
 			}
 			$this->db->commit();
@@ -62,21 +82,50 @@ class BookingService {
 	}
 
 	/**
-	 * @return RelatedBooking|null null when the booking was stored; otherwise the
-	 *                             existing booking it matched, with its id so the
-	 *                             relationship survives as data and not only prose
+	 * Existing bookings this extraction might be a second email about.
+	 *
+	 * The identifiers go in raw as well as normalised: the column holds whatever
+	 * the model wrote, so a literal hit needs the raw form, while the normalised
+	 * form catches the same reference typed with different punctuation.
+	 *
+	 * @return list<MatchCandidate>
 	 */
-	private function applyOne(string $userId, string $messageId, ExtractedBooking $extracted): ?RelatedBooking {
-		$existing = $this->bookingMapper->findByReference(
-			$userId,
-			$extracted->type,
-			$extracted->provider,
-			$extracted->bookingReference,
-		);
-		if ($existing !== null) {
-			return new RelatedBooking($existing->getId(), $this->describeRelated($existing, $extracted));
+	private function findCandidates(string $userId, ExtractedBooking $extracted): array {
+		$identifiers = [];
+		foreach ([$extracted->bookingReference, $extracted->confirmationNumber] as $value) {
+			if ($value !== null && $value !== '') {
+				$identifiers[] = $value;
+			}
+			$normalized = $this->matcher->normalizeIdentifier($value);
+			if ($normalized !== null) {
+				$identifiers[] = $normalized;
+			}
 		}
 
+		$rows = $this->bookingMapper->findMatchCandidates(
+			$userId,
+			$extracted->type,
+			$this->toDateTime($extracted->startDate),
+			self::MATCH_WINDOW_DAYS,
+			array_values(array_unique($identifiers)),
+		);
+
+		return array_values(array_map(
+			static fn (Booking $booking): MatchCandidate => new MatchCandidate(
+				$booking->getId(),
+				$booking->getType(),
+				$booking->getProvider(),
+				$booking->getBookingReference(),
+				$booking->getConfirmationNumber(),
+				$booking->decodedDetails(),
+				$booking->getStartDate()?->format('Y-m-d\TH:i:s'),
+				$booking->getReviewState(),
+			),
+			$rows,
+		));
+	}
+
+	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted): void {
 		$now = $this->timeFactory->getDateTime();
 		$booking = new Booking();
 		$booking->setUserId($userId);
@@ -96,22 +145,38 @@ class BookingService {
 		$booking->setStartDate($this->toDateTime($extracted->startDate));
 		$booking->setEndDate($this->toDateTime($extracted->endDate));
 		$this->bookingMapper->insert($booking);
+	}
 
-		return null;
+	private function report(BookingMatch $match, ExtractedBooking $extracted): RelatedBooking {
+		return new RelatedBooking(
+			$match->candidate->id,
+			$this->describeRelated($match, $extracted),
+			$match->reason,
+			$match->decisive,
+		);
 	}
 
 	/**
-	 * Explain what this email matched and what was (not) done about it. A
-	 * cancellation is called out by name: it is the case where leaving the
-	 * booking untouched matters most to the reader.
+	 * Explain what this email matched, on what evidence, and what was (not) done
+	 * about it. Two things are called out by name because leaving the booking
+	 * untouched matters most there: a cancellation, and a match we were not sure
+	 * enough of to act on.
 	 */
-	private function describeRelated(Booking $existing, ExtractedBooking $extracted): string {
+	private function describeRelated(BookingMatch $match, ExtractedBooking $extracted): string {
+		$existing = $match->candidate;
 		$label = $extracted->title ?? $extracted->bookingReference ?? $extracted->type;
-		$line = '"' . $label . '" matches the existing booking #' . (string)$existing->getId()
-			. ' (' . $existing->getType() . ', ' . ($existing->getBookingReference() ?? 'no reference')
-			. ', ' . $existing->getReviewState() . ')';
+		$named = 'the existing booking #' . (string)$existing->id
+			. ' (' . $existing->type . ', ' . ($existing->bookingReference ?? 'no reference')
+			. ', ' . $existing->reviewState . ')';
+
+		if (!$match->decisive) {
+			return '"' . $label . '" may duplicate ' . $named . ' — ' . $match->evidence
+				. '. It was saved as a new draft rather than dropped; discard whichever is wrong.';
+		}
+
+		$line = '"' . $label . '" matches ' . $named . ' on ' . $match->evidence;
 		if ($extracted->status === 'cancelled') {
-			return $line . ' and reports it as CANCELLED. Updates are not supported yet, so the booking'
+			return $line . ', and reports it as CANCELLED. Updates are not supported yet, so the booking'
 				. ' was left unchanged — cancel or discard it yourself.';
 		}
 		return $line . '. Updates are not supported yet, so the booking was left unchanged.';

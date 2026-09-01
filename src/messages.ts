@@ -216,6 +216,19 @@ const outcomeNotice = (message: Message): MessageNotice | null => {
 export const messageNotices = (message: Message): MessageNotice[] => {
 	const notices = [failureNotice(message), outcomeNotice(message)]
 
+	// A message that both saved a booking and relates to an existing one is the
+	// possible-duplicate case: the matcher found evidence pointing both ways —
+	// same operator and day, but references that disagree — and chose to keep the
+	// booking rather than suppress it. Only the user can settle it, so only the
+	// user's attention finishes the job. Derived rather than a status of its own
+	// because nothing else produces both at once.
+	if (message.status === 'processed' && message.relatedBookingIds.length > 0) {
+		notices.push({
+			type: 'warning',
+			text: 'This email may duplicate a booking you already have. Both were kept, so check them and discard whichever is wrong.',
+		})
+	}
+
 	// Not tied to a status: a repair can accompany any outcome, including a
 	// perfectly good extraction. A rising repair rate is how a degrading model
 	// shows up before it starts failing outright, so it is never silent.

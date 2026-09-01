@@ -84,6 +84,21 @@ describe('messageNotices', () => {
 		expect(messageNotices(message({ status: 'dropped' }))[0].type).toBe('warning')
 	})
 
+	it('warns when a saved booking may duplicate one you already have', () => {
+		// The possible-duplicate case: the matcher kept the booking rather than
+		// suppress it on ambiguous evidence, so the user has to settle it.
+		const notices = messageNotices(message({ status: 'processed', relatedBookingIds: [12] }))
+		expect(notices).toHaveLength(1)
+		expect(notices[0].type).toBe('warning')
+		expect(notices[0].text).toContain('may duplicate')
+	})
+
+	it('does not call a related row a possible duplicate — nothing was saved', () => {
+		const notices = messageNotices(message({ status: 'related', relatedBookingIds: [12] }))
+		expect(notices).toHaveLength(1)
+		expect(notices[0].text).toContain('does not apply updates yet')
+	})
+
 	it('reassures on an email that genuinely held no booking', () => {
 		expect(messageNotices(message({ status: 'no_booking' }))[0].type).toBe('info')
 	})
