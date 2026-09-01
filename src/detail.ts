@@ -156,11 +156,11 @@ export const bookingsFromMessage = (bookings: Booking[], message: Message): Book
 	bookings.filter((booking) => booking.sourceMessageId === message.messageId)
 
 /**
- * The bookings an email matched without creating them. Two cases share this
- * list: the `related` status, where every booking in the email already existed,
- * and the possible-duplicate case, where a booking *was* created and merely
- * resembles this one. Held as ids on the message rather than derived, because
- * nothing links the two — an earlier email created these bookings, not this one.
+ * The bookings an email is about but did not create, because they already
+ * existed — the `related` status. Held as ids on the message rather than
+ * derived, because nothing links the two: an earlier email created these
+ * bookings, not this one. Possible duplicates are deliberately *not* here; that
+ * is a booking-to-booking relation, see `possibleDuplicates` in bookings.ts.
  * @param bookings every booking
  * @param message the message to trace sideways from
  */

@@ -27,6 +27,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setReviewState(string $reviewState)
  * @method string|null getSourceMessageId()
  * @method void setSourceMessageId(?string $sourceMessageId)
+ * @method int|null getPossibleDuplicateOf()
+ * @method void setPossibleDuplicateOf(?int $possibleDuplicateOf)
  * @method float|null getConfidence()
  * @method void setConfidence(?float $confidence)
  * @method string|null getDetails()
@@ -88,6 +90,14 @@ class Booking extends Entity implements \JsonSerializable {
 	protected string $status = self::STATUS_ACTIVE;
 	protected string $reviewState = self::REVIEW_DRAFT;
 	protected ?string $sourceMessageId = null;
+	/**
+	 * Another booking of this user's that this one may duplicate — set by
+	 * BookingMatcher when the evidence pointed both ways, and cleared by an
+	 * explicit "Not a duplicate". Stored one way round and read both ways (see
+	 * `possibleDuplicates` in src/bookings.ts): which of the pair arrived first
+	 * is not something the user should need to know to find the flag.
+	 */
+	protected ?int $possibleDuplicateOf = null;
 	protected ?float $confidence = null;
 	/** Canonical per-type structured payload, stored as a JSON string. */
 	protected ?string $details = null;
@@ -99,6 +109,7 @@ class Booking extends Entity implements \JsonSerializable {
 
 	public function __construct() {
 		$this->addType('tripId', 'integer');
+		$this->addType('possibleDuplicateOf', 'integer');
 		$this->addType('confidence', 'float');
 		$this->addType('startDate', 'datetime');
 		$this->addType('endDate', 'datetime');
@@ -142,6 +153,7 @@ class Booking extends Entity implements \JsonSerializable {
 			// updates an existing booking (one message = one booking), so this
 			// genuinely means "created by" — it is the trail back to the source.
 			'sourceMessageId' => $this->sourceMessageId,
+			'possibleDuplicateOf' => $this->possibleDuplicateOf,
 			'details' => $this->decodedDetails(),
 			// Local wall-clock span: emit without timezone offset (see V8).
 			'startDate' => $this->startDate?->format('Y-m-d\TH:i:s'),

@@ -46,8 +46,10 @@ UI (Vue, OCS API) — four views: Calendar | Bookings | Trips | Messages
   │            received | Last processed | Attempts | Status), rows expand for
   │            the prompt + raw model response; filter by status, retry
   └─ Detail sidebar: any one booking/trip/message in full, addressed by
-               location.hash, linking to whatever it relates to, and the only
-               place a booking or trip is acted on (its Actions section)
+               location.hash, linking to whatever it relates to — including a
+               "Potential duplicate" section on both sides of a flagged pair —
+               and the only place a booking or trip is acted on (its Actions
+               section)
 ```
 
 Key classes (all under `OCA\TravelManager`, `lib/`):
@@ -74,7 +76,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   + `Version1700Date2026082710…` (adds `messages.issue_reasons`)
   + `Version1800Date2026082800…` (adds `messages.related_booking_ids`)
   + `Version2000Date2026083100…` (indexes `(user_id, type, start_date)` for the
-  duplicate-detection candidate query).
+  duplicate-detection candidate query)
+  + `Version2100Date2026090100…` (adds `bookings.possible_duplicate_of`).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -111,7 +114,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   column set**: whether a second email describes an existing booking is a
   judgement made in `BookingMatcher` (see §3), and the DB only supplies
   candidates (`findMatchCandidates`, indexed by `tm_book_user_ref` and
-  `tm_book_user_type_start`). `trip_id` links to a trip. **Two orthogonal state axes** (see §3):
+  `tm_book_user_type_start`). `trip_id` links to a trip;
+  **`possible_duplicate_of`** points at another of the user's bookings this one
+  may duplicate (nullable, not a foreign key — `purge` clears inbound edges
+  itself). **Two orthogonal state axes** (see §3):
   `status` = active/cancelled/superseded (the booking *fact*, set from the email)
   and `review_state` = draft/confirmed/discarded/archived (the *user's* decision).
   Cross-type header only (`type, provider, booking_reference,
@@ -228,10 +234,9 @@ code follows the overrides.
      the incoming booking outright, so a false positive is the *only*
      irreversible mistake available here — losing a booking beats a duplicate the
      user can discard. Anything short of decisive yields
-     `BookingMatch::REASON_POSSIBLE`, the booking is written, and the message
-     carries the resemblance in `related_booking_ids` + a warning notice
-     (`messageNotices` derives it from `status = processed` *with* related ids —
-     nothing else produces both).
+     `BookingMatch::REASON_POSSIBLE` and the booking is written **with
+     `possible_duplicate_of` set** — see the next decision for where that then
+     shows up.
 
   **Dates corroborate; they never veto**, and they are compared by **calendar
   day** — a confirmation gives a 14:00 check-in and the reminder a bare date,
@@ -244,6 +249,39 @@ code follows the overrides.
   per-type detail field, and a lone identifier goes in `booking_reference` — but
   the matcher must keep tolerating both readings regardless: the wording only
   lowers the rate, and there is no backfill of existing rows.
+- **A possible duplicate is a relation between two bookings, not a fact about an
+  email.** It lives in `bookings.possible_duplicate_of`. It was briefly in
+  `messages.related_booking_ids`, which was wrong twice over: it could only be
+  shown in the Messages view, while the thing to act on is a pair of *bookings*;
+  and it made that column mean two things at once — "every booking in this email
+  already existed" (the `related` status, genuinely message-level) and "this
+  email made a booking that resembles another" — so no one label could be right
+  for both. `related_booking_ids` now means only the first, and
+  `AppliedExtraction::relatedBookingIds()` filters to **suppressed matches only**.
+  Consequences:
+  - **Stored one way round, read both ways.** The edge sits on whichever booking
+    was created second, but that direction is an accident of processing order.
+    `possibleDuplicates` (`src/bookings.ts`) unions both directions, so both
+    cards carry the flag and both offer the same way out. Storing it twice would
+    be two rows to keep in step for no gain.
+  - **Discarded and archived hide the flag rather than clear it.** You have
+    already decided about that booking, so there is nothing left to check — but
+    restoring it brings the flag back, which is what a soft state is for. Hiding
+    is a filter in `possibleDuplicates`, not a write.
+  - **"Not a duplicate" is the permanent answer** (`DELETE
+    /api/bookings/{id}/duplicate` → `BookingService::clearPossibleDuplicate`),
+    and it clears **both** directions — the flag reads the same on both cards, so
+    dismissing it on one would leave a lie on the other. Deliberately *not* a
+    review transition: the two state axes stay orthogonal, and this is neither a
+    fact about the booking nor a decision about keeping it. Without this the flag
+    would be an accusation the user can never answer, which trains people to
+    ignore the section.
+  - **The Messages row banner stays on the second email only**, and is now
+    derived from that run's booking carrying an edge (`messageNotices(message,
+    created)`), not from the message's own columns. The earlier email's row
+    records a run that did nothing wrong; a banner added to it after the fact
+    would describe something that had not happened yet. Its *sidebar* still shows
+    the "Potential duplicate" section, because that hangs off the bookings.
 - **Booking state is two orthogonal axes, never one column.** `status` is a fact
   about the booking (`active`/`cancelled`/`superseded`) and is the *only* one the
   extraction writes; `review_state` is the user's decision
@@ -364,6 +402,12 @@ debug panel for iterating without waiting for cron:
   1.11.0): `BookingMatcher` + `Dto/{MatchCandidate,BookingMatch}`, replacing
   `BookingMapper::findByReference`. See the decision in §3 for the two emails
   that motivated it and the rules that came out.
+- ✅ **Potential duplicates are a booking relation** (2026-09-01, app version
+  1.12.0): `bookings.possible_duplicate_of`, symmetric display on both booking
+  and message cards, and a "Not a duplicate" dismissal. See §3.
+- ✅ **Messages reach the model oldest first** (2026-09-01): `fetchRecent` sorts
+  the window ascending by UID instead of reversing it, so the earlier email is
+  the one that creates a booking. See §7.
 - ✅ **Trip picker on confirm**: confirming a draft asks which trip it belongs to,
   with date-based suggestions.
 - ✅ **App.vue split** (2026-08-28): 1,829 lines → a 99-line shell plus three view

@@ -15,6 +15,7 @@ import {
 	hotelFields,
 	linkDialogBookings,
 	passengerLines,
+	possibleDuplicates,
 	restoreTarget,
 	reviewActions,
 	unassignedBookings,
@@ -32,6 +33,7 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 	reviewState: 'draft',
 	confidence: null,
 	sourceMessageId: null,
+	possibleDuplicateOf: null,
 	details: {},
 	startDate: null,
 	endDate: null,
@@ -350,5 +352,42 @@ describe('decodeHtmlEntities', () => {
 
 	it('resolves double-encoded entities (e.g. "&amp;#39;")', () => {
 		expect(decodeHtmlEntities('August Norway Sebie&amp;#39;s birthday')).toBe('August Norway Sebie\'s birthday')
+	})
+})
+
+describe('possibleDuplicates', () => {
+	const a = booking({ id: 1 })
+	const b = booking({ id: 2, possibleDuplicateOf: 1 })
+
+	it('reads the edge from the booking that carries it', () => {
+		expect(possibleDuplicates([a, b], b).map((x) => x.id)).toEqual([1])
+	})
+
+	it('reads it from the other side too — which arrived first is an accident', () => {
+		expect(possibleDuplicates([a, b], a).map((x) => x.id)).toEqual([2])
+	})
+
+	it('ignores an edge pointing at a booking that is no longer loaded', () => {
+		expect(possibleDuplicates([booking({ id: 2, possibleDuplicateOf: 99 })], b)).toEqual([])
+	})
+
+	it('never pairs a booking with itself', () => {
+		const self = booking({ id: 1, possibleDuplicateOf: 1 })
+		expect(possibleDuplicates([self], self)).toEqual([])
+	})
+
+	it('hides the flag once the other one is discarded — the question is answered', () => {
+		const discarded = booking({ id: 2, possibleDuplicateOf: 1, reviewState: 'discarded' })
+		expect(possibleDuplicates([a, discarded], a)).toEqual([])
+	})
+
+	it('hides it on a discarded booking itself, in both directions', () => {
+		const discarded = booking({ id: 1, reviewState: 'archived' })
+		expect(possibleDuplicates([discarded, b], discarded)).toEqual([])
+	})
+
+	it('collects every booking flagged against this one', () => {
+		const c = booking({ id: 3, possibleDuplicateOf: 1 })
+		expect(possibleDuplicates([a, b, c], a).map((x) => x.id)).toEqual([2, 3])
 	})
 })

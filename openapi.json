@@ -34,6 +34,7 @@
                     "reviewState",
                     "confidence",
                     "sourceMessageId",
+                    "possibleDuplicateOf",
                     "details",
                     "startDate",
                     "endDate",
@@ -83,6 +84,11 @@
                     },
                     "sourceMessageId": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "possibleDuplicateOf": {
+                        "type": "integer",
+                        "format": "int64",
                         "nullable": true
                     },
                     "details": {
@@ -1124,6 +1130,134 @@
                     },
                     "400": {
                         "description": "Unknown review state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/bookings/{id}/duplicate": {
+            "delete": {
+                "operationId": "booking-dismiss-duplicate",
+                "summary": "Dismiss a possible-duplicate flag on a booking",
+                "description": "Clears the flag from both bookings in the pair: it reads the same on both cards, so dismissing it on one and not the other would leave a lie on the other. Not a review transition — the two state axes stay orthogonal, and this is neither a fact about the booking nor a decision about keeping it.",
+                "tags": [
+                    "booking"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Id of the booking",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "format": "int64"
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Flag cleared",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "$ref": "#/components/schemas/Booking"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Booking not found",
                         "content": {
                             "application/json": {
                                 "schema": {

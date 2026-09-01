@@ -19,7 +19,8 @@ import {
 	sortMessages,
 } from './messages'
 import { isOpen, openDetail, route } from './navigation'
-import { loading, messages, reload } from './store'
+import { bookingsFromMessage } from './detail'
+import { bookings, loading, messages, reload } from './store'
 
 /**
  * Open the row the route points at, and bring it into view.
@@ -211,7 +212,7 @@ const onRetry = async (id: number) => {
 						<!-- No metadata repeated here: the grid row above already carries
 						     From/dates/attempts. What the body adds is what does not fit a
 						     column — why it failed, and the retry. -->
-						<NcNoteCard v-for="(notice, i) in messageNotices(item)"
+						<NcNoteCard v-for="(notice, i) in messageNotices(item, bookingsFromMessage(bookings, item))"
 							:key="i"
 							class="tm-notice"
 							:type="notice.type"

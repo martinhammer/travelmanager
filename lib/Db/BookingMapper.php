@@ -73,6 +73,23 @@ class BookingMapper extends QBMapper {
 	}
 
 	/**
+	 * Drop every edge pointing at this booking as a possible duplicate.
+	 *
+	 * `possible_duplicate_of` is stored one way round but read both ways, so
+	 * clearing the pointing booking is the only way to clear the flag from the
+	 * pointed-at one's card. Also runs before a hard delete: the column is not a
+	 * foreign key, so nothing else would tidy up after a purge.
+	 */
+	public function clearPossibleDuplicatesOf(string $userId, int $bookingId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('possible_duplicate_of', $qb->createNamedParameter(null))
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('possible_duplicate_of', $qb->createNamedParameter($bookingId, IQueryBuilder::PARAM_INT)));
+		$qb->executeStatement();
+	}
+
+	/**
 	 * Existing bookings worth comparing an incoming extraction against.
 	 *
 	 * Deliberately a *candidate* query, not the decision: whether two bookings

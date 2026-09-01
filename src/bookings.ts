@@ -399,3 +399,29 @@ export const linkDialogBookings = (items: Booking[], tripId: number): Booking[] 
 	items.filter((item) => (item.tripId === null || item.tripId === tripId)
 		&& item.reviewState !== 'discarded'
 		&& item.reviewState !== 'archived')
+
+/**
+ * The bookings a given booking may duplicate, in both directions.
+ *
+ * The edge is stored one way round — on whichever booking was created second —
+ * but that direction is an accident of which email was processed first, not
+ * something the user knows or should have to. A duplicate is a claim about a
+ * pair of bookings, so both cards show it and both offer the same way out.
+ *
+ * Discarded and archived bookings are left out rather than deleted from the
+ * data: you have already made a decision about them, so there is nothing left to
+ * check, and a flag you cannot clear on a row you have put away is noise.
+ * Restoring one brings the flag back, which is the point of a soft state —
+ * `dismissPossibleDuplicate` is the deliberate, permanent answer.
+ * @param items every booking
+ * @param booking the booking whose card is being drawn
+ */
+export const possibleDuplicates = (items: Booking[], booking: Booking): Booking[] => {
+	if (booking.reviewState === 'discarded' || booking.reviewState === 'archived') {
+		return []
+	}
+	return items.filter((item) => item.id !== booking.id
+		&& (item.id === booking.possibleDuplicateOf || item.possibleDuplicateOf === booking.id)
+		&& item.reviewState !== 'discarded'
+		&& item.reviewState !== 'archived')
+}

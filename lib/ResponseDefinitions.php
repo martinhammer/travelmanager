@@ -19,6 +19,7 @@ namespace OCA\TravelManager;
  *     reviewState: string,
  *     confidence: float|null,
  *     sourceMessageId: string|null,
+ *     possibleDuplicateOf: int|null,
  *     details: array<string, mixed>,
  *     startDate: string|null,
  *     endDate: string|null,

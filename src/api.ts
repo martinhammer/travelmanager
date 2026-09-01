@@ -83,6 +83,12 @@ export interface Booking {
 	confidence: number | null
 	/** RFC Message-ID of the email that created this booking — the trail back to it. */
 	sourceMessageId: string | null
+	/**
+	 * Another booking this one may duplicate. Stored one way round; read both
+	 * ways via `possibleDuplicates` in bookings.ts, since which of the pair
+	 * arrived first is not something the user should need to know.
+	 */
+	possibleDuplicateOf: number | null
 	details: BookingDetails
 	startDate: string | null
 	endDate: string | null
@@ -103,7 +109,11 @@ export interface Message {
 	failureKind: string | null
 	/** ExtractionIssue reason slugs from the last attempt, e.g. 'repaired_json'. */
 	issueReasons: string[]
-	/** Bookings this email matched but did not touch — a duplicate it was not applied over, or one it may duplicate. */
+	/**
+	 * Bookings this email is about but did not create, because they already
+	 * existed. Possible duplicates are *not* here — those are a booking-to-booking
+	 * relation and live on `Booking.possibleDuplicateOf`.
+	 */
 	relatedBookingIds: number[]
 	error: string | null
 	/** Raw model output from the last attempt (truncated server-side). */
@@ -149,6 +159,16 @@ export const updateBooking = async (id: number, fields: Partial<Pick<Booking, 't
  */
 export const setBookingReviewState = async (id: number, reviewState: ReviewState): Promise<Booking> => {
 	const res = await axios.post(base(`bookings/${id}/review`), { reviewState })
+	return unwrap(res.data)
+}
+
+/**
+ * Answer the duplicate question with "no". Clears the flag from both bookings in
+ * the pair, and is not undoable — only re-running the source email brings it back.
+ * @param id either booking of the pair
+ */
+export const dismissPossibleDuplicate = async (id: number): Promise<Booking> => {
+	const res = await axios.delete(base(`bookings/${id}/duplicate`))
 	return unwrap(res.data)
 }
 

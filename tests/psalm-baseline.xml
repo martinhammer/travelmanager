@@ -141,6 +141,11 @@
       <code><![CDATA[Version2000Date20260831000000]]></code>
     </UnusedClass>
   </file>
+  <file src="lib/Migration/Version2100Date20260901000000.php">
+    <UnusedClass>
+      <code><![CDATA[Version2100Date20260901000000]]></code>
+    </UnusedClass>
+  </file>
   <file src="lib/Service/BookingService.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>

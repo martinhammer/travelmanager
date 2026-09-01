@@ -67,7 +67,7 @@ class BookingService {
 					$related[] = $this->report($match, $extracted);
 					continue;
 				}
-				$this->insertBooking($userId, $messageId, $extracted);
+				$this->insertBooking($userId, $messageId, $extracted, $match);
 				$created++;
 				if ($match !== null) {
 					$related[] = $this->report($match, $extracted);
@@ -125,7 +125,12 @@ class BookingService {
 		));
 	}
 
-	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted): void {
+	/**
+	 * @param ?BookingMatch $match a resemblance we were not sure enough of to act
+	 *                             on, recorded on the booking so both sides of the
+	 *                             pair can show it
+	 */
+	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted, ?BookingMatch $match): void {
 		$now = $this->timeFactory->getDateTime();
 		$booking = new Booking();
 		$booking->setUserId($userId);
@@ -139,6 +144,7 @@ class BookingService {
 		$booking->setConfirmationNumber($extracted->confirmationNumber);
 		$booking->setTitle($extracted->title);
 		$booking->setSourceMessageId($messageId);
+		$booking->setPossibleDuplicateOf($match?->candidate->id);
 		$booking->setConfidence($extracted->confidence);
 		$encodedDetails = json_encode($extracted->details);
 		$booking->setDetails($encodedDetails === false ? null : $encodedDetails);
@@ -228,7 +234,31 @@ class BookingService {
 	 */
 	public function purge(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
+		// The column is not a foreign key, so nothing else would clear an edge
+		// pointing at a row that is about to stop existing.
+		$this->bookingMapper->clearPossibleDuplicatesOf($userId, $bookingId);
 		$this->bookingMapper->delete($booking);
+	}
+
+	/**
+	 * Answer the duplicate question with "no": drop the edge for good.
+	 *
+	 * Deliberately not a review transition — the two axes stay orthogonal, and
+	 * this is neither a fact about the booking nor a decision about keeping it.
+	 * Clears the edge in **both** directions, because the flag reads the same on
+	 * both cards and dismissing it on one and not the other would be a lie on the
+	 * other. Unlike discarding, this is not recoverable: re-running the source
+	 * message is what brings it back.
+	 */
+	public function clearPossibleDuplicate(string $userId, int $bookingId): void {
+		$booking = $this->bookingMapper->find($bookingId, $userId);
+		$this->bookingMapper->clearPossibleDuplicatesOf($userId, $bookingId);
+		if ($booking->getPossibleDuplicateOf() === null) {
+			return;
+		}
+		$booking->setPossibleDuplicateOf(null);
+		$booking->setUpdatedAt($this->timeFactory->getDateTime());
+		$this->bookingMapper->update($booking);
 	}
 
 	/**

@@ -171,7 +171,11 @@ final class BookingServiceTest extends TestCase {
 		$other->setBookingReference('ZZZZZZ');
 		$other->setConfirmationNumber(null);
 		$this->candidates([$other]);
-		$this->bookingMapper->expects($this->once())->method('insert');
+		// The resemblance is recorded on the booking, which is what the pair of
+		// them is about — not on the message, which is only where it was noticed.
+		$this->bookingMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (Booking $b): bool => $b->getPossibleDuplicateOf() === 12));
 
 		$applied = $this->service->applyExtraction('alice', '<m6@example.com>', [$this->extracted()]);
 
@@ -181,9 +185,46 @@ final class BookingServiceTest extends TestCase {
 		$this->assertSame(BookingMatch::REASON_POSSIBLE, $applied->related[0]->reason);
 		$this->assertSame(0, $applied->suppressedCount());
 		$this->assertStringContainsString('may duplicate', $applied->related[0]->description);
-		// Still linked by id: the flag is worthless if the user cannot open the
-		// booking it is about.
+		// messages.related_booking_ids means only "this email is about bookings
+		// that already existed". A possible duplicate is not that.
+		$this->assertSame([], $applied->relatedBookingIds());
+	}
+
+	public function testASuppressedMatchLeavesNoDuplicateFlagBehind(): void {
+		// Nothing was written, so there is no second booking to compare against.
+		$this->candidates([$this->existing()]);
+		$this->bookingMapper->expects($this->never())->method('insert');
+
+		$applied = $this->service->applyExtraction('alice', '<m8@example.com>', [$this->extracted()]);
+
 		$this->assertSame([12], $applied->relatedBookingIds());
+	}
+
+	public function testDismissingADuplicateClearsBothDirections(): void {
+		// The flag reads the same on both cards, so clearing it on one and not
+		// the other would leave a lie on the other.
+		$booking = $this->existing();
+		$booking->setPossibleDuplicateOf(99);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->expects($this->once())
+			->method('clearPossibleDuplicatesOf')
+			->with('alice', 12);
+		$this->bookingMapper->expects($this->once())
+			->method('update')
+			->with($this->callback(static fn (Booking $b): bool => $b->getPossibleDuplicateOf() === null));
+
+		$this->service->clearPossibleDuplicate('alice', 12);
+	}
+
+	public function testPurgingABookingClearsEdgesPointingAtIt(): void {
+		// The column is not a foreign key, so nothing else would tidy up.
+		$this->bookingMapper->method('find')->willReturn($this->existing());
+		$this->bookingMapper->expects($this->once())
+			->method('clearPossibleDuplicatesOf')
+			->with('alice', 12);
+		$this->bookingMapper->expects($this->once())->method('delete');
+
+		$this->service->purge('alice', 12);
 	}
 
 	public function testAConfirmationNumberReusedAsAReferenceIsTheSameBooking(): void {

@@ -51,15 +51,20 @@ class AppliedExtraction {
 	}
 
 	/**
-	 * The ids of the bookings this message relates to, for storing on the message
-	 * so the UI can offer to open them.
+	 * The ids of the bookings this message is *about* without having created
+	 * them, for storing on the message so the UI can offer to open them.
+	 *
+	 * **Suppressed matches only.** A possible duplicate is a relation between two
+	 * bookings, not between an email and a booking, and it lives on
+	 * `bookings.possible_duplicate_of` instead — otherwise this column would mean
+	 * two different things at once and no label could be right for both.
 	 *
 	 * @return list<int>
 	 */
 	public function relatedBookingIds(): array {
 		return array_values(array_unique(array_map(
 			static fn (RelatedBooking $entry): int => $entry->bookingId,
-			$this->related,
+			array_filter($this->related, static fn (RelatedBooking $entry): bool => $entry->suppressed),
 		)));
 	}
 }

@@ -1,4 +1,4 @@
-import type { Message } from './api'
+import type { Booking, Message } from './api'
 import type { SortColumn, SortDirection } from './grid'
 
 /**
@@ -212,17 +212,19 @@ const outcomeNotice = (message: Message): MessageNotice | null => {
  * A row can warrant more than one: a booking can be saved *and* have come from a
  * response we repaired.
  * @param message the ledger row
+ * @param created the bookings this message produced (see bookingsFromMessage)
  */
-export const messageNotices = (message: Message): MessageNotice[] => {
+export const messageNotices = (message: Message, created: Booking[] = []): MessageNotice[] => {
 	const notices = [failureNotice(message), outcomeNotice(message)]
 
-	// A message that both saved a booking and relates to an existing one is the
-	// possible-duplicate case: the matcher found evidence pointing both ways —
-	// same operator and day, but references that disagree — and chose to keep the
-	// booking rather than suppress it. Only the user can settle it, so only the
-	// user's attention finishes the job. Derived rather than a status of its own
-	// because nothing else produces both at once.
-	if (message.status === 'processed' && message.relatedBookingIds.length > 0) {
+	// Read off the booking this run produced, not off the message: a possible
+	// duplicate is a relation between two bookings, and the message is only where
+	// it was noticed. That also gets the asymmetry right — this row is the run
+	// that made the second booking, so it is the run whose outcome needs
+	// checking. The earlier email's row records a run that did nothing wrong, and
+	// a banner added to it after the fact would describe something that had not
+	// happened yet. Both bookings still show the flag on their own cards.
+	if (created.some((booking) => booking.possibleDuplicateOf !== null)) {
 		notices.push({
 			type: 'warning',
 			text: 'This email may duplicate a booking you already have. Both were kept, so check them and discard whichever is wrong.',

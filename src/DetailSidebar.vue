@@ -6,11 +6,11 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import type { Booking, Message, ReviewState, Trip } from './api'
-import { setBookingReviewState } from './api'
+import { dismissPossibleDuplicate, setBookingReviewState } from './api'
 import type { DetailType } from './detail'
 import BookingDetails from './BookingDetails.vue'
 import { bookingsFromMessage, byId, messageForBooking, relatedBookings } from './detail'
-import { bookingSpan, reviewActions } from './bookings'
+import { bookingSpan, possibleDuplicates, reviewActions } from './bookings'
 import {
 	askDeleteBooking,
 	askDeleteTrip,
@@ -160,7 +160,37 @@ const messageBookings = computed(() =>
 const messageRelated = computed(() =>
 	message.value === null ? [] : relatedBookings(props.bookings, message.value))
 
+// A third, different claim again: not "this email is about that booking" but
+// "these two bookings may be the same thing". It hangs off the bookings rather
+// than the message, so it shows on both sides of the pair and on either email
+// that produced one of them — which of the two arrived first is an accident of
+// processing order that the user should not have to reason about.
+const bookingDuplicates = computed(() =>
+	booking.value === null ? [] : possibleDuplicates(props.bookings, booking.value))
+
+const messageDuplicates = computed(() => {
+	const seen = new Set<number>()
+	return messageBookings.value
+		.flatMap((item) => possibleDuplicates(props.bookings, item))
+		.filter((item) => !seen.has(item.id) && seen.add(item.id))
+})
+
 // --- acting on it ----------------------------------------------------------
+
+/**
+ * Answer the duplicate question with "no". Clears the flag from both bookings of
+ * the pair, which is why it can be offered from either card.
+ * @param id the booking whose card the button was pressed on
+ */
+const onDismissDuplicate = async (id: number) => {
+	try {
+		await dismissPossibleDuplicate(id)
+		showSuccess(t('travelmanager', 'Marked as not a duplicate'))
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not clear the duplicate flag'))
+	}
+}
 
 const onReview = async (id: number, target: ReviewState) => {
 	try {
@@ -268,10 +298,38 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					</li>
 				</ul>
 
+				<!-- Its own section, not a row under "Related": this is the one
+				     link that asks the user a question rather than just offering a
+				     way across. -->
+				<template v-if="bookingDuplicates.length > 0">
+					<h4 :class="$style.heading">
+						{{ t('travelmanager', 'Potential duplicate') }}
+					</h4>
+					<p :class="$style.hint">
+						{{ t('travelmanager', 'This may be the same booking, extracted twice from two emails. Compare them, then discard one — or say they are different.') }}
+					</p>
+					<ul :class="$style.links">
+						<li v-for="item in bookingDuplicates" :key="item.id" :class="$style.linkRow">
+							<span class="tm-badge">{{ typeName(item.type) }}</span>
+							<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+								{{ bookingLabel(item) }}
+							</NcButton>
+						</li>
+					</ul>
+				</template>
+
 				<h4 :class="$style.heading">
 					{{ t('travelmanager', 'Actions') }}
 				</h4>
 				<div class="tm-actions">
+					<!-- Offered from either card because it clears both. Secondary:
+					     saying "not a duplicate" is one of two equally good answers,
+					     and the other one is Discard. -->
+					<NcButton v-if="bookingDuplicates.length > 0"
+						variant="secondary"
+						@click="onDismissDuplicate(booking.id)">
+						{{ t('travelmanager', 'Not a duplicate') }}
+					</NcButton>
 					<!-- Primary while the booking has no trip — filing it is then the
 					     one thing still outstanding; secondary once it has one, where
 					     the button is a way back in rather than a task. -->
@@ -358,6 +416,23 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 						</li>
 					</ul>
 				</template>
+
+				<!-- Shown on *both* emails of a pair, since it hangs off their
+				     bookings rather than off this row. The email that arrived
+				     second is not the only one worth looking at. -->
+				<template v-if="messageDuplicates.length > 0">
+					<h4 :class="$style.heading">
+						{{ t('travelmanager', 'Potential duplicate') }}
+					</h4>
+					<ul :class="$style.links">
+						<li v-for="item in messageDuplicates" :key="item.id" :class="$style.linkRow">
+							<span class="tm-badge">{{ typeName(item.type) }}</span>
+							<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+								{{ bookingLabel(item) }}
+							</NcButton>
+						</li>
+					</ul>
+				</template>
 			</template>
 		</div>
 	</NcAppSidebar>
@@ -405,6 +480,13 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 
 .none {
 	color: var(--color-text-maxcontrast);
+}
+
+/* Sits between a heading and the links it explains, so it takes the heading's
+   bottom margin rather than adding its own above. */
+.hint {
+	color: var(--color-text-maxcontrast);
+	margin: 0 0 8px;
 }
 
 </style>

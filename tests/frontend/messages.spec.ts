@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Message } from '../../src/api'
+import type { Booking, Message } from '../../src/api'
 import {
 	filterMessagesByStatus,
 	hasDetails,
@@ -10,6 +10,15 @@ import {
 	retryable,
 	sortMessages,
 } from '../../src/messages'
+
+// Only the fields messageNotices reads; the rest of a Booking is irrelevant here.
+const asBooking = (id: number, possibleDuplicateOf: number | null): Booking =>
+	({ id, possibleDuplicateOf }) as Booking
+
+/** The booking made by the email that arrived second: it carries the edge. */
+const duplicateBooking = asBooking(2, 1)
+/** The booking the edge points at, made by the earlier email. */
+const pointedAtBooking = asBooking(1, null)
 
 const message = (overrides: Partial<Message> = {}): Message => ({
 	id: 1,
@@ -84,13 +93,19 @@ describe('messageNotices', () => {
 		expect(messageNotices(message({ status: 'dropped' }))[0].type).toBe('warning')
 	})
 
-	it('warns when a saved booking may duplicate one you already have', () => {
-		// The possible-duplicate case: the matcher kept the booking rather than
-		// suppress it on ambiguous evidence, so the user has to settle it.
-		const notices = messageNotices(message({ status: 'processed', relatedBookingIds: [12] }))
+	it('warns when a booking this email made may duplicate an existing one', () => {
+		// Read off the booking, not the message: the matcher kept the booking
+		// rather than suppress it on ambiguous evidence, and the pair is what the
+		// user has to settle.
+		const notices = messageNotices(message(), [duplicateBooking])
 		expect(notices).toHaveLength(1)
 		expect(notices[0].type).toBe('warning')
 		expect(notices[0].text).toContain('may duplicate')
+	})
+
+	it('leaves the earlier email alone — its run did nothing that needs checking', () => {
+		// That email's booking is *pointed at*, so it carries no edge of its own.
+		expect(messageNotices(message(), [pointedAtBooking])).toEqual([])
 	})
 
 	it('does not call a related row a possible duplicate — nothing was saved', () => {
