@@ -79,10 +79,16 @@ const onSearchEnter = () => {
 }
 
 /**
- * Apply the dialog: create the trip if asked, link unless "No trip", and confirm
- * when the booking was still a draft. The link is applied *before* the review
- * change so a failure there leaves the booking a draft — recoverable by pressing
- * Confirm again — rather than confirmed but orphaned.
+ * Apply the dialog: create the trip if asked, confirm when the booking was still
+ * a draft, then link unless "No trip".
+ *
+ * The confirm now runs **before** the link, the reverse of how it used to. Only
+ * confirmed bookings can be linked to a trip, so linking first would be rejected
+ * outright. The old order existed so a failed link left a draft rather than a
+ * confirmed booking with no trip; that failure is now handled by the Trip
+ * button, which every confirmed booking carries and which renders *primary*
+ * while it has no trip — so an orphan announces itself and is one click from
+ * being filed.
  */
 const submit = async () => {
 	const item = props.booking
@@ -102,11 +108,13 @@ const submit = async () => {
 		// is the trip the booking is already on, which is the ordinary outcome of
 		// opening the dialog just to look.
 		const changed = tripId !== item.tripId
+		if (confirming) {
+			await setBookingReviewState(item.id, 'confirmed')
+		}
 		if (changed) {
 			await assignBookingToTrip(item.id, tripId)
 		}
 		if (confirming) {
-			await setBookingReviewState(item.id, 'confirmed')
 			showSuccess(reviewLabels.confirmed.done)
 		} else if (changed) {
 			showSuccess(tripId === null

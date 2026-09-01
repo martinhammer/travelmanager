@@ -91,14 +91,21 @@ describe('review transitions', () => {
 
 	it('offers only a way back from discarded and archived', () => {
 		expect(reviewActions(booking({ reviewState: 'discarded' }))).toEqual(['draft'])
-		expect(reviewActions(booking({ reviewState: 'archived' }))).toEqual(['draft'])
+		expect(reviewActions(booking({ reviewState: 'archived' }))).toEqual(['confirmed'])
 	})
 
-	it('restores a previously confirmed booking to confirmed, not back into the draft queue', () => {
-		const wasConfirmed = booking({ reviewState: 'archived', confirmedAt: '2026-07-01T10:00:00+00:00' })
-		expect(restoreTarget(wasConfirmed)).toBe('confirmed')
-		expect(reviewActions(wasConfirmed)).toEqual(['confirmed'])
-		expect(restoreTarget(booking({ reviewState: 'discarded' }))).toBe('draft')
+	it('restores a discard into the draft queue even when the booking had been confirmed', () => {
+		// Undoing a discard says the booking is worth another look, not that it is
+		// right, so it goes back to the state that means "needs review".
+		const wasConfirmed = booking({ reviewState: 'discarded', confirmedAt: '2026-07-01T10:00:00+00:00' })
+		expect(restoreTarget(wasConfirmed)).toBe('draft')
+	})
+
+	it('restores an archived booking straight back to confirmed', () => {
+		// Archiving is completion, not rejection: un-archiving must not demand
+		// that you vouch for the booking a second time. It also keeps its trip,
+		// which is only legal for a confirmed booking.
+		expect(restoreTarget(booking({ reviewState: 'archived' }))).toBe('confirmed')
 	})
 })
 
@@ -192,10 +199,10 @@ describe('booking filters', () => {
 describe('trip grouping', () => {
 	const pool = [
 		booking({ id: 1, tripId: 7 }),
-		booking({ id: 2, tripId: null }),
+		booking({ id: 2, tripId: null, reviewState: 'confirmed' }),
 		booking({ id: 3, tripId: 7 }),
 		booking({ id: 4, tripId: 9 }),
-		booking({ id: 5, tripId: null }),
+		booking({ id: 5, tripId: null, reviewState: 'confirmed' }),
 	]
 
 	it('collects the bookings linked to a given trip', () => {
@@ -203,22 +210,33 @@ describe('trip grouping', () => {
 		expect(bookingsForTrip(pool, 42)).toEqual([])
 	})
 
-	it('collects only the unassigned bookings', () => {
+	it('collects only the unassigned bookings, and only confirmed ones', () => {
 		expect(unassignedBookings(pool).map((i) => i.id)).toEqual([2, 5])
 	})
 
-	it('the link dialog shows unassigned bookings plus the trip\'s own members', () => {
+	it('the link dialog shows unassigned confirmed bookings plus the trip\'s own members', () => {
 		expect(linkDialogBookings(pool, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
 		expect(linkDialogBookings(pool, 9).map((i) => i.id)).toEqual([2, 4, 5])
 	})
 
-	it('the link dialog leaves out discarded and archived bookings', () => {
-		const withTombstones = [
+	it('the link dialog leaves out anything not confirmed', () => {
+		// A trip groups travel you have decided is real; a draft is an extraction
+		// nobody has vouched for yet. Drafts reach a trip through the picker
+		// attached to confirming them.
+		const notEligible = [
 			...pool,
-			booking({ id: 6, tripId: null, reviewState: 'discarded' }),
-			booking({ id: 7, tripId: null, reviewState: 'archived' }),
+			booking({ id: 6, tripId: null, reviewState: 'draft' }),
+			booking({ id: 7, tripId: null, reviewState: 'discarded' }),
+			booking({ id: 8, tripId: null, reviewState: 'archived' }),
 		]
-		expect(linkDialogBookings(withTombstones, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
+		expect(linkDialogBookings(notEligible, 7).map((i) => i.id)).toEqual([1, 2, 3, 5])
+	})
+
+	it('keeps an already-linked booking listed whatever its state, so it can be unlinked', () => {
+		// One linked while confirmed and later restored to draft would otherwise
+		// be stranded on the trip with no way out of it.
+		const restored = [booking({ id: 9, tripId: 7, reviewState: 'draft' })]
+		expect(linkDialogBookings(restored, 7).map((i) => i.id)).toEqual([9])
 	})
 })
 

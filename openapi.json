@@ -1319,6 +1319,7 @@
             "post": {
                 "operationId": "booking-assign-trip",
                 "summary": "Link a booking to a trip, or unlink it when tripId is null",
+                "description": "Only confirmed bookings can be linked; unlinking is allowed from any state.",
                 "tags": [
                     "booking"
                 ],
@@ -1404,6 +1405,34 @@
                     },
                     "404": {
                         "description": "Booking or trip not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Booking is not confirmed",
                         "content": {
                             "application/json": {
                                 "schema": {

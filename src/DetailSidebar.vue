@@ -19,9 +19,9 @@ import {
 	openTripPicker,
 } from './dialogs'
 import {
-	actionLabel,
 	bookingLabel,
 	bookingStatusLabel,
+	actionLabel,
 	reviewLabels,
 	reviewStateLabel,
 	tripLabel,
@@ -192,10 +192,20 @@ const onDismissDuplicate = async (id: number) => {
 	}
 }
 
-const onReview = async (id: number, target: ReviewState) => {
+/**
+ * @param item the booking being moved
+ * @param target the review state to move it to
+ */
+const onReview = async (item: Booking, target: ReviewState) => {
+	// Discarding unlinks the booking from its trip, and Restore does not put it
+	// back. Say so at the moment it happens rather than letting the user find the
+	// trip empty later.
+	const unfiled = target === 'discarded' && item.tripId !== null
 	try {
-		await setBookingReviewState(id, target)
-		showSuccess(reviewLabels[target].done)
+		await setBookingReviewState(item.id, target)
+		showSuccess(unfiled
+			? t('travelmanager', 'Booking discarded and removed from its trip')
+			: reviewLabels[target].done)
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update the booking'))
@@ -204,9 +214,10 @@ const onReview = async (id: number, target: ReviewState) => {
 
 /**
  * Confirming a *draft* asks which trip it belongs to first; every other review
- * transition applies straight away. Restoring a discarded booking also targets
- * 'confirmed', but it is not a first decision and may already have a trip — hence
- * the reviewState check rather than a target check alone.
+ * transition applies straight away. Restoring an archived booking also targets
+ * 'confirmed', but it is an undo rather than a first decision and it keeps the
+ * trip it already had — hence the reviewState check rather than a target check
+ * alone.
  * @param item the booking being acted on
  * @param target the review state the button moves it to
  */
@@ -215,7 +226,7 @@ const onReviewAction = (item: Booking, target: ReviewState) => {
 		openTripPicker(item)
 		return
 	}
-	onReview(item.id, target)
+	onReview(item, target)
 }
 
 /**

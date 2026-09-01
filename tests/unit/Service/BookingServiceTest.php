@@ -216,6 +216,64 @@ final class BookingServiceTest extends TestCase {
 		$this->service->clearPossibleDuplicate('alice', 12);
 	}
 
+	public function testDiscardingUnlinksTheBookingFromItsTrip(): void {
+		// Discarding says the booking is wrong; a trip groups travel that is real.
+		// Leaving it filed would keep a rejected booking feeding the trip's
+		// derived dates and type lozenges.
+		$booking = $this->existing();
+		$booking->setTripId(3);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->expects($this->once())
+			->method('update')
+			->with($this->callback(static fn (Booking $b): bool => $b->getTripId() === null
+				&& $b->getReviewState() === Booking::REVIEW_DISCARDED))
+			->willReturn($booking);
+
+		$this->service->setReviewState('alice', 12, Booking::REVIEW_DISCARDED);
+	}
+
+	public function testArchivingKeepsTheTripLink(): void {
+		// Archiving says the travel happened and is done with, which is precisely
+		// when it belongs to its trip — emptying past trips would destroy the
+		// history the Trips view and the calendar are built on.
+		$booking = $this->existing();
+		$booking->setTripId(3);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->expects($this->once())
+			->method('update')
+			->with($this->callback(static fn (Booking $b): bool => $b->getTripId() === 3))
+			->willReturn($booking);
+
+		$this->service->setReviewState('alice', 12, Booking::REVIEW_ARCHIVED);
+	}
+
+	public function testOnlyAConfirmedBookingCanBeLinkedToATrip(): void {
+		// A trip groups travel you have decided is real; a draft is an extraction
+		// nobody has vouched for yet.
+		$draft = $this->existing();
+		$draft->setReviewState(Booking::REVIEW_DRAFT);
+		$this->bookingMapper->method('find')->willReturn($draft);
+		$this->bookingMapper->expects($this->never())->method('update');
+
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->assignBookingToTrip('alice', 12, 3);
+	}
+
+	public function testUnlinkingIsAllowedFromAnyState(): void {
+		// Otherwise a booking linked while confirmed and later restored to draft
+		// would be stranded on the trip with no way out of it.
+		$draft = $this->existing();
+		$draft->setReviewState(Booking::REVIEW_DRAFT);
+		$draft->setTripId(3);
+		$this->bookingMapper->method('find')->willReturn($draft);
+		$this->bookingMapper->expects($this->once())
+			->method('update')
+			->with($this->callback(static fn (Booking $b): bool => $b->getTripId() === null))
+			->willReturn($draft);
+
+		$this->service->assignBookingToTrip('alice', 12, null);
+	}
+
 	public function testPurgingABookingClearsEdgesPointingAtIt(): void {
 		// The column is not a foreign key, so nothing else would tidy up.
 		$this->bookingMapper->method('find')->willReturn($this->existing());

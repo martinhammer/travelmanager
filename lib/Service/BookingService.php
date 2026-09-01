@@ -213,6 +213,14 @@ class BookingService {
 	 * and so a later email about the same booking cannot resurrect it as a fresh
 	 * draft. Use purge() to delete a booking for good.
 	 *
+	 * **Discarding also unlinks the booking from its trip.** Discarding says the
+	 * booking is wrong, and a trip is a grouping of travel that is real — leaving
+	 * it filed would keep a rejected booking feeding the trip's derived dates and
+	 * type lozenges. Archiving deliberately does *not* unlink: it says the travel
+	 * happened and is done with, which is precisely when it belongs to its trip.
+	 * The link is not restored by a later Restore — the row remembers no previous
+	 * trip, and re-filing is one click from the Trip button.
+	 *
 	 * @throws \InvalidArgumentException on an unknown review state
 	 */
 	public function setReviewState(string $userId, int $bookingId, string $reviewState): Booking {
@@ -223,6 +231,9 @@ class BookingService {
 		$booking->setReviewState($reviewState);
 		if ($reviewState === Booking::REVIEW_CONFIRMED && $booking->getConfirmedAt() === null) {
 			$booking->setConfirmedAt($this->timeFactory->getDateTime());
+		}
+		if ($reviewState === Booking::REVIEW_DISCARDED) {
+			$booking->setTripId(null);
 		}
 		$booking->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->bookingMapper->update($booking);
@@ -389,6 +400,16 @@ class BookingService {
 	public function assignBookingToTrip(string $userId, int $bookingId, ?int $tripId): Booking {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		if ($tripId !== null) {
+			// Only a booking you have decided to keep can be filed. A trip is a
+			// grouping of real travel, and a draft is an extraction nobody has
+			// vouched for yet — grouping those would put unreviewed guesses into
+			// the trip's derived dates and type lozenges. Unlinking (null) stays
+			// open to any state, so a booking can always be taken back out.
+			if ($booking->getReviewState() !== Booking::REVIEW_CONFIRMED) {
+				throw new \InvalidArgumentException(
+					'Only confirmed bookings can be linked to a trip; this one is ' . $booking->getReviewState(),
+				);
+			}
 			// Verifies ownership; throws if the trip is not the user's.
 			$this->tripMapper->find($tripId, $userId);
 		}

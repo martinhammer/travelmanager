@@ -346,13 +346,30 @@ export const draftCount = (items: Booking[]): number =>
 	items.filter((item) => item.reviewState === 'draft').length
 
 /**
- * Where "Restore" should put a booking: back to confirmed if it had already
- * been confirmed before it was discarded/archived, otherwise back to the
- * draft queue for review.
+ * Where "Restore" puts a booking, decided by what it is being restored *from*
+ * rather than by where it had been before.
+ *
+ * - **Discarded → draft, always**, even if it was confirmed when you discarded
+ *   it. Discarding is how you say "this is wrong"; taking that back means the
+ *   booking is worth another look, not that it is right. Draft is the state that
+ *   means "needs review", so that is where the second look starts — and
+ *   confirming from there is one click, with the trip picker attached.
+ * - **Archived → confirmed.** Archiving is not rejection, it is completion: the
+ *   travel happened and you are done with it. Un-archiving should not demand
+ *   that you vouch for the booking a second time. Archive is only reachable from
+ *   confirmed (see reviewActions), so there is no other state to return to.
+ *
+ * This is also what keeps trip links coherent: an archived booking keeps its
+ * trip, and restoring puts it back in the one state where being linked is legal.
+ * A discarded booking has already been unlinked server-side, so it comes back a
+ * plain unfiled draft.
+ *
+ * Branches on `reviewState`, not on `confirmedAt` as it once did — that
+ * timestamp is still recorded on a first confirmation, but nothing reads it now.
  * @param item the booking being restored
  */
 export const restoreTarget = (item: Booking): ReviewState =>
-	item.confirmedAt !== null ? 'confirmed' : 'draft'
+	item.reviewState === 'archived' ? 'confirmed' : 'draft'
 
 /**
  * The review states a booking can be moved to from where it is now, in the
@@ -381,24 +398,32 @@ export const bookingsForTrip = (items: Booking[], tripId: number): Booking[] =>
 
 /**
  * The bookings not yet linked to any trip — the pool eligible to be linked.
+ * Confirmed only: see linkDialogBookings for why.
  * @param items the bookings to filter
  */
 export const unassignedBookings = (items: Booking[]): Booking[] =>
-	items.filter((item) => item.tripId === null)
+	items.filter((item) => item.tripId === null && item.reviewState === 'confirmed')
 
 /**
  * The bookings shown in the "Link a booking" dialog for a given trip: those
  * already linked to it (so they stay visible with an Unlink action instead of
- * disappearing once linked) plus the still-unassigned pool. Discarded and
- * archived bookings are left out — they survive as rows now, but they are not
- * things you want to group into a trip.
+ * disappearing once linked) plus the still-unassigned **confirmed** pool.
+ *
+ * Only confirmed bookings can be linked — a trip groups travel you have decided
+ * is real, and a draft is an extraction nobody has vouched for yet, so filing
+ * one would feed unreviewed guesses into the trip's derived dates and type
+ * lozenges. Drafts reach a trip through the picker attached to *confirming*
+ * them, which is the point at which they stop being guesses.
+ *
+ * Already-linked bookings are kept whatever their state, so one that was linked
+ * and later restored to draft can still be unlinked here rather than being
+ * stranded. The backend enforces the same rule (BookingService::assignBookingToTrip).
  * @param items the bookings to filter
  * @param tripId the trip being linked to
  */
 export const linkDialogBookings = (items: Booking[], tripId: number): Booking[] =>
-	items.filter((item) => (item.tripId === null || item.tripId === tripId)
-		&& item.reviewState !== 'discarded'
-		&& item.reviewState !== 'archived')
+	items.filter((item) => item.tripId === tripId
+		|| (item.tripId === null && item.reviewState === 'confirmed'))
 
 /**
  * The bookings a given booking may duplicate, in both directions.

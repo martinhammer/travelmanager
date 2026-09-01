@@ -68,6 +68,8 @@ export const bookingStatusLabel = (status: string): string => bookingStatusLabel
  * means adding a state is a single edit here plus one in reviewActions().
  */
 export const reviewLabels: Record<ReviewState, { action: string, done: string }> = {
+	// 'Restore' rather than 'Move to drafts': draft is only ever *targeted* by
+	// undoing a discard, so the label names the act, not the state.
 	draft: { action: t('travelmanager', 'Restore'), done: t('travelmanager', 'Booking restored to drafts') },
 	confirmed: { action: t('travelmanager', 'Confirm'), done: t('travelmanager', 'Booking confirmed') },
 	discarded: { action: t('travelmanager', 'Discard'), done: t('travelmanager', 'Booking discarded') },
@@ -75,7 +77,13 @@ export const reviewLabels: Record<ReviewState, { action: string, done: string }>
 }
 
 /**
- * A restore back to 'confirmed' is an undo, not a fresh confirmation.
+ * Decoded so a leftover entity reads as a character, not as literal markup.
+ * @param item the booking to name
+ */
+/**
+ * Restoring an archived booking targets 'confirmed', but it is an undo rather
+ * than a fresh confirmation — and it opens no trip picker, so calling it
+ * "Confirm" would promise the wrong thing.
  * @param item the booking being acted on
  * @param target the review state the button moves it to
  */
@@ -84,10 +92,6 @@ export const actionLabel = (item: Booking, target: ReviewState): string =>
 		? t('travelmanager', 'Restore')
 		: reviewLabels[target].action
 
-/**
- * Decoded so a leftover entity reads as a character, not as literal markup.
- * @param item the booking to name
- */
 export const bookingLabel = (item: Booking): string => decodeHtmlEntities(item.title || item.type)
 
 export const tripLabel = (trip: Trip): string => decodeHtmlEntities(trip.name)

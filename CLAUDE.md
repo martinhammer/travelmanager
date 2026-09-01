@@ -291,13 +291,59 @@ code follows the overrides.
   - **Discard and archive are soft.** The row survives as a tombstone, so the user
     can undo *and* so a later email about the same booking cannot resurrect a
     discarded booking as a fresh draft (a match never writes to the existing row
-    at all, `review_state` least of all). Hard deletion is a separate, explicit action
+    at all, `review_state` least of all). **Discarding unlinks the booking from
+    its trip**, archiving deliberately does not: discarding says the booking is
+    wrong, and leaving it filed would keep a rejected booking feeding the trip's
+    derived dates and type lozenges, while archiving says the travel happened and
+    is done with — which is precisely when it belongs to its trip, and emptying
+    past trips would destroy the history the Trips view and the calendar are
+    built on. The link is **not** restored by a later Restore (nothing remembers
+    the previous trip), so the discard toast says the booking left its trip
+    rather than letting the user find it gone later. Hard deletion is a separate, explicit action
     (`BookingService::purge`, `DELETE /api/bookings/{id}`) — and because it leaves
     no tombstone, a later email *will* re-create the booking.
   - **Archiving is manual** (a user button) for now; an automatic sweep on
     `end_date` + a cooling period is deferred, and is the intended trigger for
     hard-deleting retained email bodies once message-body persistence lands.
   - Review transitions all go through `POST /api/bookings/{id}/review`.
+  - **Restore is decided by what you are restoring *from***, not by where the
+    booking had been (`restoreTarget` in `src/bookings.ts`, branching on
+    `reviewState`; the old branch on `confirmedAt` is gone, and that timestamp is
+    now written but never read):
+    - **`discarded` → `draft`, always**, even if it was confirmed when you
+      discarded it. Discarding is how you say "this is wrong"; taking that back
+      means the booking is worth another look, not that it is right. Draft is the
+      state that means "needs review", so that is where the second look starts,
+      and confirming from there is one click with the trip picker attached.
+    - **`archived` → `confirmed`.** Archiving is completion, not rejection — the
+      travel happened and you are done with it — so un-archiving must not demand
+      that you vouch for the booking a second time. Archive is only reachable
+      from confirmed, so there is no other state to return to.
+
+    This is also what keeps trip links coherent: an archived booking keeps its
+    trip and comes back to the one state where being linked is legal, while a
+    discarded one was unlinked on the way out and returns as a plain unfiled
+    draft. `labels.ts::actionLabel` exists for the archived case alone: the
+    button targets `confirmed` but must read "Restore", since it is an undo and
+    opens no trip picker.
+  - **Only confirmed bookings can be linked to a trip.** A trip groups travel you
+    have decided is real; a draft is an extraction nobody has vouched for yet, so
+    filing one would feed unreviewed guesses into the trip's derived dates and
+    type lozenges (which are computed from its bookings — see `tripRows`).
+    Enforced in `BookingService::assignBookingToTrip` (400, not a silent no-op)
+    and mirrored in the pool `linkDialogBookings`/`unassignedBookings` offer.
+    Two deliberate exceptions:
+    - **Unlinking (`tripId = null`) is allowed from any state**, and
+      `linkDialogBookings` keeps an already-linked booking listed whatever its
+      state. A booking linked while confirmed and later restored to draft would
+      otherwise be stranded on the trip with no way out of it.
+    - Drafts still *reach* a trip, through the picker attached to confirming
+      them — which is the moment they stop being guesses. That is why the confirm
+      now runs before the link.
+
+    In practice nothing reaches a *linked draft* at all: discarding clears the
+    link on the way out, and archive → restore lands on `confirmed`. The
+    exceptions above are belt-and-braces for rows that predate these rules.
   - **Confirming a draft asks for a trip first.** Confirmation is the moment a
     booking becomes one you have decided to keep, so it is the natural point to
     group it. The dialog is a **single radio group** over two sections —
@@ -320,11 +366,17 @@ code follows the overrides.
     writes nothing and shows no toast. Button variants follow the target,
     not the position: `archived`/`discarded` are never the obvious next action so
     they are always secondary, while confirm/restore are primary.
-    The link is applied **before** the review change, so a failed link leaves the
-    booking a draft (press Confirm again) rather than confirmed but orphaned.
-    Only `draft → confirmed` opens it: *restoring* a discarded booking also
-    targets `confirmed` but is not a first decision, hence the `reviewState`
-    check in `onReviewAction`, not a target check alone.
+    The review change is applied **before** the link — the reverse of how it was
+    first built. Only confirmed bookings can be linked (see below), so linking a
+    draft first would simply be rejected (400). The old order existed so a failed link
+    left a draft rather than a confirmed booking with no trip; that outcome is
+    now handled by the **Trip** button, which every confirmed booking carries and
+    which renders *primary* while it has none, so an orphan announces itself and
+    is one click from being filed.
+    Only `draft → confirmed` opens the dialog: *restoring an archived booking*
+    also targets `confirmed`, but it is an undo rather than a first decision and
+    it still has the trip it was archived with — hence the `reviewState` check in
+    `onReviewAction`, not a target check alone.
 - **Failed extractions are retried per message, not by wiping.** `messages`
   retains the email body, so `IngestionService::retryMessage` rebuilds the prompt
   and schedules a fresh task **bypassing the dedup check** (the message is
@@ -402,6 +454,10 @@ debug panel for iterating without waiting for cron:
   1.11.0): `BookingMatcher` + `Dto/{MatchCandidate,BookingMatch}`, replacing
   `BookingMapper::findByReference`. See the decision in §3 for the two emails
   that motivated it and the rules that came out.
+- ✅ **Booking lifecycle tightened** (2026-09-01, app version 1.13.0): restoring
+  a *discarded* booking always lands on `draft` (an archived one still returns to
+  `confirmed`), discarding unlinks it from its trip, and only confirmed bookings
+  can be linked to a trip. See §3.
 - ✅ **Potential duplicates are a booking relation** (2026-09-01, app version
   1.12.0): `bookings.possible_duplicate_of`, symmetric display on both booking
   and message cards, and a "Not a duplicate" dismissal. See §3.

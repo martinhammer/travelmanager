@@ -179,12 +179,16 @@ class BookingController extends OCSController {
 	/**
 	 * Link a booking to a trip, or unlink it when tripId is null
 	 *
+	 * Only confirmed bookings can be linked; unlinking is allowed from any state.
+	 *
 	 * @param int $id Id of the booking
 	 * @param int|null $tripId Id of the trip to link, or null to unlink
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking or trip not found
+	 * @throws OCSBadRequestException Booking is not confirmed
 	 *
 	 * 200: Booking linked
+	 * 400: Booking is not confirmed
 	 * 404: Booking or trip not found
 	 */
 	#[NoAdminRequired]
@@ -195,6 +199,8 @@ class BookingController extends OCSController {
 			return new DataResponse($this->serialize($id));
 		} catch (DoesNotExistException) {
 			throw new OCSNotFoundException();
+		} catch (\InvalidArgumentException $e) {
+			throw new OCSBadRequestException($e->getMessage());
 		}
 	}
 
