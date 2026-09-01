@@ -76,7 +76,8 @@ class HordeImapClient implements IImapClient {
 			// Take the last $limit messages by sequence number (new mail arrives
 			// last). This deliberately avoids server-side SEARCH/SORT, which not
 			// every IMAP server supports (some reject `UID SORT … ALL` with
-			// "Illegal arguments").
+			// "Illegal arguments"). The window is the newest $limit; the order
+			// within it is oldest-first — see the return below.
 			$start = max(1, $total - $limit + 1);
 			$ids = new Horde_Imap_Client_Ids($start . ':' . $total, true);
 
@@ -90,8 +91,13 @@ class HordeImapClient implements IImapClient {
 			foreach ($fetched as $data) {
 				$messages[] = $this->buildMessage($client, $mailbox, $data, $uidValidity);
 			}
-			// Sequence order is oldest→newest; hand back newest first.
-			return array_reverse($messages);
+			// Oldest first, by UID rather than by the order the server happened to
+			// send the untagged FETCH responses in. UIDs increase strictly with
+			// arrival within a UIDVALIDITY (RFC 3501), so this is arrival order
+			// by definition rather than by convention — and the order is part of
+			// the contract, not a nicety. See IImapClient::fetchRecent.
+			usort($messages, static fn (ImapMessage $a, ImapMessage $b): int => $a->uid <=> $b->uid);
+			return $messages;
 		} catch (Horde_Imap_Client_Exception $e) {
 			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
 		} finally {

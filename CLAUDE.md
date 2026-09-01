@@ -957,14 +957,30 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
 - **Fetch the last N by sequence number, not SEARCH/SORT.** `fetchRecent` reads
   the mailbox `MESSAGES` count and fetches the trailing sequence range
-  `max-N+1:max` (new mail arrives last), then `array_reverse`s to newest-first.
-  The earlier approach (`search()` with an empty `Search_Query` + a `SORT
+  `max-N+1:max` (new mail arrives last). The earlier approach (`search()` with an empty `Search_Query` + a `SORT
   (REVERSE ARRIVAL)` option) is fragile: some servers (e.g. Purelymail) reject the
   resulting `UID SORT … ` with no search key as **`UID failed. Illegal
   arguments.`**, and SORT isn't universally supported. Sequence fetch needs only
   base IMAP. Surface real Horde errors via the exception's public `$details`
   (raw server response) — `getMessage()` alone is the generic "IMAP error
   reported by server." (see `HordeImapClient::describe()`).
+- **Messages reach the model oldest first, and that is a contract.** *Which*
+  messages (the newest N) and *what order* they are handed over in are separate
+  decisions: `fetchRecent` sorts the window ascending **by UID**, and
+  `IngestionService` must not re-order it. Deduplication treats the first email
+  about a booking as the one that creates it and every later one as being *about*
+  that booking, so scheduling newest-first made "first" mean "whichever
+  extraction task happened to finish first" — which is arbitrary, and put the
+  duplicate flag on whichever of two emails won the race rather than on the later
+  one. Sort **by UID, not by the order the server sent the untagged FETCH
+  responses in**: UIDs increase strictly with arrival within a UIDVALIDITY
+  (RFC 3501), so that is arrival order by definition rather than by convention.
+  Deliberately **not** by the `Date` header — on forwarded mail it is the
+  forwarding time, so it carries no more truth than arrival order and is
+  client-controlled besides. **This orders scheduling only**: extraction is
+  asynchronous, so with more than one AI worker the results can still arrive out
+  of order. A hard guarantee would mean serialising per user or holding results
+  until earlier ones are applied, both of which fight the async design; not done.
 - **Loading the bundled Composer autoloader.** Nextcloud only auto-includes an
   app's **`<app>/composer/autoload.php`** (`OC_App::registerAutoloading`), **not
   `<app>/vendor/autoload.php`**. Our build ships the autoloader under `vendor/`,

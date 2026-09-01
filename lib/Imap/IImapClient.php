@@ -15,7 +15,19 @@ use OCA\TravelManager\Exception\ImapException;
  */
 interface IImapClient {
 	/**
-	 * Fetch the most recent messages from the configured mailbox, newest first.
+	 * Fetch the most recent messages from the configured mailbox, **oldest first**.
+	 *
+	 * Two separate things: *which* messages (the newest $limit, since a mailbox
+	 * can hold years of mail) and *what order* they come back in (oldest first,
+	 * so they reach the model in the order they arrived).
+	 *
+	 * The order is part of the contract, not an implementation detail. Booking
+	 * deduplication treats the first email about a booking as the one that
+	 * creates it and every later one as being about that booking; hand them over
+	 * newest-first and "first" silently means "whichever extraction task finished
+	 * first", which is arbitrary. Note this only orders the *scheduling* —
+	 * extraction is asynchronous, so with several AI workers running the results
+	 * can still arrive out of order.
 	 *
 	 * @param int $limit maximum number of messages to return
 	 * @return ImapMessage[]

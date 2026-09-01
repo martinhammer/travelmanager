@@ -106,6 +106,29 @@ final class IngestionServiceTest extends TestCase {
 		$this->assertSame(1, $this->service->ingestForUser('alice'));
 	}
 
+	public function testMessagesAreScheduledInTheOrderTheMailboxReturnedThem(): void {
+		// IImapClient hands messages over oldest-first, and ingestion must not
+		// re-order them: booking deduplication treats the first email about a
+		// booking as the one that creates it, so scheduling the newest first
+		// makes "first" mean "whichever extraction finished first".
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			$this->message('<older@example.com>'),
+			$this->message('<newer@example.com>'),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+
+		$scheduled = [];
+		$this->llmService->method('scheduleText2Text')
+			->willReturnCallback(static function (string $prompt, string $userId, string $customId) use (&$scheduled): int {
+				$scheduled[] = $customId;
+				return count($scheduled);
+			});
+
+		$this->assertSame(2, $this->service->ingestForUser('alice'));
+		$this->assertSame(['<older@example.com>', '<newer@example.com>'], $scheduled);
+	}
+
 	public function testSchedulingFailureMarksMessageFailed(): void {
 		$this->configureUser();
 		$this->imapClient->method('fetchRecent')->willReturn([$this->message('<x@example.com>')]);
