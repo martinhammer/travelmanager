@@ -2,12 +2,14 @@
 import { computed, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import ContentDuplicateIcon from 'vue-material-design-icons/ContentDuplicate.vue'
 import { t } from '@nextcloud/l10n'
 import {
 	type BookingSort,
 	BOOKING_COLUMNS,
 	bookingSpan,
 	filterBookings,
+	hasPossibleDuplicate,
 	sortBookings,
 } from './bookings'
 import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
@@ -62,6 +64,10 @@ const filters: { key: string, label: string }[] = [
 	{ key: 'confirmed', label: t('travelmanager', 'Confirmed') },
 	{ key: 'archived', label: t('travelmanager', 'Archived') },
 	{ key: 'discarded', label: t('travelmanager', 'Discarded') },
+	// Not a review state, and in the same chip row anyway: the chips answer one
+	// question — which bookings am I looking at — and "the ones I still have to
+	// settle" is the answer people want right after "the drafts".
+	{ key: 'duplicates', label: t('travelmanager', 'Possible duplicates') },
 ]
 </script>
 
@@ -124,11 +130,25 @@ const filters: { key: string, label: string }[] = [
 						'tm-row-selected': isOpen('booking', item.id),
 					}]"
 					@click="openDetail('booking', item.id)">
-					<button type="button"
-						class="tm-cell-text tm-open-link"
-						@click.stop.prevent="openDetail('booking', item.id)">
-						{{ item.title || typeName(item.type) }}
-					</button>
+					<!-- The mark goes on the identity, not in the Status column:
+					     status is what the email said, review state is what you
+					     decided, and "there may be two of these" is a third,
+					     orthogonal thing — about whether the row is one row at all.
+					     Beside the button rather than inside it, because the title
+					     truncates with an ellipsis and an icon within it would be the
+					     first thing clipped, exactly on the long titles where it
+					     matters. It carries its own label, so it is named either way. -->
+					<span class="tm-cell-name">
+						<button type="button"
+							class="tm-cell-text tm-open-link"
+							@click.stop.prevent="openDetail('booking', item.id)">
+							{{ item.title || typeName(item.type) }}
+						</button>
+						<ContentDuplicateIcon v-if="hasPossibleDuplicate(bookings, item)"
+							:class="$style.duplicate"
+							:size="16"
+							:title="t('travelmanager', 'May be the same as another booking')" />
+					</span>
 					<!-- The trip's colour, exactly as on the Trips grid, so the same trip
 					     is recognisable from either list. The swatch is present but
 					     invisible when that trip has no colour, so names line up down
@@ -164,6 +184,21 @@ const filters: { key: string, label: string }[] = [
 </template>
 
 <style module>
+/* Warning colour, but not warning iconography: a possible duplicate is a
+   question, not a fault, and often a benign one. A triangle here would spend the
+   same alarm the Messages notices use for real failures. Never shrinks — the
+   title beside it is what gives way.
+
+   --color-warning-text, NOT --color-warning: the two are a background/foreground
+   pair, and the plain token is the *background* half (#FFEEC5 on light, #3D3010
+   on dark). Used as a colour it renders near-white on white. The -text half
+   inverts with the theme, so this stays readable in both. Same pairing as
+   .tm-badge-warning in grid.css. */
+.duplicate {
+	flex-shrink: 0;
+	color: var(--color-warning-text, #8a6d00);
+}
+
 /* Title takes the lion's share; Trip and Provider stretch too, since trip and
    supplier names vary far more in length than a type, a reference or a date.
    Fixed widths elsewhere, not auto: every row is its own grid container, so

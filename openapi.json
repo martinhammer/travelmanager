@@ -34,7 +34,7 @@
                     "reviewState",
                     "confidence",
                     "sourceMessageId",
-                    "possibleDuplicateOf",
+                    "duplicateGroupId",
                     "details",
                     "startDate",
                     "endDate",
@@ -86,7 +86,7 @@
                         "type": "string",
                         "nullable": true
                     },
-                    "possibleDuplicateOf": {
+                    "duplicateGroupId": {
                         "type": "integer",
                         "format": "int64",
                         "nullable": true
@@ -1189,9 +1189,9 @@
         },
         "/ocs/v2.php/apps/travelmanager/api/bookings/{id}/duplicate": {
             "delete": {
-                "operationId": "booking-dismiss-duplicate",
-                "summary": "Dismiss a possible-duplicate flag on a booking",
-                "description": "Clears the flag from both bookings in the pair: it reads the same on both cards, so dismissing it on one and not the other would leave a lie on the other. Not a review transition — the two state axes stay orthogonal, and this is neither a fact about the booking nor a decision about keeping it.",
+                "operationId": "booking-leave-duplicate-group",
+                "summary": "Take a booking out of its group of possible duplicates",
+                "description": "Removes only this booking; any others in the group stay grouped, since saying one is different does not settle what the rest claim about each other. Not a review transition — the two state axes stay orthogonal, and this is neither a fact about the booking nor a decision about keeping it.",
                 "tags": [
                     "booking"
                 ],
@@ -1207,7 +1207,7 @@
                     {
                         "name": "id",
                         "in": "path",
-                        "description": "Id of the booking",
+                        "description": "Id of the booking to remove from the group",
                         "required": true,
                         "schema": {
                             "type": "integer",
@@ -1227,7 +1227,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Flag cleared",
+                        "description": "Booking removed from the group",
                         "content": {
                             "application/json": {
                                 "schema": {

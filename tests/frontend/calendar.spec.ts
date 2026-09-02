@@ -11,6 +11,7 @@ import {
 	compareItems,
 	contrastingText,
 	firstDraft,
+	firstDuplicate,
 	MIN_LANES,
 	isInMonth,
 	layoutMonth,
@@ -56,6 +57,7 @@ const item = (over: Partial<CalendarItem> = {}): CalendarItem => ({
 	reviewState: 'confirmed',
 	color: null,
 	label: 'BA2551',
+	duplicate: false,
 	start: '2026-09-10',
 	end: '2026-09-10',
 	...over,
@@ -514,7 +516,17 @@ describe('monthSummary', () => {
 		const legs = [0, 1, 2, 3].map((n) => item({
 			id: 51, key: `booking-51-${n}`, reviewState: 'draft', start: '2026-09-12',
 		}))
-		expect(monthSummary(legs, september)).toEqual({ trips: 0, bookings: 1, drafts: 1 })
+		expect(monthSummary(legs, september)).toEqual({ trips: 0, bookings: 1, drafts: 1, duplicates: 0 })
+	})
+
+	it('counts the bookings still to be settled as duplicates', () => {
+		// A four-leg flight is one booking to settle, same as for drafts.
+		expect(monthSummary([
+			item({ id: 1, duplicate: true, start: '2026-09-10' }),
+			item({ id: 1, key: 'booking-1-b', duplicate: true, start: '2026-09-12' }),
+			item({ id: 2, duplicate: true, start: '2026-09-11' }),
+			item({ id: 3, start: '2026-09-11' }),
+		], september).duplicates).toBe(2)
 	})
 
 	it('counts what the month holds, drafts separately', () => {
@@ -522,7 +534,7 @@ describe('monthSummary', () => {
 			item({ id: 1, kind: 'trip', reviewState: null, start: '2026-09-10', end: '2026-09-14' }),
 			item({ id: 2, reviewState: 'draft', start: '2026-09-10' }),
 			item({ id: 3, reviewState: 'confirmed', start: '2026-09-12' }),
-		], september)).toEqual({ trips: 1, bookings: 2, drafts: 1 })
+		], september)).toEqual({ trips: 1, bookings: 2, drafts: 1, duplicates: 0 })
 	})
 
 	it('counts a span that only reaches into the month', () => {
@@ -546,5 +558,15 @@ describe('monthSummary', () => {
 		]
 		expect(firstDraft(items, september)?.id).toBe(2)
 		expect(firstDraft(items, { year: 2026, month: 11 })).toBeNull()
+	})
+
+	it('offers the earliest possible duplicate in the month the same way', () => {
+		const items = [
+			item({ id: 1, duplicate: true, start: '2026-09-20' }),
+			item({ id: 2, duplicate: true, start: '2026-09-04' }),
+			item({ id: 3, start: '2026-09-01' }),
+		]
+		expect(firstDuplicate(items, september)?.id).toBe(2)
+		expect(firstDuplicate(items, { year: 2026, month: 11 })).toBeNull()
 	})
 })

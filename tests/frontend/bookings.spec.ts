@@ -12,6 +12,7 @@ import {
 	filterByReviewState,
 	flightSegmentFields,
 	formatDateTime,
+	hasPossibleDuplicate,
 	hotelFields,
 	linkDialogBookings,
 	passengerLines,
@@ -33,7 +34,7 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
 	reviewState: 'draft',
 	confidence: null,
 	sourceMessageId: null,
-	possibleDuplicateOf: null,
+	duplicateGroupId: null,
 	details: {},
 	startDate: null,
 	endDate: null,
@@ -374,38 +375,84 @@ describe('decodeHtmlEntities', () => {
 })
 
 describe('possibleDuplicates', () => {
-	const a = booking({ id: 1 })
-	const b = booking({ id: 2, possibleDuplicateOf: 1 })
+	const a = booking({ id: 1, duplicateGroupId: 1 })
+	const b = booking({ id: 2, duplicateGroupId: 1 })
+	const c = booking({ id: 3, duplicateGroupId: 1 })
 
-	it('reads the edge from the booking that carries it', () => {
+	it('shows the other member of a pair, from either side', () => {
+		expect(possibleDuplicates([a, b], a).map((x) => x.id)).toEqual([2])
 		expect(possibleDuplicates([a, b], b).map((x) => x.id)).toEqual([1])
 	})
 
-	it('reads it from the other side too — which arrived first is an accident', () => {
-		expect(possibleDuplicates([a, b], a).map((x) => x.id)).toEqual([2])
-	})
-
-	it('ignores an edge pointing at a booking that is no longer loaded', () => {
-		expect(possibleDuplicates([booking({ id: 2, possibleDuplicateOf: 99 })], b)).toEqual([])
+	it('shows every other member of a group of three, from every side', () => {
+		// The point of the group: the directed-edge model this replaced pointed
+		// every booking at the oldest, so only that one saw the whole cluster.
+		expect(possibleDuplicates([a, b, c], a).map((x) => x.id)).toEqual([2, 3])
+		expect(possibleDuplicates([a, b, c], b).map((x) => x.id)).toEqual([1, 3])
+		expect(possibleDuplicates([a, b, c], c).map((x) => x.id)).toEqual([1, 2])
 	})
 
 	it('never pairs a booking with itself', () => {
-		const self = booking({ id: 1, possibleDuplicateOf: 1 })
-		expect(possibleDuplicates([self], self)).toEqual([])
+		expect(possibleDuplicates([a], a)).toEqual([])
 	})
 
-	it('hides the flag once the other one is discarded — the question is answered', () => {
-		const discarded = booking({ id: 2, possibleDuplicateOf: 1, reviewState: 'discarded' })
+	it('says nothing for a booking in no group', () => {
+		const loner = booking({ id: 4, duplicateGroupId: null })
+		expect(possibleDuplicates([a, b, loner], loner)).toEqual([])
+	})
+
+	it('keeps groups apart', () => {
+		const other = booking({ id: 5, duplicateGroupId: 5 })
+		expect(possibleDuplicates([a, b, other], a).map((x) => x.id)).toEqual([2])
+	})
+
+	it('hides a member once it is discarded — the question is answered', () => {
+		const discarded = booking({ id: 2, duplicateGroupId: 1, reviewState: 'discarded' })
 		expect(possibleDuplicates([a, discarded], a)).toEqual([])
+		expect(possibleDuplicates([a, discarded, c], a).map((x) => x.id)).toEqual([3])
 	})
 
-	it('hides it on a discarded booking itself, in both directions', () => {
-		const discarded = booking({ id: 1, reviewState: 'archived' })
-		expect(possibleDuplicates([discarded, b], discarded)).toEqual([])
+	it('hides the section on a booking that is itself put away', () => {
+		const archived = booking({ id: 1, duplicateGroupId: 1, reviewState: 'archived' })
+		expect(possibleDuplicates([archived, b], archived)).toEqual([])
+	})
+})
+
+describe('hasPossibleDuplicate', () => {
+	it('marks both members of a live pair', () => {
+		const pair = [booking({ id: 1, duplicateGroupId: 1 }), booking({ id: 2, duplicateGroupId: 1 })]
+		expect(pair.map((item) => hasPossibleDuplicate(pair, item))).toEqual([true, true])
 	})
 
-	it('collects every booking flagged against this one', () => {
-		const c = booking({ id: 3, possibleDuplicateOf: 1 })
-		expect(possibleDuplicates([a, b, c], a).map((x) => x.id)).toEqual([2, 3])
+	it('does not mark a booking whose only partner was discarded', () => {
+		// A group id survives on the row, but a mark with nothing left to compare
+		// against is a task the user cannot finish.
+		const settled = [
+			booking({ id: 1, duplicateGroupId: 1 }),
+			booking({ id: 2, duplicateGroupId: 1, reviewState: 'discarded' }),
+		]
+		expect(hasPossibleDuplicate(settled, settled[0])).toBe(false)
+	})
+
+	it('does not mark a booking in no group', () => {
+		const loner = booking({ id: 1 })
+		expect(hasPossibleDuplicate([loner], loner)).toBe(false)
+	})
+})
+
+describe('filterByReviewState', () => {
+	const pool = [
+		booking({ id: 1, duplicateGroupId: 5 }),
+		booking({ id: 2, duplicateGroupId: 5 }),
+		booking({ id: 3, reviewState: 'confirmed' }),
+	]
+
+	it('narrows to the bookings still waiting to be settled', () => {
+		expect(filterByReviewState(pool, 'duplicates').map((i) => i.id)).toEqual([1, 2])
+	})
+
+	it('still filters by review state for every other key', () => {
+		expect(filterByReviewState(pool, 'confirmed').map((i) => i.id)).toEqual([3])
+		expect(filterByReviewState(pool, 'all')).toHaveLength(3)
 	})
 })

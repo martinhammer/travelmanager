@@ -12,13 +12,11 @@ import {
 } from '../../src/messages'
 
 // Only the fields messageNotices reads; the rest of a Booking is irrelevant here.
-const asBooking = (id: number, possibleDuplicateOf: number | null): Booking =>
-	({ id, possibleDuplicateOf }) as Booking
+const asBooking = (id: number, duplicateGroupId: number | null): Booking =>
+	({ id, duplicateGroupId }) as Booking
 
-/** The booking made by the email that arrived second: it carries the edge. */
-const duplicateBooking = asBooking(2, 1)
-/** The booking the edge points at, made by the earlier email. */
-const pointedAtBooking = asBooking(1, null)
+const groupedBooking = asBooking(2, 1)
+const ungroupedBooking = asBooking(1, null)
 
 const message = (overrides: Partial<Message> = {}): Message => ({
 	id: 1,
@@ -93,19 +91,24 @@ describe('messageNotices', () => {
 		expect(messageNotices(message({ status: 'dropped' }))[0].type).toBe('warning')
 	})
 
-	it('warns when a booking this email made may duplicate an existing one', () => {
+	it('warns when a booking this email made may be the same as another', () => {
 		// Read off the booking, not the message: the matcher kept the booking
-		// rather than suppress it on ambiguous evidence, and the pair is what the
+		// rather than suppress it on ambiguous evidence, and the group is what the
 		// user has to settle.
-		const notices = messageNotices(message(), [duplicateBooking])
+		const notices = messageNotices(message(), [groupedBooking])
 		expect(notices).toHaveLength(1)
 		expect(notices[0].type).toBe('warning')
-		expect(notices[0].text).toContain('may duplicate')
+		expect(notices[0].text).toContain('may be the same')
 	})
 
-	it('leaves the earlier email alone — its run did nothing that needs checking', () => {
-		// That email's booking is *pointed at*, so it carries no edge of its own.
-		expect(messageNotices(message(), [pointedAtBooking])).toEqual([])
+	it('warns on every email of a group, not only the one that arrived last', () => {
+		// Group membership is symmetric, and which email came second is an
+		// accident of arrival order the reader cannot see.
+		expect(messageNotices(message(), [asBooking(1, 1)])).toHaveLength(1)
+	})
+
+	it('says nothing for an email whose booking is in no group', () => {
+		expect(messageNotices(message(), [ungroupedBooking])).toEqual([])
 	})
 
 	it('does not call a related row a possible duplicate — nothing was saved', () => {

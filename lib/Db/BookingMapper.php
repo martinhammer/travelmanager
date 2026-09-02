@@ -72,20 +72,35 @@ class BookingMapper extends QBMapper {
 		$qb->executeStatement();
 	}
 
-	/**
-	 * Drop every edge pointing at this booking as a possible duplicate.
-	 *
-	 * `possible_duplicate_of` is stored one way round but read both ways, so
-	 * clearing the pointing booking is the only way to clear the flag from the
-	 * pointed-at one's card. Also runs before a hard delete: the column is not a
-	 * foreign key, so nothing else would tidy up after a purge.
-	 */
-	public function clearPossibleDuplicatesOf(string $userId, int $bookingId): void {
+	/** Put one booking into a group of maybe-duplicates, or take it out (null). */
+	public function setDuplicateGroup(string $userId, int $bookingId, ?int $groupId): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->update($this->getTableName())
-			->set('possible_duplicate_of', $qb->createNamedParameter(null))
+			->set('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT))
 			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
-			->andWhere($qb->expr()->eq('possible_duplicate_of', $qb->createNamedParameter($bookingId, IQueryBuilder::PARAM_INT)));
+			->andWhere($qb->expr()->eq('id', $qb->createNamedParameter($bookingId, IQueryBuilder::PARAM_INT)));
+		$qb->executeStatement();
+	}
+
+	public function countInDuplicateGroup(string $userId, int $groupId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->func()->count('id', 'members'))
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT)));
+		$result = $qb->executeQuery();
+		$count = (int)$result->fetchOne();
+		$result->closeCursor();
+		return $count;
+	}
+
+	/** Dissolve a group entirely — used when too few members are left to compare. */
+	public function clearDuplicateGroup(string $userId, int $groupId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('duplicate_group_id', $qb->createNamedParameter(null))
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT)));
 		$qb->executeStatement();
 	}
 

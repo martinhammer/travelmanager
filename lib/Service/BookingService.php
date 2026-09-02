@@ -67,7 +67,7 @@ class BookingService {
 					$related[] = $this->report($match, $extracted);
 					continue;
 				}
-				$this->insertBooking($userId, $messageId, $extracted, $match);
+				$this->insertBooking($userId, $messageId, $extracted, $this->duplicateGroupFor($userId, $match));
 				$created++;
 				if ($match !== null) {
 					$related[] = $this->report($match, $extracted);
@@ -120,17 +120,43 @@ class BookingService {
 				$booking->decodedDetails(),
 				$booking->getStartDate()?->format('Y-m-d\TH:i:s'),
 				$booking->getReviewState(),
+				$booking->getDuplicateGroupId(),
 			),
 			$rows,
 		));
 	}
 
 	/**
-	 * @param ?BookingMatch $match a resemblance we were not sure enough of to act
-	 *                             on, recorded on the booking so both sides of the
-	 *                             pair can show it
+	 * The group a booking we are about to store should join, given the
+	 * resemblance the matcher found — or null when it found none.
+	 *
+	 * Joins the candidate's existing group if it has one, so a third email lands
+	 * with the other two rather than starting a rival pair. Otherwise the two of
+	 * them become a new group named after the **older** booking's id: no sequence
+	 * or side table, and the name stays valid even if that booking is purged.
+	 *
+	 * This is the one field an incoming email may write onto an *existing*
+	 * booking. It is not extracted data — no column the email described is
+	 * touched, and `review_state` least of all — it is the app's own bookkeeping
+	 * about a pair, and it has to be on both of them or neither can show it.
 	 */
-	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted, ?BookingMatch $match): void {
+	private function duplicateGroupFor(string $userId, ?BookingMatch $match): ?int {
+		if ($match === null) {
+			return null;
+		}
+		$existing = $match->candidate->duplicateGroupId;
+		if ($existing !== null) {
+			return $existing;
+		}
+		$this->bookingMapper->setDuplicateGroup($userId, $match->candidate->id, $match->candidate->id);
+		return $match->candidate->id;
+	}
+
+	/**
+	 * @param ?int $duplicateGroupId the group of maybe-duplicates to store it in,
+	 *                               so both sides of the resemblance can show it
+	 */
+	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted, ?int $duplicateGroupId): void {
 		$now = $this->timeFactory->getDateTime();
 		$booking = new Booking();
 		$booking->setUserId($userId);
@@ -144,7 +170,7 @@ class BookingService {
 		$booking->setConfirmationNumber($extracted->confirmationNumber);
 		$booking->setTitle($extracted->title);
 		$booking->setSourceMessageId($messageId);
-		$booking->setPossibleDuplicateOf($match?->candidate->id);
+		$booking->setDuplicateGroupId($duplicateGroupId);
 		$booking->setConfidence($extracted->confidence);
 		$encodedDetails = json_encode($extracted->details);
 		$booking->setDetails($encodedDetails === false ? null : $encodedDetails);
@@ -245,31 +271,48 @@ class BookingService {
 	 */
 	public function purge(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
-		// The column is not a foreign key, so nothing else would clear an edge
-		// pointing at a row that is about to stop existing.
-		$this->bookingMapper->clearPossibleDuplicatesOf($userId, $bookingId);
+		$groupId = $booking->getDuplicateGroupId();
 		$this->bookingMapper->delete($booking);
+		if ($groupId !== null) {
+			$this->tidyDuplicateGroup($userId, $groupId);
+		}
 	}
 
 	/**
-	 * Answer the duplicate question with "no": drop the edge for good.
+	 * Answer the duplicate question with "no" for one booking: take it out of its
+	 * group and leave the rest of the group intact.
 	 *
-	 * Deliberately not a review transition — the two axes stay orthogonal, and
-	 * this is neither a fact about the booking nor a decision about keeping it.
-	 * Clears the edge in **both** directions, because the flag reads the same on
-	 * both cards and dismissing it on one and not the other would be a lie on the
-	 * other. Unlike discarding, this is not recoverable: re-running the source
-	 * message is what brings it back.
+	 * One member leaving is the whole reason this is a group rather than a pair
+	 * of pointers. Saying "this one is not the same as those" must not also
+	 * un-say what the others still claim about each other — which is exactly what
+	 * the old edge model did when you dismissed from the wrong side.
+	 *
+	 * Deliberately not a review transition: the two state axes stay orthogonal,
+	 * and this is neither a fact about the booking nor a decision about keeping
+	 * it. Not recoverable either — re-running the source message is what brings
+	 * the flag back.
 	 */
-	public function clearPossibleDuplicate(string $userId, int $bookingId): void {
+	public function leaveDuplicateGroup(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
-		$this->bookingMapper->clearPossibleDuplicatesOf($userId, $bookingId);
-		if ($booking->getPossibleDuplicateOf() === null) {
+		$groupId = $booking->getDuplicateGroupId();
+		if ($groupId === null) {
 			return;
 		}
-		$booking->setPossibleDuplicateOf(null);
+		$booking->setDuplicateGroupId(null);
 		$booking->setUpdatedAt($this->timeFactory->getDateTime());
 		$this->bookingMapper->update($booking);
+		$this->tidyDuplicateGroup($userId, $groupId);
+	}
+
+	/**
+	 * A group of one claims nothing, so clear it rather than leaving a value
+	 * behind that reads like a flag in the database and shows as nothing in the
+	 * UI. Callers pass the group a booking has just left or been deleted from.
+	 */
+	private function tidyDuplicateGroup(string $userId, int $groupId): void {
+		if ($this->bookingMapper->countInDuplicateGroup($userId, $groupId) < 2) {
+			$this->bookingMapper->clearDuplicateGroup($userId, $groupId);
+		}
 	}
 
 	/**

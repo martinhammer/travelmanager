@@ -127,25 +127,25 @@ class BookingController extends OCSController {
 	}
 
 	/**
-	 * Dismiss a possible-duplicate flag on a booking
+	 * Take a booking out of its group of possible duplicates
 	 *
-	 * Clears the flag from both bookings in the pair: it reads the same on both
-	 * cards, so dismissing it on one and not the other would leave a lie on the
+	 * Removes only this booking; any others in the group stay grouped, since
+	 * saying one is different does not settle what the rest claim about each
 	 * other. Not a review transition — the two state axes stay orthogonal, and
 	 * this is neither a fact about the booking nor a decision about keeping it.
 	 *
-	 * @param int $id Id of the booking
+	 * @param int $id Id of the booking to remove from the group
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
 	 *
-	 * 200: Flag cleared
+	 * 200: Booking removed from the group
 	 * 404: Booking not found
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'DELETE', url: '/api/bookings/{id}/duplicate')]
-	public function dismissDuplicate(int $id): DataResponse {
+	public function leaveDuplicateGroup(int $id): DataResponse {
 		try {
-			$this->bookingService->clearPossibleDuplicate($this->uid(), $id);
+			$this->bookingService->leaveDuplicateGroup($this->uid(), $id);
 			return new DataResponse($this->serialize($id));
 		} catch (DoesNotExistException) {
 			throw new OCSNotFoundException();

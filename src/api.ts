@@ -84,11 +84,12 @@ export interface Booking {
 	/** RFC Message-ID of the email that created this booking — the trail back to it. */
 	sourceMessageId: string | null
 	/**
-	 * Another booking this one may duplicate. Stored one way round; read both
-	 * ways via `possibleDuplicates` in bookings.ts, since which of the pair
-	 * arrived first is not something the user should need to know.
+	 * The group of maybe-the-same bookings this one belongs to, or null. A group
+	 * rather than a pointer at one other booking: three emails about one booking
+	 * is ordinary, and every member has to see every other. See
+	 * `possibleDuplicates` in bookings.ts.
 	 */
-	possibleDuplicateOf: number | null
+	duplicateGroupId: number | null
 	details: BookingDetails
 	startDate: string | null
 	endDate: string | null
@@ -163,11 +164,12 @@ export const setBookingReviewState = async (id: number, reviewState: ReviewState
 }
 
 /**
- * Answer the duplicate question with "no". Clears the flag from both bookings in
- * the pair, and is not undoable — only re-running the source email brings it back.
- * @param id either booking of the pair
+ * Say one booking is not the same as the others it is grouped with. The rest of
+ * the group stays grouped. Not undoable — only re-running the source email
+ * brings the flag back.
+ * @param id the booking to take out of the group
  */
-export const dismissPossibleDuplicate = async (id: number): Promise<Booking> => {
+export const leaveDuplicateGroup = async (id: number): Promise<Booking> => {
 	const res = await axios.delete(base(`bookings/${id}/duplicate`))
 	return unwrap(res.data)
 }

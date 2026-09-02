@@ -188,8 +188,17 @@ export const passengerLines = (details: FlightDetails): string[] =>
  * @param items the bookings to filter
  * @param reviewState the review state to keep, or 'all' for no filtering
  */
-export const filterByReviewState = (items: Booking[], reviewState: string): Booking[] =>
-	reviewState === 'all' ? items : items.filter((item) => item.reviewState === reviewState)
+export const filterByReviewState = (items: Booking[], reviewState: string): Booking[] => {
+	// 'duplicates' is not a review state, and sits in the same chip row anyway:
+	// the chips are one question — "which bookings am I looking at?" — and the
+	// answer people want most often after "the drafts" is "the ones I have to
+	// settle". Kept here rather than as a second filter ref so the grid keeps one
+	// selection, not two that can contradict each other.
+	if (reviewState === 'duplicates') {
+		return items.filter((item) => hasPossibleDuplicate(items, item))
+	}
+	return reviewState === 'all' ? items : items.filter((item) => item.reviewState === reviewState)
+}
 
 /** The Bookings grid's sortable columns — one per column heading. */
 export type BookingSort = 'title' | 'trip' | 'type' | 'provider' | 'reference' | 'travel' | 'added' | 'reviewState'
@@ -426,27 +435,41 @@ export const linkDialogBookings = (items: Booking[], tripId: number): Booking[] 
 		|| (item.tripId === null && item.reviewState === 'confirmed'))
 
 /**
- * The bookings a given booking may duplicate, in both directions.
+ * The other bookings in this one's group of maybe-duplicates.
  *
- * The edge is stored one way round — on whichever booking was created second —
- * but that direction is an accident of which email was processed first, not
- * something the user knows or should have to. A duplicate is a claim about a
- * pair of bookings, so both cards show it and both offer the same way out.
+ * Membership is symmetric by construction, so every card shows the whole group.
+ * The predecessor stored a directed edge and unioned the two directions, which
+ * worked for a pair and quietly failed for three: every booking pointed at the
+ * oldest, so the hub saw both spokes and neither spoke saw the other.
  *
- * Discarded and archived bookings are left out rather than deleted from the
- * data: you have already made a decision about them, so there is nothing left to
- * check, and a flag you cannot clear on a row you have put away is noise.
- * Restoring one brings the flag back, which is the point of a soft state —
- * `dismissPossibleDuplicate` is the deliberate, permanent answer.
+ * Discarded and archived bookings are left out rather than un-grouped: you have
+ * already made a decision about them, so there is nothing left to compare, and a
+ * flag on a row you have put away is noise. Restoring one brings the flag back,
+ * which is the point of a soft state — `leaveDuplicateGroup` is the deliberate,
+ * permanent answer.
  * @param items every booking
  * @param booking the booking whose card is being drawn
  */
 export const possibleDuplicates = (items: Booking[], booking: Booking): Booking[] => {
-	if (booking.reviewState === 'discarded' || booking.reviewState === 'archived') {
+	const group = booking.duplicateGroupId
+	if (group === null || booking.reviewState === 'discarded' || booking.reviewState === 'archived') {
 		return []
 	}
 	return items.filter((item) => item.id !== booking.id
-		&& (item.id === booking.possibleDuplicateOf || item.possibleDuplicateOf === booking.id)
+		&& item.duplicateGroupId === group
 		&& item.reviewState !== 'discarded'
 		&& item.reviewState !== 'archived')
 }
+
+/**
+ * Whether this booking has anyone left to be compared with.
+ *
+ * Delegates rather than testing `duplicateGroupId` directly: a group whose only
+ * other member you discarded still has an id on every row, and a mark on a
+ * booking with nothing to compare it against is a task the user cannot finish.
+ * One rule, one place.
+ * @param items every booking
+ * @param booking the booking being marked
+ */
+export const hasPossibleDuplicate = (items: Booking[], booking: Booking): boolean =>
+	possibleDuplicates(items, booking).length > 0

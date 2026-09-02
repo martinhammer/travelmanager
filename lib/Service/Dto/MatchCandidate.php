@@ -29,6 +29,9 @@ class MatchCandidate {
 		public readonly ?string $startDate,
 		/** Only for the prose: "you already discarded this" is worth reading. */
 		public readonly string $reviewState,
+		/** The maybe-duplicate group it is already in, so a third booking joins
+		 *  that group rather than starting a rival one. */
+		public readonly ?int $duplicateGroupId = null,
 	) {
 	}
 }

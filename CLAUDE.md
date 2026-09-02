@@ -37,7 +37,9 @@ UI (Vue, OCS API) — four views: Calendar | Bookings | Trips | Messages
   │            the sidebar *without leaving the calendar*
   ├─ Bookings: sortable grid (Title | Trip | Type | Provider | Reference |
   │            Travel dates | Added | Status); filter by review state + type;
-  │            rows do not expand — clicking one opens the detail sidebar
+  │            rows do not expand — clicking one opens the detail sidebar. A
+  │            ContentDuplicate icon beside a title marks a possible duplicate,
+  │            and a "Possible duplicates" filter chip is the queue for them
   ├─ Trips:    sortable grid (Trip | Type | Travel dates | Bookings); the Type
   │            column is the trip's own work/leisure, the Bookings column its
   │            dates + booking-type lozenges derived from what is linked; filter
@@ -77,7 +79,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   + `Version1800Date2026082800…` (adds `messages.related_booking_ids`)
   + `Version2000Date2026083100…` (indexes `(user_id, type, start_date)` for the
   duplicate-detection candidate query)
-  + `Version2100Date2026090100…` (adds `bookings.possible_duplicate_of`).
+  + `Version2100Date2026090100…` (adds `bookings.possible_duplicate_of`)
+  + `Version2200Date2026090200…` / `…2026090210…` (replaces it with
+  `bookings.duplicate_group_id`: convert, then drop).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -115,9 +119,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   judgement made in `BookingMatcher` (see §3), and the DB only supplies
   candidates (`findMatchCandidates`, indexed by `tm_book_user_ref` and
   `tm_book_user_type_start`). `trip_id` links to a trip;
-  **`possible_duplicate_of`** points at another of the user's bookings this one
-  may duplicate (nullable, not a foreign key — `purge` clears inbound edges
-  itself). **Two orthogonal state axes** (see §3):
+  **`duplicate_group_id`** is the group of maybe-the-same bookings this one
+  belongs to (nullable; the value is the id of the group's oldest member, so no
+  sequence or side table is needed and the name survives that member being
+  purged). **Two orthogonal state axes** (see §3):
   `status` = active/cancelled/superseded (the booking *fact*, set from the email)
   and `review_state` = draft/confirmed/discarded/archived (the *user's* decision).
   Cross-type header only (`type, provider, booking_reference,
@@ -234,9 +239,10 @@ code follows the overrides.
      the incoming booking outright, so a false positive is the *only*
      irreversible mistake available here — losing a booking beats a duplicate the
      user can discard. Anything short of decisive yields
-     `BookingMatch::REASON_POSSIBLE` and the booking is written **with
-     `possible_duplicate_of` set** — see the next decision for where that then
-     shows up.
+     `BookingMatch::REASON_POSSIBLE` and the booking is written **into the
+     candidate's duplicate group** — see the next decision for where that then
+     shows up. The matcher still returns at most one candidate; joining that
+     one's group is what makes a third booking land with the other two.
 
   **Dates corroborate; they never veto**, and they are compared by **calendar
   day** — a confirmation gives a 14:00 check-in and the reminder a bare date,
@@ -249,8 +255,8 @@ code follows the overrides.
   per-type detail field, and a lone identifier goes in `booking_reference` — but
   the matcher must keep tolerating both readings regardless: the wording only
   lowers the rate, and there is no backfill of existing rows.
-- **A possible duplicate is a relation between two bookings, not a fact about an
-  email.** It lives in `bookings.possible_duplicate_of`. It was briefly in
+- **A possible duplicate is a relation between bookings, not a fact about an
+  email.** It lives in `bookings.duplicate_group_id`. It was briefly in
   `messages.related_booking_ids`, which was wrong twice over: it could only be
   shown in the Messages view, while the thing to act on is a pair of *bookings*;
   and it made that column mean two things at once — "every booking in this email
@@ -259,29 +265,85 @@ code follows the overrides.
   for both. `related_booking_ids` now means only the first, and
   `AppliedExtraction::relatedBookingIds()` filters to **suppressed matches only**.
   Consequences:
-  - **Stored one way round, read both ways.** The edge sits on whichever booking
-    was created second, but that direction is an accident of processing order.
-    `possibleDuplicates` (`src/bookings.ts`) unions both directions, so both
-    cards carry the flag and both offer the same way out. Storing it twice would
-    be two rows to keep in step for no gain.
+  - **A group, not a directed edge.** "Is a duplicate of" is an equivalence, and
+    three emails about one booking is ordinary. The first cut stored
+    `possible_duplicate_of` pointing at the matched candidate; since candidates
+    come back oldest-first that made a **star**, which worked for a pair and
+    failed quietly for three: the hub saw both spokes and neither spoke saw the
+    other, and dismissing from the hub dissolved a relationship between two
+    bookings nobody had adjudicated. With a group id every member sees every
+    other (`possibleDuplicates` in `src/bookings.ts` is now just "same group, not
+    me"), and one member leaving disturbs nothing else.
+  - **Joining a group writes to an existing booking.** The one field an incoming
+    email may set on a row it did not create — `duplicateGroupFor` names the
+    group after the older booking and stamps it on both, because a flag only one
+    side carries is a flag only one side can show. It is app bookkeeping, not
+    extracted data: no column the email described is touched, `review_state`
+    least of all.
+  - **A group of one is dissolved** (`tidyDuplicateGroup`, on leave and on
+    purge). It claims nothing, and left behind it reads like a flag in the
+    database while showing as nothing in the UI.
   - **Discarded and archived hide the flag rather than clear it.** You have
     already decided about that booking, so there is nothing left to check — but
     restoring it brings the flag back, which is what a soft state is for. Hiding
     is a filter in `possibleDuplicates`, not a write.
-  - **"Not a duplicate" is the permanent answer** (`DELETE
-    /api/bookings/{id}/duplicate` → `BookingService::clearPossibleDuplicate`),
-    and it clears **both** directions — the flag reads the same on both cards, so
-    dismissing it on one would leave a lie on the other. Deliberately *not* a
-    review transition: the two state axes stay orthogonal, and this is neither a
-    fact about the booking nor a decision about keeping it. Without this the flag
-    would be an accusation the user can never answer, which trains people to
-    ignore the section.
-  - **The Messages row banner stays on the second email only**, and is now
-    derived from that run's booking carrying an edge (`messageNotices(message,
-    created)`), not from the message's own columns. The earlier email's row
-    records a run that did nothing wrong; a banner added to it after the fact
-    would describe something that had not happened yet. Its *sidebar* still shows
-    the "Potential duplicate" section, because that hangs off the bookings.
+  - **"Not a duplicate" is the permanent answer, and it acts on a row** (`DELETE
+    /api/bookings/{id}/duplicate` → `BookingService::leaveDuplicateGroup`, where
+    `{id}` is the booking *listed in the row*, not the card you are on). With
+    three bookings grouped, "not a duplicate" has to name which one, and the row
+    is the only place that answer is unambiguous; the rest stay grouped.
+    Deliberately *not* a review transition: the two state axes stay orthogonal,
+    and this is neither a fact about the booking nor a decision about keeping it.
+    Without it the flag would be an accusation the user can never answer, which
+    trains people to ignore the section.
+  - **The answer lives in the "Potential duplicates" section, not in Actions.**
+    Actions is the booking's lifecycle (confirm / archive / discard / file under
+    a trip); a relation-level control sitting there read as a fourth way of
+    saying "keep this", indistinguishable from **Confirm** to anyone not holding
+    the data model in their head. They genuinely are different — confirming one
+    of two duplicates does not answer whether they are the same, and you may
+    confirm both and decide afterwards — which is why the fix is placement
+    rather than merging them.
+  - **Surfaced on the lists, but not on the calendar's bars.** The flag creates
+    a task, so it needs somewhere to be *found*, not just somewhere to be read:
+    - **Bookings grid** — a `ContentDuplicate` icon beside the title, plus a
+      "Possible duplicates" filter chip (`filterByReviewState`, which is where
+      that chip row already lives even though this is not a review state — the
+      chips answer one question, "which bookings am I looking at"). The mark sits
+      on the *identity*, never in the Status column: status is what the email
+      said, review state is what you decided, and "there may be two of these" is
+      a third, orthogonal thing. It is beside the title button rather than inside
+      it, because the title truncates with an ellipsis and an icon within it
+      would be clipped first on exactly the long titles where it matters.
+      `ContentDuplicate` in `--color-warning`, deliberately **not** a warning
+      triangle: this is a question, often a benign one, and alert iconography
+      here spends the alarm the Messages notices need for real failures.
+    - **Calendar — nothing on the bars, a count in the month summary.** A bar
+      already spends its colour on which trip, its outline on draft, and its one
+      glyph on the booking type, which below 640px is *all* that survives the
+      container query. There is no room for a second cue and no cue to give up.
+      A flagged pair also already draws two bars over the same days, which is the
+      signal. So it goes where this month's outstanding work already lives: a
+      `{n} possible duplicate(s)` button beside `{n} draft(s) to review`, opening
+      the earliest (`firstDuplicate`, extracted alongside `firstDraft` over a
+      shared `earliest`). `CalendarItem.duplicate` is passed in rather than read
+      off the booking, since the rule involves every *other* booking.
+    - **`hasPossibleDuplicate` delegates to `possibleDuplicates`** rather than
+      testing `duplicateGroupId`: a group whose only other member you discarded
+      still leaves an id on the row, and a mark with nothing left to compare
+      against is a task the user cannot finish. It is asked against the **whole**
+      booking list, never a filtered one — a partner hidden by the calendar's
+      archived toggle is still one you have to settle, and dropping the mark when
+      you hide it would make the toggle look like it resolved something.
+    - **No navigation counter.** The month summary and the filter chip cover it;
+      the nav is the one place a number costs attention on every screen.
+  - **The Messages row banner shows on every email of a group**, derived from
+    that run's booking carrying a group id (`messageNotices(message, created)`),
+    not from the message's own columns. It was briefly on the last email only —
+    under the edge model that was the one booking carrying the edge — but group
+    membership is symmetric, and which email arrived second is an accident of
+    order the reader cannot see. The wording says a booking *may be the same as*
+    one from another email, so it is true read from either side.
 - **Booking state is two orthogonal axes, never one column.** `status` is a fact
   about the booking (`active`/`cancelled`/`superseded`) and is the *only* one the
   extraction writes; `review_state` is the user's decision
@@ -459,8 +521,10 @@ debug panel for iterating without waiting for cron:
   `confirmed`), discarding unlinks it from its trip, and only confirmed bookings
   can be linked to a trip. See §3.
 - ✅ **Potential duplicates are a booking relation** (2026-09-01, app version
-  1.12.0): `bookings.possible_duplicate_of`, symmetric display on both booking
-  and message cards, and a "Not a duplicate" dismissal. See §3.
+  1.12.0): symmetric display on both booking and message cards, and a "Not a
+  duplicate" dismissal. Reworked into a **group** (2026-09-02, app version
+  1.14.0) so three emails about one booking work, with the dismissal moved into
+  the section and applied per row. See §3.
 - ✅ **Messages reach the model oldest first** (2026-09-01): `fetchRecent` sorts
   the window ascending by UID instead of reversing it, so the earlier email is
   the one that creates a booking. See §7.
@@ -984,6 +1048,16 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
     for `popstate` and a fragment link fires only `hashchange`.
   - Where it is genuinely a **button** (`.tm-cal-more` expands a week), undo the
     reset explicitly and **double the class** to clear (0,2,1).
+- **`--color-warning` is a background, `--color-warning-text` is the foreground.**
+  The status colours come in pairs and the plain token is the *fill*, not the
+  ink: in NC 34's default theme `--color-warning` is `#FFEEC5` (pale cream) and
+  `--color-warning-text` is `#664700`, and the dark theme swaps them
+  (`#3D3010` / `#FFEEC5`). Setting `color: var(--color-warning)` therefore paints
+  near-white text on a white page — it *looks* like the icon failed to render.
+  Same for `--color-error`/`-text`, `--color-info`/`-text`, `--color-success`/
+  `-text`. Only the `-text` half inverts with the theme, so it is also the only
+  one that stays readable in both. Values live in
+  `apps/theming/lib/Themes/{Default,Dark}Theme.php` in a server checkout.
 - **Verify CSS against the server's own stylesheets, not just its variables.**
   A harness that defines `--color-*` and `--default-clickable-area` but omits
   `core/css/inputs.css` will happily measure a design that the real page does not

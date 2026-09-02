@@ -218,16 +218,19 @@ export const messageNotices = (message: Message, created: Booking[] = []): Messa
 	const notices = [failureNotice(message), outcomeNotice(message)]
 
 	// Read off the booking this run produced, not off the message: a possible
-	// duplicate is a relation between two bookings, and the message is only where
-	// it was noticed. That also gets the asymmetry right — this row is the run
-	// that made the second booking, so it is the run whose outcome needs
-	// checking. The earlier email's row records a run that did nothing wrong, and
-	// a banner added to it after the fact would describe something that had not
-	// happened yet. Both bookings still show the flag on their own cards.
-	if (created.some((booking) => booking.possibleDuplicateOf !== null)) {
+	// duplicate is a relation between bookings, and the message is only where it
+	// was noticed.
+	//
+	// Shown on *every* email of a group, not just the one that arrived last. It
+	// used to be the last one alone — that email's booking carried the edge and
+	// the earlier one did not — but group membership is symmetric, and which
+	// email came second is an accident of arrival order the reader has no way to
+	// know. The wording says the booking may be a duplicate rather than that this
+	// email duplicated something, so it is true from either side.
+	if (created.some((booking) => booking.duplicateGroupId !== null)) {
 		notices.push({
 			type: 'warning',
-			text: 'This email may duplicate a booking you already have. Both were kept, so check them and discard whichever is wrong.',
+			text: 'A booking from this email may be the same as one from another email. Compare them and discard whichever is wrong.',
 		})
 	}
 

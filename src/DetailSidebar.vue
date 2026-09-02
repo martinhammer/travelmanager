@@ -4,9 +4,9 @@ import NcAppSidebar from '@nextcloud/vue/components/NcAppSidebar'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import { showError, showSuccess } from '@nextcloud/dialogs'
-import { t } from '@nextcloud/l10n'
+import { n, t } from '@nextcloud/l10n'
 import type { Booking, Message, ReviewState, Trip } from './api'
-import { dismissPossibleDuplicate, setBookingReviewState } from './api'
+import { leaveDuplicateGroup, setBookingReviewState } from './api'
 import type { DetailType } from './detail'
 import BookingDetails from './BookingDetails.vue'
 import { bookingsFromMessage, byId, messageForBooking, relatedBookings } from './detail'
@@ -178,17 +178,19 @@ const messageDuplicates = computed(() => {
 // --- acting on it ----------------------------------------------------------
 
 /**
- * Answer the duplicate question with "no". Clears the flag from both bookings of
- * the pair, which is why it can be offered from either card.
- * @param id the booking whose card the button was pressed on
+ * Say the booking in this row is not the same as the rest of the group. Acts on
+ * the row, not on the card: with three bookings grouped, "not a duplicate" has
+ * to name which one, and the row is the only place that answer is unambiguous.
+ * The others stay grouped.
+ * @param item the booking listed in the row the button was pressed in
  */
-const onDismissDuplicate = async (id: number) => {
+const onNotADuplicate = async (item: Booking) => {
 	try {
-		await dismissPossibleDuplicate(id)
-		showSuccess(t('travelmanager', 'Marked as not a duplicate'))
+		await leaveDuplicateGroup(item.id)
+		showSuccess(t('travelmanager', 'Marked as a different booking'))
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not clear the duplicate flag'))
+		showError(t('travelmanager', 'Could not update the booking'))
 	}
 }
 
@@ -311,19 +313,29 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 
 				<!-- Its own section, not a row under "Related": this is the one
 				     link that asks the user a question rather than just offering a
-				     way across. -->
+				     way across — so the answer lives here too, per row, rather
+				     than in Actions where it read as another way to say "keep". -->
 				<template v-if="bookingDuplicates.length > 0">
 					<h4 :class="$style.heading">
-						{{ t('travelmanager', 'Potential duplicate') }}
+						{{ n('travelmanager', 'Potential duplicate', 'Potential duplicates', bookingDuplicates.length) }}
 					</h4>
 					<p :class="$style.hint">
-						{{ t('travelmanager', 'This may be the same booking, extracted twice from two emails. Compare them, then discard one — or say they are different.') }}
+						{{ n('travelmanager',
+							'This booking and the one below may be the same one, read from different emails. Open it to compare, then discard whichever is wrong.',
+							'This booking and the {n} below may all be the same one, read from different emails. Open them to compare, then discard whichever are wrong.',
+							bookingDuplicates.length, { n: bookingDuplicates.length }) }}
 					</p>
 					<ul :class="$style.links">
 						<li v-for="item in bookingDuplicates" :key="item.id" :class="$style.linkRow">
 							<span class="tm-badge">{{ typeName(item.type) }}</span>
-							<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+							<NcButton :class="$style.linkRowGrow" variant="tertiary" @click="emit('open', 'booking', item.id)">
 								{{ bookingLabel(item) }}
+							</NcButton>
+							<!-- Removes *this row's* booking from the group, leaving
+							     any others grouped: one of three being different
+							     settles nothing about the other two. -->
+							<NcButton variant="tertiary" @click="onNotADuplicate(item)">
+								{{ t('travelmanager', 'Not a duplicate') }}
 							</NcButton>
 						</li>
 					</ul>
@@ -333,14 +345,6 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					{{ t('travelmanager', 'Actions') }}
 				</h4>
 				<div class="tm-actions">
-					<!-- Offered from either card because it clears both. Secondary:
-					     saying "not a duplicate" is one of two equally good answers,
-					     and the other one is Discard. -->
-					<NcButton v-if="bookingDuplicates.length > 0"
-						variant="secondary"
-						@click="onDismissDuplicate(booking.id)">
-						{{ t('travelmanager', 'Not a duplicate') }}
-					</NcButton>
 					<!-- Primary while the booking has no trip — filing it is then the
 					     one thing still outstanding; secondary once it has one, where
 					     the button is a way back in rather than a task. -->
@@ -433,7 +437,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 				     second is not the only one worth looking at. -->
 				<template v-if="messageDuplicates.length > 0">
 					<h4 :class="$style.heading">
-						{{ t('travelmanager', 'Potential duplicate') }}
+						{{ n('travelmanager', 'Potential duplicate', 'Potential duplicates', messageDuplicates.length) }}
 					</h4>
 					<ul :class="$style.links">
 						<li v-for="item in messageDuplicates" :key="item.id" :class="$style.linkRow">
@@ -486,6 +490,17 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 }
 
 .linkRow > *:first-child {
+	flex-shrink: 0;
+}
+
+/* The link takes the slack and truncates; anything after it (the per-row "Not a
+   duplicate" answer) keeps its full width. */
+.linkRowGrow {
+	flex: 1;
+	min-width: 0;
+}
+
+.linkRow > *:last-child {
 	flex-shrink: 0;
 }
 

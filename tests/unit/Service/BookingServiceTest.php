@@ -171,11 +171,15 @@ final class BookingServiceTest extends TestCase {
 		$other->setBookingReference('ZZZZZZ');
 		$other->setConfirmationNumber(null);
 		$this->candidates([$other]);
-		// The resemblance is recorded on the booking, which is what the pair of
-		// them is about — not on the message, which is only where it was noticed.
+		// The resemblance is recorded on the bookings, which is what it is about
+		// — not on the message, which is only where it was noticed. The group is
+		// named after the older booking, and the older booking joins it too.
+		$this->bookingMapper->expects($this->once())
+			->method('setDuplicateGroup')
+			->with('alice', 12, 12);
 		$this->bookingMapper->expects($this->once())
 			->method('insert')
-			->with($this->callback(static fn (Booking $b): bool => $b->getPossibleDuplicateOf() === 12));
+			->with($this->callback(static fn (Booking $b): bool => $b->getDuplicateGroupId() === 12));
 
 		$applied = $this->service->applyExtraction('alice', '<m6@example.com>', [$this->extracted()]);
 
@@ -200,20 +204,51 @@ final class BookingServiceTest extends TestCase {
 		$this->assertSame([12], $applied->relatedBookingIds());
 	}
 
-	public function testDismissingADuplicateClearsBothDirections(): void {
-		// The flag reads the same on both cards, so clearing it on one and not
-		// the other would leave a lie on the other.
-		$booking = $this->existing();
-		$booking->setPossibleDuplicateOf(99);
-		$this->bookingMapper->method('find')->willReturn($booking);
+	public function testAThirdBookingJoinsTheGroupTheOthersAreAlreadyIn(): void {
+		// Rather than starting a rival pair: three emails about one booking is
+		// ordinary, and every member has to see every other one.
+		$other = $this->existing();
+		$other->setBookingReference('ZZZZZZ');
+		$other->setConfirmationNumber(null);
+		$other->setDuplicateGroupId(7);
+		$this->candidates([$other]);
+		// The group already has a name, so nothing is written to the existing row.
+		$this->bookingMapper->expects($this->never())->method('setDuplicateGroup');
 		$this->bookingMapper->expects($this->once())
-			->method('clearPossibleDuplicatesOf')
-			->with('alice', 12);
+			->method('insert')
+			->with($this->callback(static fn (Booking $b): bool => $b->getDuplicateGroupId() === 7));
+
+		$this->service->applyExtraction('alice', '<m9@example.com>', [$this->extracted()]);
+	}
+
+	public function testLeavingAGroupOfThreeKeepsTheOtherTwoGrouped(): void {
+		// Saying one booking is different settles nothing about the other two.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(2);
 		$this->bookingMapper->expects($this->once())
 			->method('update')
-			->with($this->callback(static fn (Booking $b): bool => $b->getPossibleDuplicateOf() === null));
+			->with($this->callback(static fn (Booking $b): bool => $b->getDuplicateGroupId() === null))
+			->willReturn($booking);
+		$this->bookingMapper->expects($this->never())->method('clearDuplicateGroup');
 
-		$this->service->clearPossibleDuplicate('alice', 12);
+		$this->service->leaveDuplicateGroup('alice', 12);
+	}
+
+	public function testAGroupWithOneMemberLeftIsDissolved(): void {
+		// A group of one claims nothing; leaving the value behind would read like
+		// a flag in the database and show as nothing in the UI.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
+		$this->bookingMapper->method('update')->willReturn($booking);
+		$this->bookingMapper->expects($this->once())
+			->method('clearDuplicateGroup')
+			->with('alice', 7);
+
+		$this->service->leaveDuplicateGroup('alice', 12);
 	}
 
 	public function testDiscardingUnlinksTheBookingFromItsTrip(): void {
@@ -274,13 +309,15 @@ final class BookingServiceTest extends TestCase {
 		$this->service->assignBookingToTrip('alice', 12, null);
 	}
 
-	public function testPurgingABookingClearsEdgesPointingAtIt(): void {
-		// The column is not a foreign key, so nothing else would tidy up.
-		$this->bookingMapper->method('find')->willReturn($this->existing());
-		$this->bookingMapper->expects($this->once())
-			->method('clearPossibleDuplicatesOf')
-			->with('alice', 12);
+	public function testPurgingTheLastComparableBookingDissolvesTheGroup(): void {
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
 		$this->bookingMapper->expects($this->once())->method('delete');
+		$this->bookingMapper->expects($this->once())
+			->method('clearDuplicateGroup')
+			->with('alice', 7);
 
 		$this->service->purge('alice', 12);
 	}

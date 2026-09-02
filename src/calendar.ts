@@ -270,6 +270,13 @@ export interface CalendarItem extends Spanning {
 	 */
 	color: string | null
 	label: string
+	/**
+	 * It has at least one other live booking it may be the same as. Passed in
+	 * rather than read off the booking, because the rule involves *every other*
+	 * booking (a group whose only other member was discarded no longer counts) —
+	 * see hasPossibleDuplicate. Always false for trips.
+	 */
+	duplicate: boolean
 }
 
 /**
@@ -293,7 +300,7 @@ export const segmentLabel = (seg: FlightSegment): string => {
 // One bar per flight leg, or [] when this is not a flight we can break up.
 // Anchored on departureLocal, the same field the extraction validates a segment
 // by, so a leg that survived extraction can always be placed.
-const flightLegItems = (booking: Booking, label: string, color: string | null): CalendarItem[] => {
+const flightLegItems = (booking: Booking, label: string, color: string | null, duplicate: boolean): CalendarItem[] => {
 	if (booking.type !== 'flight') {
 		return []
 	}
@@ -306,6 +313,7 @@ const flightLegItems = (booking: Booking, label: string, color: string | null): 
 		const arrival = (seg.arrivalLocal ?? '').slice(0, 10)
 		return [{
 			kind: 'booking' as const,
+			duplicate,
 			id: booking.id,
 			key: `booking-${booking.id}-${index}`,
 			type: booking.type,
@@ -338,9 +346,15 @@ const flightLegItems = (booking: Booking, label: string, color: string | null): 
  * @param booking the booking to place
  * @param label its already-worded title, used when a leg cannot name itself
  * @param color its trip's colour, or null to use the booking-type palette
+ * @param duplicate whether it still has another booking to be compared with
  */
-export const bookingItems = (booking: Booking, label: string, color: string | null = null): CalendarItem[] => {
-	const legs = flightLegItems(booking, label, color)
+export const bookingItems = (
+	booking: Booking,
+	label: string,
+	color: string | null = null,
+	duplicate = false,
+): CalendarItem[] => {
+	const legs = flightLegItems(booking, label, color, duplicate)
 	if (legs.length > 0) {
 		return legs
 	}
@@ -352,6 +366,7 @@ export const bookingItems = (booking: Booking, label: string, color: string | nu
 	const end = (booking.endDate ?? '').slice(0, 10)
 	return [{
 		kind: 'booking',
+		duplicate,
 		id: booking.id,
 		key: `booking-${booking.id}`,
 		type: booking.type,
@@ -380,6 +395,9 @@ export const tripItem = (row: TripRow, label: string): CalendarItem | null => {
 	const end = (row.end ?? row.start).slice(0, 10)
 	return {
 		kind: 'trip',
+		// A trip is never a duplicate of anything: the flag is about bookings
+		// extracted more than once, and a trip is created by hand.
+		duplicate: false,
 		id: row.trip.id,
 		key: `trip-${row.trip.id}`,
 		type: null,
@@ -562,6 +580,7 @@ export interface MonthSummary {
 	trips: number
 	bookings: number
 	drafts: number
+	duplicates: number
 }
 
 /**
@@ -582,6 +601,7 @@ export const monthSummary = (items: CalendarItem[], month: CalendarMonth): Month
 		trips: distinct((item) => item.kind === 'trip'),
 		bookings: distinct((item) => item.kind === 'booking'),
 		drafts: distinct((item) => item.reviewState === 'draft'),
+		duplicates: distinct((item) => item.duplicate),
 	}
 }
 
@@ -592,10 +612,28 @@ export const monthSummary = (items: CalendarItem[], month: CalendarMonth): Month
  * @param items every item on the calendar
  * @param month the month being shown
  */
-export const firstDraft = (items: CalendarItem[], month: CalendarMonth): CalendarItem | null => {
+export const firstDraft = (items: CalendarItem[], month: CalendarMonth): CalendarItem | null =>
+	earliest(items, month, (item) => item.reviewState === 'draft')
+
+/**
+ * The earliest booking in the month that may duplicate another, so the summary's
+ * duplicate count is a button that opens one rather than a number you then have
+ * to go and find. Same shape as firstDraft on purpose: both are "outstanding
+ * work in this month", and the calendar answers them the same way.
+ * @param items every item on the calendar
+ * @param month the month being shown
+ */
+export const firstDuplicate = (items: CalendarItem[], month: CalendarMonth): CalendarItem | null =>
+	earliest(items, month, (item) => item.duplicate)
+
+const earliest = (
+	items: CalendarItem[],
+	month: CalendarMonth,
+	kept: (item: CalendarItem) => boolean,
+): CalendarItem | null => {
 	const { from, to } = monthRange(month)
-	const drafts = items
-		.filter((item) => item.reviewState === 'draft' && overlaps(item, from, to))
+	const matching = items
+		.filter((item) => kept(item) && overlaps(item, from, to))
 		.sort(compareItems)
-	return drafts[0] ?? null
+	return matching[0] ?? null
 }

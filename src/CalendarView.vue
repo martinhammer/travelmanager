@@ -14,6 +14,7 @@ import {
 	bookingItems,
 	calendarBookings,
 	firstDraft,
+	firstDuplicate,
 	isInMonth,
 	layoutMonth,
 	monthOf,
@@ -22,6 +23,7 @@ import {
 	tripItem,
 	weekdayLabels,
 } from './calendar'
+import { hasPossibleDuplicate } from './bookings'
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
 import { detailHref, isOpen, openDetail } from './navigation'
@@ -68,11 +70,17 @@ const items = computed<CalendarItem[]>(() => {
 	// trip's colour so the bar can tint itself; a booking with no trip, or in an
 	// uncoloured one, gets null and keeps the booking-type palette.
 	const colors = tripColors.value
-	const placed = calendarBookings(bookings.value, showAll.value)
+	// hasPossibleDuplicate is asked against the *whole* list, not the filtered
+	// one: a booking whose partner is hidden by the archived toggle is still one
+	// you have to settle, and dropping the mark when you hide it would make the
+	// toggle look like it resolved something.
+	const all = bookings.value
+	const placed = calendarBookings(all, showAll.value)
 		.flatMap((booking) => bookingItems(
 			booking,
 			bookingLabel(booking),
 			booking.tripId === null ? null : (colors[booking.tripId] ?? null),
+			hasPossibleDuplicate(all, booking),
 		))
 	return [...trips.filter((item): item is CalendarItem => item !== null), ...placed]
 })
@@ -162,12 +170,19 @@ const onOpen = (item: CalendarItem): void => openDetail(detailType(item), item.i
 
 const barHref = (item: CalendarItem): string => detailHref(detailType(item), item.id)
 
-// The draft count is the month's outstanding decision, so it opens one rather
-// than being a number you have to go and act on somewhere else.
+// Each count in the summary is a piece of the month's outstanding work, so each
+// opens one rather than being a number you have to go and act on somewhere else.
 const onOpenDraft = (): void => {
 	const draft = firstDraft(items.value, month.value)
 	if (draft !== null) {
 		onOpen(draft)
+	}
+}
+
+const onOpenDuplicate = (): void => {
+	const item = firstDuplicate(items.value, month.value)
+	if (item !== null) {
+		onOpen(item)
 	}
 }
 </script>
@@ -225,6 +240,17 @@ const onOpenDraft = (): void => {
 				<span aria-hidden="true">·</span>
 				<NcButton variant="secondary" @click="onOpenDraft">
 					{{ t('travelmanager', '{n} draft(s) to review', { n: summary.drafts }) }}
+				</NcButton>
+			</template>
+			<!-- Deliberately here and not on the bars. A bar already spends its
+			     colour on which trip, its outline on draft, and its one glyph on
+			     the booking type — which below 640px is all that is left of it. The
+			     summary is where this month's outstanding work already lives, and a
+			     flagged pair draws two bars over the same days anyway. -->
+			<template v-if="summary.duplicates > 0">
+				<span aria-hidden="true">·</span>
+				<NcButton variant="secondary" @click="onOpenDuplicate">
+					{{ t('travelmanager', '{n} possible duplicate(s)', { n: summary.duplicates }) }}
 				</NcButton>
 			</template>
 		</div>
