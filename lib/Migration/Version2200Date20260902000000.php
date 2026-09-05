@@ -88,7 +88,6 @@ class Version2200Date20260902000000 extends SimpleMigrationStep {
 			->from('travelmanager_bookings')
 			->where($read->expr()->isNotNull('possible_duplicate_of'));
 		$result = $read->executeQuery();
-		/** @var list<int> $anchors */
 		$anchors = array_map(static fn (mixed $id): int => (int)$id, $result->fetchAll(\PDO::FETCH_COLUMN));
 		$result->closeCursor();
 
