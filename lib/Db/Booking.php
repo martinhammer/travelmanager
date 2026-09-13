@@ -79,6 +79,8 @@ class Booking extends Entity implements \JsonSerializable {
 	public const TYPE_FLIGHT = 'flight';
 	public const TYPE_ACCOMMODATION = 'accommodation';
 	public const TYPE_CAR_RENTAL = 'car_rental';
+	public const TYPE_TRAIN = 'train';
+	public const TYPE_BUS = 'bus';
 
 	protected string $userId = '';
 	protected ?int $tripId = null;

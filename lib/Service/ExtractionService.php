@@ -27,7 +27,17 @@ class ExtractionService {
 		'flight',
 		'accommodation',
 		'car_rental',
+		'train',
+		'bus',
 	];
+
+	/**
+	 * Types whose `details` is a list of legs anchored on `departureLocal`.
+	 * Train and bus share the flight shape because the fact is the same one — a
+	 * sequence of timed hops between places — and one validator covering all
+	 * three is one place for the anti-hallucination rule to live.
+	 */
+	private const SEGMENTED_TYPES = ['flight', 'train', 'bus'];
 
 	public const ALLOWED_STATUSES = ['confirmed', 'cancelled', 'changed'];
 
@@ -48,7 +58,7 @@ class ExtractionService {
 {
   "bookings": [
     {
-      "type": "flight | accommodation | car_rental",
+      "type": "flight | accommodation | car_rental | train | bus",
       "provider": "the company that DELIVERS the service (airline / hotel / rental desk), not the agency or website booked through | null",
       "booking_reference": "string | null",
       "confirmation_number": "string | null",
@@ -62,7 +72,7 @@ class ExtractionService {
 
 DETAILS when type = "flight":
 {
-  "passengers": [ { "name": "string", "frequentFlyer": "string | null", "baggage": "string | null" } ],
+  "passengers": [ { "name": "string", "frequentFlyer": "string | null", "ticketNumber": "e-ticket number for this passenger | null", "baggage": "string | null" } ],
   "segments": [ {
     "carrier": "marketing airline | null",
     "operatingCarrier": "operating airline | null",
@@ -77,6 +87,25 @@ DETAILS when type = "flight":
     "seat": "string | null",
     "terminal": "string | null",
     "gate": "string | null"
+  } ]
+}
+
+DETAILS when type = "train" or type = "bus":
+{
+  "retailer": "the agency, website or ticket seller the journey was bought through, e.g. Easybook or SNCB International | null",
+  "passengers": [ { "name": "string", "ticketNumber": "string | null", "baggage": "string | null" } ],
+  "segments": [ {
+    "carrier": "the company operating this leg, e.g. Perdana Express or InterCity | null",
+    "serviceNumber": "the train or coach service number, e.g. 9567 or KD-74 | null",
+    "origin": "station or terminal | null",
+    "destination": "station or terminal | null",
+    "departureLocal": "YYYY-MM-DDTHH:MM:SS",
+    "departureTimezone": "IANA name | null",
+    "arrivalLocal": "YYYY-MM-DDTHH:MM:SS | null",
+    "arrivalTimezone": "IANA name | null",
+    "fareClass": "e.g. 2nd Class / Standard / Economy | null",
+    "seats": [ { "passenger": "name | null", "coach": "coach or carriage | null", "seat": "string | null" } ],
+    "platform": "string | null"
   } ]
 }
 
@@ -106,15 +135,57 @@ JSON;
 
 		$rules = implode("\n", [
 			'You extract travel bookings from a single email.',
-			'First classify each booking as flight, accommodation, or car_rental, then output ONLY that type\'s details object.',
+			'First classify each booking as flight, accommodation, car_rental, train or bus, then output ONLY that type\'s details object.',
 			'Return ONLY a JSON object matching the schema below. No prose, no markdown fences.',
-			'Only include bookings of type flight, accommodation, or car_rental.',
+			'Only include bookings of type flight, accommodation, car_rental, train or bus.',
 			'booking_reference and confirmation_number are different identifiers. Include both when the email shows both, '
 				. 'and put a lone identifier in booking_reference with confirmation_number null — never the other way round.',
-			'provider is the operator that delivers the service: the airline, the hotel, the rental desk you collect the car from. '
+			// An aggregator email can carry nine identifier-shaped values, and the
+			// two columns were being filled by whichever came first rather than by
+			// which ones the traveller needs. Role, not order.
+			'When the email shows several booking identifiers, booking_reference is the one the traveller presents in order '
+				. 'to travel — the boarding code, the PNR, the code tickets are collected or checked in with — and '
+				. 'confirmation_number is the one identifying the order or transaction with the seller (order code, order '
+				. 'number, reference number). Prefer those two roles over any other identifier in the email.',
+			// Both observed rail/coach emails carry an identifier that looks like a
+			// reference and belongs to something other than this booking: a customer
+			// number that is the same in every email the sender ever writes, and a
+			// service number shared by everyone travelling that route. Either one
+			// landing in an identifier field makes two unrelated bookings look like
+			// one, which is the single irreversible mistake duplicate detection can
+			// make — so the rule is stated by class rather than by example.
+			'An identifier must name THIS booking. A customer or account number, a loyalty or frequent-flyer number, '
+				. 'a VAT number, an invoice or transaction line id, and a route, trip or service number are NOT booking '
+				. 'identifiers: never put them in booking_reference or confirmation_number.',
+			'provider is the operator that delivers the service: the airline, the hotel, the rental desk you collect the car from, '
+				. 'the train or coach company that runs the service. '
 				. 'When the email comes from an agency, broker or booking site, that name belongs in the type-specific details field '
-				. 'for it (car_rental.supplier) and NOT in provider.',
-			'A round-trip flight has two segments; multi-leg flights have one segment per leg.',
+				. 'for it (car_rental.supplier, train.retailer, bus.retailer) and NOT in provider. '
+				. 'Only when the email never names the operating company may the seller stand in provider as well.',
+			'A round-trip flight has two segments; multi-leg flights have one segment per leg. Train and bus journeys work the same way: '
+				. 'one segment per leg, and a connection is a new leg.',
+			'Put a train or coach service number in segments[].serviceNumber, never in booking_reference. Some emails print it after '
+				. 'the leg it belongs to rather than before it — attach it to that leg.',
+			// A rail booking states seats per passenger per leg: two travellers over
+			// an outbound and a return is four different seats, and a single field
+			// per leg can only keep one of them.
+			'Seats are per passenger AND per leg. Put one entry in that leg\'s seats array for each passenger travelling on it, '
+				. 'with the coach or carriage on the same entry. When the email gives a seat but does not say whose it is, '
+				. 'use one entry with passenger null.',
+			// Observed: a coach email prints each seat inside the passenger's own
+			// block, the passenger object has no seat field, and the seats were
+			// dropped entirely rather than moved to the leg.
+			'A seat printed inside a passenger\'s own block still belongs to the leg that passenger is travelling on: put it '
+				. 'in that segment\'s seats array together with the passenger\'s name. There is no seat field on a passenger. '
+				. 'Never leave a seat out because of where in the email it was printed.',
+			'When a summary line lists seats or tickets together and a per-passenger block also gives them one by one, the '
+				. 'per-passenger block is authoritative — the summary may pair them in a different order.',
+			'Give every segment a full date AND time. When the email states the journey date once and later legs show only a time, '
+				. 'use that date, rolling to the next day when a time is earlier than the leg before it.',
+			'An outbound and a return with separate booking references or tickets are two bookings; when one reference covers both, '
+				. 'they are one booking with a segment for each.',
+			'Extract traveller names only. Never extract nationality, gender, date of birth, phone number, email or postal address '
+				. 'for a traveller, even when the email states them.',
 			'Times are LOCAL wall-clock at the relevant place. Do NOT convert timezones.',
 			'Use null (or omit) for anything not present in the email. Never invent dates, references or names.',
 			'If the email contains no such booking, return {"bookings": []}.',
@@ -205,9 +276,9 @@ JSON;
 			return null;
 		}
 
-		$validated = match ($type) {
-			'flight' => $this->validateFlightDetails($rawDetails, $label, $issues),
-			'car_rental' => $this->validateCarRentalDetails($rawDetails, $label, $issues),
+		$validated = match (true) {
+			in_array($type, self::SEGMENTED_TYPES, true) => $this->validateSegmentedDetails($rawDetails, $type, $label, $issues),
+			$type === 'car_rental' => $this->validateCarRentalDetails($rawDetails, $label, $issues),
 			default => $this->validateAccommodationDetails($rawDetails, $label, $issues),
 		};
 
@@ -237,11 +308,19 @@ JSON;
 	}
 
 	/**
+	 * Validate the legs of a flight, train or bus journey.
+	 *
+	 * One validator for all three because the fact is the same: a sequence of
+	 * timed hops, each anchored on `departureLocal`, which is the field the
+	 * anti-hallucination rule turns on. Only the wording differs, so `$noun`
+	 * carries the booking type into the issue messages and nothing else does.
+	 *
 	 * @param array<array-key, mixed> $details
+	 * @param string $noun the booking type, used to word any issue raised
 	 * @param ExtractionIssue[] $issues
 	 * @return array{0: array<array-key, mixed>, 1: ?string, 2: ?string}|null
 	 */
-	private function validateFlightDetails(array $details, string $label, array &$issues): ?array {
+	private function validateSegmentedDetails(array $details, string $noun, string $label, array &$issues): ?array {
 		$segments = [];
 		$dates = [];
 		$seen = 0;
@@ -268,7 +347,7 @@ JSON;
 		if ($segments === []) {
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_MISSING_DEPARTURE,
-				$label . ': flight dropped — ' . ($seen === 0
+				$label . ': ' . $noun . ' dropped — ' . ($seen === 0
 					? 'details contained no segments'
 					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal'),
 				true,
@@ -282,7 +361,7 @@ JSON;
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_PARTIAL_SEGMENTS,
 				$label . ': kept ' . count($segments) . ' of ' . $seen
-					. ' flight segment(s); the rest had no parseable departureLocal',
+					. ' ' . $noun . ' segment(s); the rest had no parseable departureLocal',
 				false,
 			);
 		}

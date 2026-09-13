@@ -18,28 +18,68 @@ export interface WhenWhere {
 export interface Passenger {
 	name?: string | null
 	frequentFlyer?: string | null
+	/** e-ticket number for this passenger. One PNR can hold several. */
+	ticketNumber?: string | null
+	/**
+	 * Not asked for — a seat belongs to a leg, so the schema puts it on the
+	 * segment. Read anyway: coach emails print the seat inside the passenger's
+	 * own block, and a model that follows the email's layout rather than ours
+	 * should not cause the seat to vanish from the card.
+	 */
+	seat?: string | null
 	baggage?: string | null
 }
 
-export interface FlightSegment {
+/** Who sits where on one leg. Eurostar states this per passenger per leg. */
+export interface SeatAssignment {
+	passenger?: string | null
+	coach?: string | null
+	seat?: string | null
+}
+
+/**
+ * One timed hop between two places — a flight leg, a train leg, a coach leg.
+ *
+ * One interface for all three because `details` is loose JSON and the shapes
+ * genuinely overlap: everything but the last four fields is common. The
+ * type-specific tail is optional on both sides rather than split into two
+ * interfaces, which would force `BookingDetails` to intersect two conflicting
+ * `segments` array types.
+ */
+export interface JourneySegment {
 	carrier?: string | null
 	operatingCarrier?: string | null
-	flightNumber?: string | null
 	origin?: string | null
 	destination?: string | null
 	departureLocal?: string | null
 	departureTimezone?: string | null
 	arrivalLocal?: string | null
 	arrivalTimezone?: string | null
-	cabinClass?: string | null
 	seat?: string | null
+	/* Flight */
+	flightNumber?: string | null
+	cabinClass?: string | null
 	terminal?: string | null
 	gate?: string | null
+	/* Train / bus */
+	serviceNumber?: string | null
+	fareClass?: string | null
+	platform?: string | null
+	/**
+	 * Seat per passenger on this leg. A seat is a fact about a passenger *and* a
+	 * leg, and a rail booking states the whole matrix — two travellers over an
+	 * outbound and a return is four different seats. The scalar `seat`/`coach`
+	 * above stay readable for older rows and for tickets that name no passenger.
+	 */
+	seats?: SeatAssignment[]
+	coach?: string | null
 }
 
-export interface FlightDetails {
+export interface JourneyDetails {
 	passengers?: Passenger[]
-	segments?: FlightSegment[]
+	segments?: JourneySegment[]
+	/** Train/bus only: the agency or site the ticket was bought through. */
+	retailer?: string | null
 }
 
 export interface CarDetails {
@@ -63,7 +103,7 @@ export interface HotelDetails {
 	guests?: { name?: string | null }[]
 }
 
-export type BookingDetails = FlightDetails & CarDetails & HotelDetails & Record<string, unknown>
+export type BookingDetails = JourneyDetails & CarDetails & HotelDetails & Record<string, unknown>
 
 /** The user's decision about a booking, orthogonal to its provider-side status. */
 export type ReviewState = 'draft' | 'confirmed' | 'discarded' | 'archived'

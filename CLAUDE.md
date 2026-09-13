@@ -13,8 +13,9 @@ an LLM, and surfaces it in the app UI (later: Calendar/Notes projection).
   canonical data model, and future projection. Do **not** split into separate apps.
 - The LLM stays **outside** the app behind an abstraction; the app holds no API keys.
 
-MVP booking types: **flight, accommodation, car rental**. Get flights working
-end-to-end first (richest case: multi-segment).
+MVP booking types: **flight, accommodation, car rental, train, bus**. Get
+flights working end-to-end first (richest case: multi-segment); train and bus
+share the flight shape (see §3).
 
 ## 2. Architecture & data flow
 
@@ -134,10 +135,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `logs` — per-user pipeline activity log (dev/debug); `(level, step, message,
   context, created_at)`, capped at newest 1000 rows per user.
 
-There is **no `segments` table** — flights/car rentals/hotels have genuinely
-different shapes, so each type's structure (flight legs + passengers, car
-supplier/features/pickup/dropoff, hotel stay/guests) is stored as validated JSON
-in `bookings.details`. The shape can evolve from the prompt + `ExtractionService`
+There is **no `segments` table** — journeys/car rentals/hotels have genuinely
+different shapes, so each type's structure (legs + passengers for flight/train/
+bus, car supplier/features/pickup/dropoff, hotel stay/guests) is stored as
+validated JSON in `bookings.details`. The shape can evolve from the prompt + `ExtractionService`
 without a DB migration (that is the whole point of the JSON approach).
 
 ### Extraction JSON contract
@@ -146,8 +147,10 @@ every response goes through `ExtractionService`: strip fences → extract first
 balanced `{…}` → `json_decode` → **classify** each booking (`type` in allowlist)
 → validate the per-type `details` (normalise the anchoring date(s), pass unknown
 fields through). Anti-hallucination: a booking without its anchoring date is
-dropped — flight ⇒ ≥1 segment with a valid `departureLocal`; car_rental ⇒ valid
-`pickup.local`; accommodation ⇒ valid `checkIn.local`.
+dropped — flight, train, bus ⇒ ≥1 segment with a valid `departureLocal`;
+car_rental ⇒ valid `pickup.local`; accommodation ⇒ valid `checkIn.local`. The
+three segmented types share one validator (`validateSegmentedDetails`, gated on
+`SEGMENTED_TYPES`), which is the only place that rule lives.
 
 **Malformed JSON is repaired, never silently.** `extractJsonObject` rebuilds the
 response while scanning it, keeping a **stack of open containers** (not a depth
@@ -255,6 +258,84 @@ code follows the overrides.
   per-type detail field, and a lone identifier goes in `booking_reference` — but
   the matcher must keep tolerating both readings regardless: the wording only
   lowers the rate, and there is no backfill of existing rows.
+- **Train and bus are the flight shape, not a new one** (2026-09-06). Both are a
+  sequence of timed hops between places, so they share `segments[]` +
+  `passengers[]`, one validator (`validateSegmentedDetails`) and one calendar
+  treatment (`legItems`). They are **two types, not one "ground transport"**:
+  they differ to anyone reading a grid or a calendar bar — own icon, own label,
+  own filter chip — while the shared shape means the code is written once anyway.
+  Two real emails (an SNCB-NMBS International rail confirmation and an Easybook
+  coach order summary) drove the details, and each left a rule behind:
+  - **`details.retailer` holds the seller**, exactly as `car_rental.supplier`
+    does, and `providerNames()` pulls it into the set. The Easybook email names
+    both roles plainly (Easybook sells, Perdana Express drives); the SNCB one
+    names its operators **only inside image filenames** (`carrier/ecd.png`), so
+    after HTML→text the sole company name in the body is the seller. Hence the
+    one concession the prompt makes: when the email never names the operating
+    company, the seller may stand in `provider` as well. A null Provider column
+    on every rail booking is worse than an imprecise one, and the matcher is
+    unaffected either way because it compares the set.
+  - **An identifier must name the booking, and that is now stated by class.**
+    The SNCB email carries `customer number: 42875099` — eight digits, so
+    `isStrong()` calls it decisive — and it is *the same in every email that
+    sender ever writes*: had it reached `confirmation_number`, the user's second
+    SNCB booking would have been silently suppressed as a duplicate of the first.
+    The Easybook email carries nine identifier-shaped values including a service
+    number and a second, contradictory `Ticket ID` pair from the invoice block.
+    So the prompt rules out customer/account, loyalty, VAT, invoice-line and
+    route/trip/service numbers **as classes**, rather than listing examples.
+  - **A service number is not an identifier, it is `segments[].serviceNumber`** —
+    the counterpart of `flightNumber`, and it does the same work: `sameService()`
+    (was `sameFlight`) guards rule 2 for all of `SCHEDULED_TYPES`, because "same
+    operator, same day" is weak for an airline and weaker still for a rail or
+    coach operator running a route hourly.
+  - **A seat belongs to a passenger *and* a leg, so it is a list on the leg**
+    (`segments[].seats[] = {passenger, coach, seat}`). This was first shipped as
+    the flight scalar `segments[].seat` and corrected the same day, by a Eurostar
+    confirmation that states the whole matrix: two travellers over an outbound and
+    a return is **four** assignments (coach 8/seats 18 and 17 out, coach 16/seats
+    54 and 53 back), and the scalar kept one per leg — the extraction silently
+    dropped the second passenger from both. Moving the field to the *passenger*
+    would have been the same mistake mirrored, dropping the leg axis instead;
+    only the per-leg list holds both. The scalar `coach`/`seat` are still read as
+    a fallback (`seatLines` in `src/bookings.ts`), since rows extracted before
+    this carry them and re-running a message is the user's choice, not ours.
+    Flights keep the scalar: an itinerary for two rarely differs by traveller and
+    no flight email observed states a per-passenger seat.
+  - **`SegmentField.value` may be a list**, which renders one line per entry. It
+    exists for seats: a leg has one per passenger, and joining them into a
+    sentence puts a table inside a string.
+  - `passengers[].ticketNumber` was added — to flights too, since a PNR holds
+    e-ticket numbers the same way — so the per-passenger identifiers survive even
+    though nothing compares them yet.
+  - **Identifier comparison stays on the two header columns.** Adding
+    `details`-level identifiers to `identifierSet()` was considered and
+    deliberately deferred: it is a change to the most consequential unit in the
+    app, on speculation, and as the existing schemas stand it would be a no-op
+    for flight/accommodation/car_rental anyway. Storing the ticket numbers is
+    what keeps that door open — if a real miss shows up, the data is already there.
+  - **Identifiers are chosen by role, not by order of appearance** (added after a
+    second Easybook email put the order code in `booking_reference` and dropped
+    the boarding code entirely): `booking_reference` is what the traveller
+    presents in order to travel — boarding code, PNR, collection code —
+    and `confirmation_number` is what identifies the order with the seller. With
+    nine identifier-shaped values in one email, "include both when the email
+    shows both" was not guidance enough; the matcher is unaffected either way
+    (it compares the set) but the card showed the least useful of the nine.
+  - **A seat printed under a passenger still belongs to the leg.** The same email
+    dropped both seats: it prints them inside each passenger's block, and since a
+    passenger has no seat field the model discarded them rather than moving them
+    to the segment. The prompt now says so outright, and `passengerLines` renders
+    an off-schema `passengers[].seat` if one ever arrives — a seat in an odd place
+    beats a seat that silently vanishes. That email also contradicts itself (a
+    summary line pairs the two seats with the two ticket ids in one order, the
+    per-passenger blocks in the other), so the prompt names the per-passenger
+    block as authoritative.
+  - **Personal attributes are never extracted.** The coach email states each
+    traveller's nationality, gender and mobile number. `validateDetails` passes
+    unknown fields straight through to the database, so the prompt is the only
+    gate: names only, and the rule is tested.
+
 - **A possible duplicate is a relation between bookings, not a fact about an
   email.** It lives in `bookings.duplicate_group_id`. It was briefly in
   `messages.related_booking_ids`, which was wrong twice over: it could only be
@@ -546,6 +627,12 @@ debug panel for iterating without waiting for cron:
   the sidebar is the only place either is shown in full or acted on, via a new
   **Actions** section. Dialogs moved to `AppDialogs.vue` + `dialogs.ts`, since the
   panel now raises them. Messages keeps its expander (see "Frontend layout").
+- ✅ **Train and bus bookings** (2026-09-06, app version 1.16.1): two new types
+  sharing the flight `details` shape, one segment validator, per-leg calendar
+  bars, `details.retailer`, `passengers[].ticketNumber`, per-passenger seats and
+  an identifier rule stated by class. No migration — `bookings.type` is a string
+  and `details` is JSON, which is the whole point of the JSON approach. Three
+  real emails drove it (SNCB, Easybook, Eurostar) and each is now a test. See §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -681,8 +768,9 @@ and the wording lives in `labels.ts`.
   fill is the user's own or `--color-primary-element`; a booking's is mixed toward
   `--color-main-background` and a draft's edge toward `--color-main-text`, so both
   follow light and dark with no theme hook to keep in step.
-- **A multi-leg flight draws one bar per leg**, each spanning that leg's own
-  departure→arrival dates (`bookingItems`/`flightLegItems`). `bookings.start_date`
+- **A multi-leg journey draws one bar per leg** — flight, train or coach alike —
+  each spanning that leg's own departure→arrival dates (`bookingItems`/`legItems`,
+  gated on the same `SEGMENTED_TYPES` list the extraction uses). `bookings.start_date`
   /`end_date` is the *whole itinerary*, so a return trip drawn from it is a single
   bar covering the fortnight you were away — which says nothing about when you were
   flying and buries every other booking under it. Consequences:
@@ -982,6 +1070,13 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
 - **Settings registration** is via `info.xml` `<settings>` (admin/admin-section/
   personal/personal-section) and `<background-jobs>`. **Bump the app version** when
   adding settings so Nextcloud re-registers them.
+- **Only bump the app version when an upgrade has to *run* something**: a
+  migration, or a settings/job registration change that needs `info.xml` re-read.
+  Ordinary work during internal testing — prompt wording, frontend, services,
+  tests — does not need one, and a version per change is noise in the history.
+  Deploying is what picks up new code; the version is not a build number.
+  Never *lower* it below what a test instance already has installed, since
+  Nextcloud records `installed_version` and reads a lower one as a downgrade.
 - **Every routed controller method needs full OpenAPI docblocks** or
   `composer openapi` (and the `openapi.yml` CI / `make openapi`) fails. Required:
   a one-line summary (no trailing period), a `@param` for each parameter, a typed

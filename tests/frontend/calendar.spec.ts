@@ -195,6 +195,39 @@ describe('what goes on the grid', () => {
 		])
 	})
 
+	// The SNCB journey: Brussels → Rotterdam → Utrecht, one change, both legs on
+	// one evening. Trains and coaches split into legs on the same rule as flights.
+	const connection = booking({
+		id: 52,
+		type: 'train',
+		startDate: '2026-09-01T17:49:00',
+		endDate: '2026-09-01T20:12:00',
+		details: {
+			segments: [
+				{ carrier: 'Eurocity Direct', serviceNumber: '9567', origin: 'Bruxelles Midi', destination: 'Rotterdam Centraal', departureLocal: '2026-09-01T17:49:00', arrivalLocal: '2026-09-01T19:17:00' },
+				{ carrier: 'InterCity', serviceNumber: '2073', origin: 'Rotterdam Centraal', destination: 'Utrecht Centraal', departureLocal: '2026-09-01T19:35:00', arrivalLocal: '2026-09-01T20:12:00' },
+			],
+		},
+	})
+
+	it('splits a train journey into one bar per leg', () => {
+		expect(bookingItems(connection, 'SNCB KDHWBQD').map((i) => i.label)).toEqual([
+			'9567 Bruxelles Midi → Rotterdam Centraal',
+			'2073 Rotterdam Centraal → Utrecht Centraal',
+		])
+	})
+
+	it('falls back to the carrier when a coach leg has no service number', () => {
+		// Real coach emails often name the operator and nothing else; an unlabelled
+		// bar would be worse than a repeated one.
+		const coach = booking({
+			type: 'bus',
+			details: { segments: [{ carrier: 'Perdana Express', origin: 'Alor Setar', destination: 'Kuala Besut', departureLocal: '2026-09-06T22:00:00' }] },
+		})
+		expect(bookingItems(coach, 'Easybook C9A4N')[0].label)
+			.toBe('Perdana Express Alor Setar → Kuala Besut')
+	})
+
 	it('carries the trip colour onto every leg, for the bar to tint itself', () => {
 		expect(bookingItems(returnTrip, 'x', '#c9349f').map((i) => i.color))
 			.toEqual(['#c9349f', '#c9349f', '#c9349f', '#c9349f'])

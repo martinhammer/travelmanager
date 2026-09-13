@@ -26,6 +26,10 @@ export const typeName = (type: string): string => {
 		return t('travelmanager', 'Accommodation')
 	case 'car_rental':
 		return t('travelmanager', 'Car rental')
+	case 'train':
+		return t('travelmanager', 'Train')
+	case 'bus':
+		return t('travelmanager', 'Bus')
 	default:
 		return type
 	}

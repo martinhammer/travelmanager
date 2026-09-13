@@ -3,8 +3,10 @@ import { type Component, computed } from 'vue'
 import AirplaneIcon from 'vue-material-design-icons/Airplane.vue'
 import BagSuitcaseIcon from 'vue-material-design-icons/BagSuitcase.vue'
 import BedIcon from 'vue-material-design-icons/Bed.vue'
+import BusIcon from 'vue-material-design-icons/Bus.vue'
 import CarIcon from 'vue-material-design-icons/Car.vue'
 import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
+import TrainIcon from 'vue-material-design-icons/Train.vue'
 import type { CalendarItem } from './calendar'
 import { contrastingText } from './calendar'
 import { formatSpan } from './grid'
@@ -40,6 +42,8 @@ const ICONS: Record<string, Component> = {
 	flight: AirplaneIcon,
 	accommodation: BedIcon,
 	car_rental: CarIcon,
+	train: TrainIcon,
+	bus: BusIcon,
 }
 
 const icon = computed(() => props.item.kind === 'trip'

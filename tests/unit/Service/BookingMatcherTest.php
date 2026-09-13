@@ -253,4 +253,76 @@ final class BookingMatcherTest extends TestCase {
 
 		$this->assertSame(['holiday autos', 'goldcar'], $names);
 	}
+	public function testProviderNamesGatherTheSellerAndTheOperatorForAJourney(): void {
+		// A rail email often names its operators only in an image, so the seller
+		// is the one company name the text carries. Whichever of the two the
+		// model chose for `provider`, both are in the set.
+		$names = $this->matcher->providerNames('train', 'SNCB-NMBS International', [
+			'retailer' => 'SNCB-NMBS International',
+			'segments' => [
+				['carrier' => 'Eurocity Direct'],
+				['carrier' => 'InterCity'],
+			],
+		]);
+
+		$this->assertSame(['sncb nmbs international', 'eurocity direct', 'intercity'], $names);
+	}
+
+	public function testTwoJourneysOnOneOperatorInOneDayAreNotOneBooking(): void {
+		// The rule flights already had, and rail needs more: an operator runs the
+		// same route hourly, so "same company, same day" says almost nothing. With
+		// neither side carrying a reference, the service number has to agree.
+		$existing = $this->candidate(
+			31,
+			'train',
+			'InterCity',
+			null,
+			null,
+			['segments' => [[
+				'serviceNumber' => '2073',
+				'origin' => 'Rotterdam Centraal',
+				'destination' => 'Utrecht Centraal',
+			]]],
+			'2026-09-01T19:35:00',
+		);
+		$later = $this->incoming(
+			'train',
+			'InterCity',
+			null,
+			null,
+			['segments' => [[
+				'serviceNumber' => '2081',
+				'origin' => 'Utrecht Centraal',
+				'destination' => 'Rotterdam Centraal',
+			]]],
+			'2026-09-01T21:35:00',
+		);
+
+		$this->assertNull($this->matcher->match($later, [$existing]));
+	}
+
+	public function testTheSameServiceOnTheSameDayIsOneBookingSeenTwice(): void {
+		$existing = $this->candidate(
+			32,
+			'bus',
+			'Perdana Express',
+			null,
+			null,
+			['segments' => [['serviceNumber' => '.KD-74']]],
+			'2026-09-06T22:00:00',
+		);
+		$reminder = $this->incoming(
+			'bus',
+			'Perdana Express (Tiara Pesona Sdn Bhd)',
+			null,
+			null,
+			['segments' => [['serviceNumber' => 'KD-74']]],
+			'2026-09-06T22:00:00',
+		);
+
+		$match = $this->matcher->match($reminder, [$existing]);
+		$this->assertNotNull($match);
+		$this->assertSame(BookingMatch::REASON_ITINERARY, $match->reason);
+		$this->assertTrue($match->decisive);
+	}
 }

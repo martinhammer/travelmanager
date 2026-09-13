@@ -3,9 +3,9 @@ import { formatSpan, localDate } from './grid'
 import type {
 	Booking,
 	CarDetails,
-	FlightDetails,
-	FlightSegment,
 	HotelDetails,
+	JourneyDetails,
+	JourneySegment,
 	ReviewState,
 	WhenWhere,
 } from './api'
@@ -60,10 +60,16 @@ export const decodeHtmlEntities = (value: string): string => {
 	return decoded
 }
 
-/** A single labelled field ready to render as "Label: value". */
+/**
+ * A single labelled field ready to render as "Label: value".
+ *
+ * `value` may be a list, which renders as one line per entry. Seats are why:
+ * a leg has one per passenger, and folding them into a sentence puts a table
+ * inside a string.
+ */
 export interface SegmentField {
 	label: string
-	value: string
+	value: string | string[]
 }
 
 /**
@@ -100,6 +106,41 @@ const collect = (fields: SegmentField[], label: string, value: string | null | u
 	}
 }
 
+// Push a labelled field only when the list has something in it.
+const collectAll = (fields: SegmentField[], label: string, values: string[]): void => {
+	if (values.length > 0) {
+		fields.push({ label, value: values })
+	}
+}
+
+/**
+ * "Coach 8, seat 18", named by who sits there when the ticket says.
+ *
+ * Falls back to the leg's own `coach`/`seat` when no assignment list was
+ * extracted — rows created before seats were per passenger still read correctly.
+ * @param seg the leg whose seating to describe
+ */
+const seatLines = (seg: JourneySegment): string[] => {
+	const assignments = seg.seats ?? []
+	const seats = assignments.length > 0
+		? assignments
+		: [{ passenger: null, coach: seg.coach, seat: seg.seat }]
+	return seats
+		.map((s) => {
+			const where = [
+				s.coach ? `coach ${s.coach}` : null,
+				s.seat ? `seat ${s.seat}` : null,
+			].filter(Boolean).join(', ')
+			if (!where) {
+				return ''
+			}
+			// Sentence case only at the start of the line, so an unattributed seat
+			// reads "Coach 8, seat 18" and an attributed one keeps the name first.
+			return s.passenger ? `${s.passenger}: ${where}` : where.charAt(0).toUpperCase() + where.slice(1)
+		})
+		.filter((line) => line !== '')
+}
+
 /**
  * The booking's travel span for the grid's Travel dates column.
  * @param booking the booking to describe
@@ -112,7 +153,7 @@ export const bookingSpan = (booking: Booking): string =>
  * sparse leg doesn't render empty rows.
  * @param seg the flight segment
  */
-export const flightSegmentFields = (seg: FlightSegment): SegmentField[] => {
+export const flightSegmentFields = (seg: JourneySegment): SegmentField[] => {
 	const fields: SegmentField[] = []
 	const flight = [seg.carrier, seg.flightNumber].filter(Boolean).join(' ')
 	collect(fields, 'Flight', flight || null)
@@ -165,14 +206,44 @@ export const hotelFields = (details: HotelDetails): SegmentField[] => {
 }
 
 /**
- * Passenger summary lines for a flight (name + frequent flyer + baggage).
- * @param details the flight details
+ * Labelled fields for one train or coach leg.
+ *
+ * Same shape as `flightSegmentFields` and deliberately not the same function:
+ * the fields a ticket actually names differ (a coach and a platform, not a
+ * terminal and a gate), and folding both into one would mean rendering a "Gate"
+ * row for a train and a "Class" row that means two different things.
+ * @param seg the journey segment
  */
-export const passengerLines = (details: FlightDetails): string[] =>
+export const journeySegmentFields = (seg: JourneySegment): SegmentField[] => {
+	const fields: SegmentField[] = []
+	const service = [seg.carrier, seg.serviceNumber].filter(Boolean).join(' ')
+	collect(fields, 'Service', service || null)
+	collect(fields, 'Origin', seg.origin)
+	collect(fields, 'Destination', seg.destination)
+	collect(fields, 'Departure', formatWhen({ local: seg.departureLocal, timezone: seg.departureTimezone }))
+	collect(fields, 'Arrival', formatWhen({ local: seg.arrivalLocal, timezone: seg.arrivalTimezone }))
+	collect(fields, 'Class', seg.fareClass)
+	collectAll(fields, 'Seats', seatLines(seg))
+	collect(fields, 'Platform', seg.platform)
+	return fields
+}
+
+/**
+ * Passenger summary lines for a journey (name + whatever the ticket adds).
+ *
+ * Frequent-flyer numbers only ever appear on flights and ticket numbers mostly
+ * on rail and coach tickets, but the line is built the same way for both: only
+ * populated extras are shown, so a bus passenger simply has no FF suffix.
+ * @param details the flight, train or bus details
+ */
+export const passengerLines = (details: JourneyDetails): string[] =>
 	(details.passengers ?? [])
 		.map((p) => {
 			const extras = [
 				p.frequentFlyer ? `FF ${p.frequentFlyer}` : null,
+				p.ticketNumber ? `ticket ${p.ticketNumber}` : null,
+				// Off-schema, but shown rather than silently dropped — see Passenger.seat.
+				p.seat ? `seat ${p.seat}` : null,
 				p.baggage ? `bag ${p.baggage}` : null,
 			].filter(Boolean).join(', ')
 			const name = p.name ?? ''

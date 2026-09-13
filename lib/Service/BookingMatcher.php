@@ -41,6 +41,13 @@ class BookingMatcher {
 	private const MIN_IDENTIFIER_LENGTH = 5;
 
 	/**
+	 * Types that run to a published timetable, where "same operator, same day"
+	 * is weak evidence on its own: an airline, a train operator or a coach
+	 * company sells many separate journeys on one route on one day.
+	 */
+	private const SCHEDULED_TYPES = ['flight', 'train', 'bus'];
+
+	/**
 	 * A short all-digit identifier is real but weak — an 8-digit confirmation
 	 * number is effectively unique, a 5-digit one is not. Below this length a
 	 * numeric match must be corroborated before it is allowed to suppress a
@@ -135,9 +142,11 @@ class BookingMatcher {
 			}
 
 			// Tier 2: no usable identifier on at least one side. The operator and
-			// the anchoring day are all there is, so flights need more: two
-			// one-way tickets on one airline on one day are a real itinerary.
-			if ($incoming->type === 'flight' && !$this->sameFlight($incoming->details, $candidate->details)) {
+			// the anchoring day are all there is, so a scheduled service needs
+			// more: two one-way tickets on one airline on one day are a real
+			// itinerary, and on rail or a coach route that is not even unusual.
+			if (in_array($incoming->type, self::SCHEDULED_TYPES, true)
+				&& !$this->sameService($incoming->details, $candidate->details)) {
 				continue;
 			}
 
@@ -235,6 +244,18 @@ class BookingMatcher {
 					$raw[] = $this->stringField($segment, 'operatingCarrier');
 				}
 				break;
+			case 'train':
+			case 'bus':
+				// The retailer for the same reason car_rental pulls in `supplier`:
+				// on a rail or coach email the operator is often only in an image
+				// (the SNCB legs name their carriers in a logo filename), so the one
+				// company name the text carries is the seller. Whichever of the two
+				// the model put in `provider`, the set still intersects.
+				$raw[] = $this->stringField($details, 'retailer');
+				foreach ($this->segments($details) as $segment) {
+					$raw[] = $this->stringField($segment, 'carrier');
+				}
+				break;
 		}
 
 		$out = [];
@@ -323,19 +344,20 @@ class BookingMatcher {
 		return substr($a, 0, 10) === substr($b, 0, 10);
 	}
 
-	/* ----------------------------------------------------------------- flights */
+	/* -------------------------------------------------------- scheduled services */
 
 	/**
-	 * Same flight number, or failing that the same route. Two separately booked
+	 * Same service number, or failing that the same route. Two separately booked
 	 * one-ways on one airline on one day are a common itinerary, so "same
-	 * carrier, same day" is not enough to call them one booking.
+	 * carrier, same day" is not enough to call them one booking — and on a rail
+	 * or coach operator running a route hourly it is weaker still.
 	 *
 	 * @param array<array-key, mixed> $a
 	 * @param array<array-key, mixed> $b
 	 */
-	private function sameFlight(array $a, array $b): bool {
-		$numbersA = $this->flightNumbers($a);
-		$numbersB = $this->flightNumbers($b);
+	private function sameService(array $a, array $b): bool {
+		$numbersA = $this->serviceNumbers($a);
+		$numbersB = $this->serviceNumbers($b);
 		if ($numbersA !== [] && $numbersB !== []) {
 			return array_intersect($numbersA, $numbersB) !== [];
 		}
@@ -346,10 +368,11 @@ class BookingMatcher {
 	 * @param array<array-key, mixed> $details
 	 * @return list<string>
 	 */
-	private function flightNumbers(array $details): array {
+	private function serviceNumbers(array $details): array {
 		$out = [];
 		foreach ($this->segments($details) as $segment) {
-			$number = $this->normalizeIdentifierLoose($this->stringField($segment, 'flightNumber'));
+			$number = $this->normalizeIdentifierLoose($this->stringField($segment, 'flightNumber'))
+				?? $this->normalizeIdentifierLoose($this->stringField($segment, 'serviceNumber'));
 			if ($number !== null && !in_array($number, $out, true)) {
 				$out[] = $number;
 			}
@@ -378,8 +401,8 @@ class BookingMatcher {
 	}
 
 	/**
-	 * A flight number is short by nature ("EY42"), so it cannot go through the
-	 * booking-reference length floor.
+	 * A service number is short by nature ("EY42", "KD-74"), so it cannot go
+	 * through the booking-reference length floor.
 	 */
 	private function normalizeIdentifierLoose(?string $value): ?string {
 		if ($value === null) {

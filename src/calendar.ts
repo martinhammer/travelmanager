@@ -1,4 +1,4 @@
-import type { Booking, FlightSegment, ReviewState } from './api'
+import type { Booking, JourneySegment, ReviewState } from './api'
 import type { TripRow } from './trips'
 import { localDate } from './grid'
 
@@ -280,28 +280,37 @@ export interface CalendarItem extends Spanning {
 }
 
 /**
- * How a leg is named on its own bar: the flight number and the route it flies.
+ * How a leg is named on its own bar: the service number and the route it runs.
  *
  * Deliberately terser than `flightSegmentFields`' "Flight" row — a bar has one
- * line and often only part of a column. The flight number is preferred over the
- * carrier because it already carries the airline code ("EY42"), so
- * "Etihad Airways EY42" spends half the width saying it twice. Pure data, so no
+ * line and often only part of a column. The number is preferred over the
+ * carrier because a flight number already carries the airline code ("EY42"), so
+ * "Etihad Airways EY42" spends half the width saying it twice. Rail and coach
+ * numbers are barer ("9567", ".KD-74") and the carrier is often absent from the
+ * email entirely, so the fallback chain matters more there. Pure data, so no
  * translation is involved and this can live in a @nextcloud/*-free module.
- * @param seg the flight segment to name
+ * @param seg the segment to name
  */
-export const segmentLabel = (seg: FlightSegment): string => {
-	const flight = seg.flightNumber?.trim() || seg.carrier?.trim() || ''
+export const segmentLabel = (seg: JourneySegment): string => {
+	const service = seg.flightNumber?.trim() || seg.serviceNumber?.trim() || seg.carrier?.trim() || ''
 	const from = seg.origin?.trim() ?? ''
 	const to = seg.destination?.trim() ?? ''
 	const route = from && to ? `${from} → ${to}` : (from || to)
-	return [flight, route].filter(Boolean).join(' ')
+	return [service, route].filter(Boolean).join(' ')
 }
 
-// One bar per flight leg, or [] when this is not a flight we can break up.
+/**
+ * Types whose `details` holds legs worth drawing separately. Mirrors
+ * ExtractionService::SEGMENTED_TYPES — a stay and a car hire are one continuous
+ * thing, a journey is not.
+ */
+const SEGMENTED_TYPES = ['flight', 'train', 'bus']
+
+// One bar per leg, or [] when this is not a journey we can break up.
 // Anchored on departureLocal, the same field the extraction validates a segment
 // by, so a leg that survived extraction can always be placed.
-const flightLegItems = (booking: Booking, label: string, color: string | null, duplicate: boolean): CalendarItem[] => {
-	if (booking.type !== 'flight') {
+const legItems = (booking: Booking, label: string, color: string | null, duplicate: boolean): CalendarItem[] => {
+	if (!SEGMENTED_TYPES.includes(booking.type)) {
 		return []
 	}
 	const segments = booking.details.segments ?? []
@@ -333,13 +342,14 @@ const flightLegItems = (booking: Booking, label: string, color: string | null, d
  * A booking as one or more bars, or [] when it carries no date and cannot be
  * placed at all.
  *
- * **A multi-leg flight becomes one bar per leg**, each spanning that leg's own
- * departure→arrival dates. The booking's `start_date`/`end_date` is the whole
- * itinerary, so a return trip drawn from it is a single bar covering the fortnight
- * you were away — which says nothing about when you were actually flying and
- * buries every other booking underneath it. The legs are what happen on a day.
+ * **A multi-leg journey becomes one bar per leg**, each spanning that leg's own
+ * departure→arrival dates — flights, trains and coaches alike. The booking's
+ * `start_date`/`end_date` is the whole itinerary, so a return trip drawn from it
+ * is a single bar covering the fortnight you were away — which says nothing about
+ * when you were actually travelling and buries every other booking underneath it.
+ * The legs are what happen on a day.
  *
- * Everything else — hotels, car rentals, and flights whose segments we could not
+ * Everything else — hotels, car rentals, and journeys whose segments we could not
  * read — stays one bar from the stored span. A booking with no end date is a
  * single day rather than a zero-length span, so it still draws as something you
  * can see and click.
@@ -354,7 +364,7 @@ export const bookingItems = (
 	color: string | null = null,
 	duplicate = false,
 ): CalendarItem[] => {
-	const legs = flightLegItems(booking, label, color, duplicate)
+	const legs = legItems(booking, label, color, duplicate)
 	if (legs.length > 0) {
 		return legs
 	}

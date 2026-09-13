@@ -11,6 +11,7 @@ import {
 	draftCount,
 	filterByReviewState,
 	flightSegmentFields,
+	journeySegmentFields,
 	formatDateTime,
 	hasPossibleDuplicate,
 	hotelFields,
@@ -295,6 +296,79 @@ describe('flightSegmentFields', () => {
 	})
 })
 
+describe('journeySegmentFields', () => {
+	it('describes a rail leg in the words a ticket uses', () => {
+		// Class and platform, not cabin and gate: same fact, different vocabulary,
+		// which is why this is its own function rather than a shared one.
+		expect(journeySegmentFields({
+			carrier: 'Eurocity Direct',
+			serviceNumber: '9567',
+			origin: 'Bruxelles Midi',
+			destination: 'Rotterdam Centraal',
+			departureLocal: '2026-09-01T17:49:00',
+			arrivalLocal: '2026-09-01T19:17:00',
+			fareClass: '2nd Class',
+			seats: [{ passenger: null, coach: '4', seat: '61' }],
+		})).toEqual([
+			{ label: 'Service', value: 'Eurocity Direct 9567' },
+			{ label: 'Origin', value: 'Bruxelles Midi' },
+			{ label: 'Destination', value: 'Rotterdam Centraal' },
+			{ label: 'Departure', value: '2026-09-01 17:49' },
+			{ label: 'Arrival', value: '2026-09-01 19:17' },
+			{ label: 'Class', value: '2nd Class' },
+			{ label: 'Seats', value: ['Coach 4, seat 61'] },
+		])
+	})
+
+	it('names who sits where, because a leg has a seat per passenger', () => {
+		// The Eurostar case: two travellers, and the outbound and return put them
+		// in different coaches. A single seat field per leg keeps one of four.
+		expect(journeySegmentFields({
+			carrier: 'Eurostar',
+			origin: 'Brussels Midi / Zuid',
+			destination: "London St Pancras Int'l",
+			departureLocal: '2025-10-24T17:56:00',
+			seats: [
+				{ passenger: 'Martin Hammer', coach: '8', seat: '18' },
+				{ passenger: 'Najiba Ramly', coach: '8', seat: '17' },
+			],
+		}).at(-1)).toEqual({
+			label: 'Seats',
+			value: ['Martin Hammer: coach 8, seat 18', 'Najiba Ramly: coach 8, seat 17'],
+		})
+	})
+
+	it('still reads a leg stored before seats were per passenger', () => {
+		expect(journeySegmentFields({ departureLocal: '2026-09-01T17:49:00', coach: '4', seat: '61' }).at(-1))
+			.toEqual({ label: 'Seats', value: ['Coach 4, seat 61'] })
+	})
+
+	it('says nothing about seats when the ticket reserved none', () => {
+		expect(journeySegmentFields({ carrier: 'InterCity', departureLocal: '2026-09-01T19:35:00' })
+			.some((f) => f.label === 'Seats')).toBe(false)
+	})
+
+	it('omits what a coach ticket does not state', () => {
+		// The Easybook sample gives no arrival time at all.
+		expect(journeySegmentFields({
+			carrier: 'Perdana Express',
+			origin: 'Terminal Shahab Perdana',
+			destination: 'Terminal Bas Kuala Besut',
+			departureLocal: '2026-09-06T22:00:00',
+			seats: [
+				{ passenger: 'Najiba Ramly', seat: '7B' },
+				{ passenger: 'Martin Hammer', seat: '7C' },
+			],
+		})).toEqual([
+			{ label: 'Service', value: 'Perdana Express' },
+			{ label: 'Origin', value: 'Terminal Shahab Perdana' },
+			{ label: 'Destination', value: 'Terminal Bas Kuala Besut' },
+			{ label: 'Departure', value: '2026-09-06 22:00' },
+			{ label: 'Seats', value: ['Najiba Ramly: seat 7B', 'Martin Hammer: seat 7C'] },
+		])
+	})
+})
+
 describe('carFields', () => {
 	it('describes supplier, car and pickup/dropoff', () => {
 		expect(carFields({
@@ -347,6 +421,19 @@ describe('passengerLines', () => {
 				{ name: 'John Doe' },
 			],
 		})).toEqual(['Jane Doe (FF SK123, bag 1x23kg)', 'John Doe'])
+	})
+
+	it('shows a seat the model put on the passenger rather than dropping it', () => {
+		// Off-schema — seats belong to the leg — but a coach email prints them in
+		// the passenger block, and a silent omission is worse than an odd place.
+		expect(passengerLines({ passengers: [{ name: 'Martin Hammer', seat: '25' }] }))
+			.toEqual(['Martin Hammer (seat 25)'])
+	})
+
+	it('shows the ticket number a rail or coach passenger travels on', () => {
+		expect(passengerLines({
+			passengers: [{ name: 'Najiba Ramly', ticketNumber: 'EP26090008586' }],
+		})).toEqual(['Najiba Ramly (ticket EP26090008586)'])
 	})
 
 	it('is empty when there are no passengers', () => {
