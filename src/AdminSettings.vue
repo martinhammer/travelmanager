@@ -7,9 +7,11 @@ import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { loadState } from '@nextcloud/initial-state'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
-import { type AdminSettings, saveAdminSettings } from './api'
+import LlmInfo from './LlmInfo.vue'
+import { type AdminSettings, type LlmDiagnostics, saveAdminSettings } from './api'
 
 const initial = loadState<AdminSettings>('travelmanager', 'adminSettings')
+const llm = loadState<LlmDiagnostics>('travelmanager', 'llm')
 const form = reactive({ ...initial })
 const saving = ref(false)
 
@@ -48,6 +50,10 @@ const onSave = async () => {
 			</NcButton>
 		</div>
 	</NcSettingsSection>
+
+	<LlmInfo :provider="llm.provider"
+		:prompt-template="llm.promptTemplate"
+		:can-see-endpoint="llm.canSeeEndpoint" />
 </template>
 
 <style module>

@@ -65,7 +65,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   or null. Second-most-tested unit after `ExtractionService`, and for the same
   reason: it is where the judgement calls live.
 - `Service/IngestionService`, `Service/ExtractionResultHandler`, `Service/BookingService`, `Service/ConfigService`.
-- `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy).
+- `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy);
+  `Llm/ProviderInfo` is its read-only description of the model in use.
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
   `Imap/Html` is the pure HTML→text helper for HTML-only bodies.
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
@@ -183,6 +184,51 @@ code follows the overrides.
 - **LLM provider is admin-global** (Task Processing). There is **no** per-user
   local/external toggle and **no** direct strategy in the MVP — that was dropped
   (V2/V9). `ILlmService` remains a thin seam for a future JSON-mode backend.
+- **The model is shown, never chosen** (2026-09-14). Both settings panels carry
+  a read-only **Extraction model** section: an `NcNoteCard` carrying both the
+  privacy notice (email content goes to a model) and the limit of what the panel
+  claims — it moved off the personal panel's mailbox section, where the first
+  half sat next to IMAP settings that have nothing to do with the model — then a
+  label/value block (provider name + id, model, endpoint URL, max output tokens,
+  task type, the provider's own runtime estimate), and the full extraction
+  prompt in a **collapsed `<details>`** with the Messages view's floating Copy
+  button — same markup and CSS as the diagnostic sections there, and collapsed
+  for the same reason: several thousand characters you consult occasionally must
+  not push the rest off the screen.
+  The pairs are `<span>`s in a grid mirroring `.tm-fields`, **not a `<dl>`** —
+  the server styles bare semantic elements hard (§7) and something in that stack
+  put ~55px of leading on every row. Four things make it what it is:
+  - **It describes configuration, not provenance.** Task Processing records no
+    provider or model against a completed task — `OCP\TaskProcessing\Task` has a
+    getter for neither — so the only honest claim available is what the *next*
+    extraction will use, and an `NcNoteCard` says exactly that. Per-row truth
+    would mean snapshotting the description at schedule time; deliberately not
+    done yet, since the activity log already records the prompt per run.
+  - **The model comes from OCP; the URL cannot.**
+    `IProvider::getOptionalInputShapeDefaults()` reports `model` and
+    `max_tokens`, and because the app never passes a `model` input itself, the
+    default a provider names is literally what runs. **No interface reports a
+    URL** — Task Processing hides the transport on purpose — so
+    `ENDPOINT_KEYS` maps app id → config key (`integration_openai` ⇒ `url`) and
+    reads the provider app's own admin config, keyed on the segment before the
+    first `-` in the provider id. That makes those key names someone else's
+    private contract: an unknown provider, a renamed key or a local model with
+    no endpoint reports **nothing rather than a guess**, and a key the owning
+    app marks **sensitive is never read at all**, because the API key lives in
+    that same namespace under a name we do not control.
+  - **The endpoint is admin-only; the rest is not.** Which model is answering is
+    worth knowing to anyone debugging their own extractions, but the URL is
+    admin-configured infrastructure and may name an internal host, so
+    `PersonalSettings` passes `toArray($isAdmin)` and the panel *says* the row
+    is admin-only rather than leaving a blank that reads like a bug.
+  - **Delivered as initial state, not an OCS endpoint.** It is a property of the
+    instance's configuration, not something the page can change or poll, and it
+    keeps the OpenAPI surface (and its docblock tax) untouched.
+
+  `ExtractionService::promptTemplate()` is the rules + schema on their own, split
+  out of `buildPrompt` — which is now that template plus the email, unchanged
+  byte for byte. The alternative was rendering the template against an invented
+  email, which puts words on a debugging screen that were never sent.
 - **IMAP is strictly read-only** (V3/V6): never flag or move messages. Dedup is
   tracked in the DB keyed on RFC `Message-ID`. The app only *connects* to a
   user-specified mailbox; it does not manage mail setup.
@@ -633,6 +679,12 @@ debug panel for iterating without waiting for cron:
   an identifier rule stated by class. No migration — `bookings.type` is a string
   and `details` is JSON, which is the whole point of the JSON approach. Three
   real emails drove it (SNCB, Easybook, Eurostar) and each is now a test. See §3.
+- ✅ **The configured model and prompt are visible** (2026-09-14): a read-only
+  *Extraction model* section on the admin **and** personal settings panels —
+  provider, model, endpoint (admins only), limits, and the full prompt with a
+  Copy button. `Llm/ProviderInfo` + `ILlmService::describeProvider()` +
+  `src/LlmInfo.vue`, shared by both panels. No migration, no endpoint, no
+  version bump. See §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch

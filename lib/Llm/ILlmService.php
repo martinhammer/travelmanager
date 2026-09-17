@@ -29,6 +29,16 @@ interface ILlmService {
 	public function hasProvider(): bool;
 
 	/**
+	 * Describe the provider that text2text extractions will currently go to.
+	 *
+	 * Read-only, for the settings panels: which model is answering, and where
+	 * the email is being sent. Null when no provider is configured or the
+	 * platform could not be asked — never throws, since this is diagnostics and
+	 * must not be able to break a page it merely annotates.
+	 */
+	public function describeProvider(): ?ProviderInfo;
+
+	/**
 	 * Extract the generated text from a completed task's output array.
 	 *
 	 * @param array<array-key, mixed> $output

@@ -54,6 +54,21 @@ class ExtractionService {
 	 * ONLY the JSON object described by the schema.
 	 */
 	public function buildPrompt(string $emailText, ?string $subject = null): string {
+		$subjectLine = $subject !== null && $subject !== '' ? "SUBJECT: {$subject}\n\n" : '';
+
+		return $this->promptTemplate() . "\n\nEMAIL:\n" . $subjectLine . $emailText;
+	}
+
+	/**
+	 * Everything sent to the model ahead of the email itself: the rules and the
+	 * schema.
+	 *
+	 * Split out of buildPrompt so the settings screens can show exactly what the
+	 * app asks for without an email wrapped around it — the alternative was
+	 * rendering the template against a made-up email, which puts words on a
+	 * debugging screen that were never sent.
+	 */
+	public function promptTemplate(): string {
 		$schema = <<<'JSON'
 {
   "bookings": [
@@ -198,9 +213,7 @@ JSON;
 			'Never truncate the response or stop mid-object.',
 		]);
 
-		$subjectLine = $subject !== null && $subject !== '' ? "SUBJECT: {$subject}\n\n" : '';
-
-		return $rules . "\n\nSCHEMA:\n" . $schema . "\n\nEMAIL:\n" . $subjectLine . $emailText;
+		return $rules . "\n\nSCHEMA:\n" . $schema;
 	}
 
 	/**

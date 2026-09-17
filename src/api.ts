@@ -316,6 +316,35 @@ export const testConnection = async (): Promise<{ ok: boolean, error?: string }>
 	return unwrap(res.data)
 }
 
+/**
+ * The model an extraction is currently sent to. Read-only diagnostics, handed
+ * to the settings panels as initial state rather than fetched: it is a property
+ * of the instance's configuration, not of anything the page can change.
+ *
+ * Note this describes what the NEXT extraction will use — Task Processing keeps
+ * no record of the provider or model a completed task ran on, so it cannot be
+ * read back per booking.
+ */
+export interface LlmProviderInfo {
+	taskTypeId: string
+	providerId: string
+	providerName: string
+	model: string | null
+	maxTokens: number | null
+	expectedRuntime: number
+	/** Null for a local provider, an unrecognised one, or a non-admin viewer. */
+	endpointUrl: string | null
+}
+
+/** Everything the settings panels are handed about extraction's LLM side. */
+export interface LlmDiagnostics {
+	provider: LlmProviderInfo | null
+	/** Whether this viewer may see the endpoint URL (admins only). */
+	canSeeEndpoint: boolean
+	/** The rules + schema sent ahead of each email. */
+	promptTemplate: string
+}
+
 export interface AdminSettings {
 	enabled: boolean
 	rateLimitPerRun: number

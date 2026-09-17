@@ -13,7 +13,9 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { confirmPassword } from '@nextcloud/password-confirmation'
 import '@nextcloud/password-confirmation/style.css'
 import { t } from '@nextcloud/l10n'
+import LlmInfo from './LlmInfo.vue'
 import {
+	type LlmDiagnostics,
 	type LogEntry,
 	type UserSettings,
 	clearLogs,
@@ -26,6 +28,7 @@ import {
 
 const initial = loadState<UserSettings>('travelmanager', 'settings')
 const featureEnabled = loadState<boolean>('travelmanager', 'featureEnabled', true)
+const llm = loadState<LlmDiagnostics>('travelmanager', 'llm')
 
 const form = reactive({
 	enabled: initial.enabled,
@@ -153,14 +156,10 @@ onMounted(refreshLogs)
 </script>
 
 <template>
-	<NcSettingsSection :name="t('travelmanager', 'Travel Manager')"
-		:description="t('travelmanager', 'Connect a dedicated mailbox that receives your travel booking emails. Messages are read only — Travel Manager never modifies your mailbox.')">
+	<NcSettingsSection :name="t('travelmanager', 'Mailbox')"
+		:description="t('travelmanager', 'Connect a dedicated mailbox that has your travel booking emails. Travel Manager has read-only access and never modifies your mailbox.')">
 		<NcNoteCard v-if="!featureEnabled" type="warning">
 			{{ t('travelmanager', 'Travel Manager is currently disabled by your administrator.') }}
-		</NcNoteCard>
-
-		<NcNoteCard type="info">
-			{{ t('travelmanager', 'Email content is sent to the AI text-processing provider configured for this Nextcloud instance. Depending on the administrator’s choice, this may be a local model or an external third-party API.') }}
 		</NcNoteCard>
 
 		<NcCheckboxRadioSwitch v-model="form.enabled" :class="$style.field">
@@ -195,6 +194,10 @@ onMounted(refreshLogs)
 			</NcButton>
 		</div>
 	</NcSettingsSection>
+
+	<LlmInfo :provider="llm.provider"
+		:prompt-template="llm.promptTemplate"
+		:can-see-endpoint="llm.canSeeEndpoint" />
 
 	<NcSettingsSection :name="t('travelmanager', 'Developer & debugging')"
 		:description="t('travelmanager', 'Tools for testing the extraction pipeline without waiting for the background job. These act only on your own data.')">
