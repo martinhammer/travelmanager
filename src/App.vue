@@ -10,6 +10,7 @@ import BookingsView from './BookingsView.vue'
 import CalendarView from './CalendarView.vue'
 import DetailSidebar from './DetailSidebar.vue'
 import MessagesView from './MessagesView.vue'
+import NavCounter from './NavCounter.vue'
 import TripsView from './TripsView.vue'
 import {
 	backLabel,
@@ -53,9 +54,15 @@ onUnmounted(() => stopNavigation())
 		<NcAppNavigation>
 			<template #list>
 				<!-- Four views; what to show within each is a filter, not a
-				     navigation choice. Counters show what awaits you, not totals —
-				     the calendar has none, because its own summary line answers that
-				     for the month on screen, which a global count cannot.
+				     navigation choice. A counter is "what awaits you, over how much
+				     there is": the lozenge is the outstanding work and the muted
+				     number the total, so the lozenge means one thing everywhere and
+				     is absent when there is nothing to do. Trips shows a total alone
+				     — travel you have filed carries no task, and inventing a queue
+				     for the sake of symmetry would make the lozenge mean two
+				     different things. The calendar has no counter at all, because
+				     its own summary line answers this for the month on screen, which
+				     a global count cannot.
 				     `@click.prevent` because NcAppNavigationItem renders <a href="#">,
 				     whose stray hash would otherwise bounce the route back. -->
 				<NcAppNavigationItem :name="t('travelmanager', 'Calendar')"
@@ -65,21 +72,28 @@ onUnmounted(() => stopNavigation())
 					:active="view === 'bookings'"
 					@click.prevent="view = 'bookings'">
 					<template #counter>
-						{{ draftBookingCount }}
+						<NavCounter :attention="draftBookingCount"
+							:total="bookings.length"
+							:label="t('travelmanager', '{n} of {total} bookings await review',
+								{ n: draftBookingCount, total: bookings.length })" />
 					</template>
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Trips')"
 					:active="view === 'trips'"
 					@click.prevent="view = 'trips'">
 					<template #counter>
-						{{ trips.length }}
+						<NavCounter :total="trips.length"
+							:label="t('travelmanager', '{total} trip(s)', { total: trips.length })" />
 					</template>
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Messages')"
 					:active="view === 'messages'"
 					@click.prevent="view = 'messages'">
 					<template #counter>
-						{{ attentionCount }}
+						<NavCounter :attention="attentionCount"
+							:total="messages.length"
+							:label="t('travelmanager', '{n} of {total} messages need attention',
+								{ n: attentionCount, total: messages.length })" />
 					</template>
 				</NcAppNavigationItem>
 			</template>

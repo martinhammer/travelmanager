@@ -940,10 +940,38 @@ and the wording lives in `labels.ts`.
   switches (the module stays mounted) but not a reload — deliberate for now; put
   it in the route if month links ever need sharing.
 
+### Navigation counters
+
+**"What awaits you, over how much there is"** — `NavCounter.vue`, one per row
+(2026-09-17). The lozenge (`NcCounterBubble`, highlighted) is the outstanding
+work; the total is muted text beside it. Reasons, in the order they bind:
+- **Only one of the two numbers is a call to action**, so only one gets the
+  emphasis a bubble carries. Mail's nav is the precedent: a lozenge there means
+  unread, never "how many mails exist". A muted number then means the same thing
+  on every row, which is what lets Trips show one on its own.
+- **Trips shows a total alone.** Travel you have filed carries no task, and the
+  candidates for a trip "queue" were all worse than nothing: current/future is
+  *what is live*, not what needs doing, and trips-holding-drafts counts the same
+  drafts the Bookings row already counts. A lozenge that means two different
+  things by row is worse than an asymmetric nav.
+- **Zero outstanding renders as the total alone** — no `0` bubble, and no bare
+  "/ 14" with nothing in front of the slash. A row with nothing to do should look
+  like one.
+- **The pair is labelled as a sentence** (`label`, the tooltip *and* the
+  accessible name): "3 of 14 bookings await review". Two numbers either side of a
+  slash read as "3 14" aloud — the slash is punctuation nobody announces — so the
+  numbers themselves are `aria-hidden` and the sentence is what is read.
+- `X` is drafts for Bookings (`draftCount`) and failed/dropped for Messages
+  (`needsAttention`). **Messages' total is the list page, not the ledger**:
+  `ProcessedMessageMapper::findAllForUser` caps at 200, so `Y` silently becomes
+  "of the most recent 200" once the ledger is longer. Bookings and Trips are
+  uncapped and exact.
+
 ### Frontend layout (`src/`)
 
 ```
 App.vue              shell only: nav, which view is showing, the detail panel
+├─ NavCounter.vue    one nav row's count: lozenge for the queue, muted total
 ├─ CalendarView.vue  the month grid, its toolbar and month summary
 │   └─ CalendarBar.vue    one trip/booking bar: its icon, colour and draft cue
 ├─ BookingsView.vue  grid only — no dialogs, no actions
