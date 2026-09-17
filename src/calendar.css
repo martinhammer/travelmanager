@@ -296,6 +296,33 @@
 	color: var(--tm-cal-accent);
 }
 
+/* Discarded: struck through, and drained of whatever colour it had.
+
+   It shows only when the archived & discarded switch is on, and it then has to
+   be told apart from an **unfiled** booking — which is the bar it otherwise
+   looks exactly like, since discarding unlinks a booking from its trip and so
+   leaves it on the default tint. Two cues, because neither is enough alone:
+   the fill drops out of the trip palette to the page's own muted grey (colour
+   here means which trip, and a discarded booking is in none), and the label is
+   struck through, which is the part that survives greyscale and says *rejected*
+   rather than merely *unfiled*. Draft's dashed edge is left alone — the two
+   states are mutually exclusive, so the cues never have to share a bar.
+
+   Specificity: the [data-kind='booking'] rule above is (0,3,0), so the class has
+   to be doubled up with .tm-cal-bar to match it and win on order — otherwise the
+   trip tint and text colour set there would outrank these.
+
+   Below 640px the label is dropped and the grey carries this on its own; that is
+   the same trade every other cue makes at that width. */
+.tm-cal .tm-cal-bar.tm-cal-bar-discarded {
+	--tm-cal-trip: var(--color-text-maxcontrast);
+	--tm-cal-text: var(--color-text-maxcontrast);
+}
+
+.tm-cal .tm-cal-bar-discarded .tm-cal-bar-label {
+	text-decoration: line-through;
+}
+
 /* Continuation: the edge that runs into the next week loses its corner, so a
    split bar reads as one thing crossing a boundary rather than two bookings. */
 .tm-cal .tm-cal-bar.tm-cal-bar-continues-left {

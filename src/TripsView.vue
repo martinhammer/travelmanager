@@ -105,7 +105,11 @@ const onNewTrip = () => openTripEditor(null)
 						</button>
 					</span>
 					<!-- What the trip is *for*, in its own sortable column. Empty for a
-					     trip nobody has classified, rather than a placeholder lozenge. -->
+					     trip nobody has classified, rather than a placeholder lozenge.
+					     A word only: the booking-type lozenges two columns over are words,
+					     and one lozenge in three carrying a glyph reads as an
+					     inconsistency rather than as a distinction. The calendar's own
+					     bars are where the trip-type glyph lives. -->
 					<span class="tm-badges tm-cell-status">
 						<span v-if="tripTypeLabel(row.trip.type)" class="tm-badge">
 							{{ tripTypeLabel(row.trip.type) }}

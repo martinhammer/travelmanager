@@ -809,9 +809,38 @@ and the wording lives in `labels.ts`.
 - **Type is carried entirely by the icon** (`vue-material-design-icons`: plane /
   bed / car, MapMarker as the fallback), since colour now means which trip. Every
   bar has one for exactly that reason.
+- **A trip's icon is its own type, and the three stay one family** (2026-09-17):
+  briefcase = work, backpack (`BagPersonal`) = leisure, plain suitcase =
+  unclassified, declared in `CalendarBar` beside the booking-type map because the
+  bars are the only place they are drawn. It was briefly mirrored on the Trips
+  grid's type lozenge and taken back out: the booking-type lozenges beside it are
+  words, so one lozenge in three carrying a glyph read as an inconsistency rather
+  than as a distinction. The suitcase is what says *trip, not booking* — its partners are the plane, the
+  bed and the car, and below 640px it is all the container query leaves — so the
+  swap had to **refine** that marker rather than spend it; a necktie or a parasol
+  would have read as a fourth kind of thing. Literal metaphors were mocked up
+  beside it and lost on that point, not on looks. The unclassified suitcase is the
+  **common** case, not a fallback for a broken one: `trips.type` is nullable and
+  never inferred, so it must look deliberate. `CalendarItem.type` now means "the
+  slug that picks this bar's glyph" — a booking type for a booking, work/leisure
+  for a trip — one field rather than two, since `kind` is consulted first and the
+  two vocabularies never meet. A trip bar's `aria-label` gained the type for the
+  usual reason: an icon is not in the accessibility tree.
 - **Draft is a dashed outline**, not a paler shade — a paler shade is what a
   *booking* already is, and the cue has to survive greyscale and colour-blindness
   besides.
+- **Discarded is muted *and* struck through** (2026-09-17). Shown only by the
+  archived & discarded switch, it then has to be told apart from an **unfiled**
+  booking — the bar it otherwise matches exactly, since discarding unlinks a
+  booking from its trip and leaves it on the default tint. So the fill drops out
+  of the trip palette to `--color-text-maxcontrast` and the label is struck
+  through; grey alone would not have separated them, and the strikethrough is the
+  half that survives greyscale and says *rejected* rather than *unfiled*.
+  `CalendarBar` withholds the inline `--tm-cal-trip` for a discarded bar as well,
+  since an inline custom property outranks the stylesheet and rows discarded
+  before the unlink rule still carry a trip id. **Archived is deliberately left
+  alone**: it keeps its trip, and its colour, because that is what archiving
+  means.
 - **Trip against booking is fill strength, weight and icon** — full colour, bold,
   suitcase — **not shape**. Bars all share one corner radius; a pill for trips
   made the distinction louder than it needs to be once the fill carries it. (The

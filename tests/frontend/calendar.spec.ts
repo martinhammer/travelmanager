@@ -292,6 +292,22 @@ describe('what goes on the grid', () => {
 			.toHaveLength(1)
 	})
 
+	it('carries a trip’s own type, so its bar can draw the right luggage', () => {
+		const row = {
+			trip: { id: 7, name: 'Berlin', type: 'work', color: null, startDate: null, endDate: null, notes: null },
+			bookings: [], start: '2026-09-10', end: '2026-09-14', types: [], period: 'future',
+		} as TripRow
+		expect(tripItem(row, 'Berlin')?.type).toBe('work')
+	})
+
+	it('leaves an unclassified trip’s type null, which keeps the plain suitcase', () => {
+		const row = {
+			trip: { id: 8, name: 'Oslo', type: null, color: null, startDate: null, endDate: null, notes: null },
+			bookings: [], start: '2026-09-10', end: '2026-09-14', types: [], period: 'future',
+		} as TripRow
+		expect(tripItem(row, 'Oslo')?.type).toBeNull()
+	})
+
 	it('uses a trip’s derived span, not its stored dates', () => {
 		const row = {
 			// Stored dates deliberately disagree: they are user-entered and stale.

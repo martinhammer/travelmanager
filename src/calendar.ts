@@ -259,7 +259,13 @@ export interface CalendarItem extends Spanning {
 	id: number
 	/** Unique per bar, so Vue can key a list in which one booking appears twice. */
 	key: string
-	/** Booking type slug ('flight', …); null for trips, which have no type. */
+	/**
+	 * The slug that picks this bar's icon: a booking's type ('flight', …), or a
+	 * trip's own work/leisure. One field rather than two because the bar asks it
+	 * exactly one question — which glyph — and answers it per `kind` first, so
+	 * the two vocabularies never meet. Null for an unclassified trip, which is
+	 * ordinary: trips.type is never inferred.
+	 */
 	type: string | null
 	/** The user's decision, driving the draft/confirmed cue; null for trips. */
 	reviewState: ReviewState | null
@@ -410,7 +416,9 @@ export const tripItem = (row: TripRow, label: string): CalendarItem | null => {
 		duplicate: false,
 		id: row.trip.id,
 		key: `trip-${row.trip.id}`,
-		type: null,
+		// Its own work/leisure, which the bar draws as a briefcase or a backpack.
+		// Null for an unclassified trip, which keeps the plain suitcase.
+		type: row.trip.type,
 		reviewState: null,
 		color: row.trip.color,
 		label,

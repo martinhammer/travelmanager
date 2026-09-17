@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { type Component, computed } from 'vue'
 import AirplaneIcon from 'vue-material-design-icons/Airplane.vue'
+import BagPersonalIcon from 'vue-material-design-icons/BagPersonal.vue'
 import BagSuitcaseIcon from 'vue-material-design-icons/BagSuitcase.vue'
 import BedIcon from 'vue-material-design-icons/Bed.vue'
+import BriefcaseIcon from 'vue-material-design-icons/Briefcase.vue'
 import BusIcon from 'vue-material-design-icons/Bus.vue'
 import CarIcon from 'vue-material-design-icons/Car.vue'
 import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
@@ -10,7 +12,7 @@ import TrainIcon from 'vue-material-design-icons/Train.vue'
 import type { CalendarItem } from './calendar'
 import { contrastingText } from './calendar'
 import { formatSpan } from './grid'
-import { reviewStateLabel, typeName } from './labels'
+import { reviewStateLabel, tripTypeLabel, typeName } from './labels'
 
 /**
  * One bar on the month grid: a trip or a booking, across the days it covers.
@@ -20,8 +22,12 @@ import { reviewStateLabel, typeName } from './labels'
  * bar itself owns what it *looks* like: its type colour, its icon, and the
  * draft-versus-confirmed cue.
  *
+ * A trip's icon is its own type (briefcase / backpack / plain suitcase), and a
+ * booking's is what kind of booking it is.
  * Type is signalled by icon as well as colour, and draft by a dashed outline
- * rather than a lighter shade, so neither cue depends on seeing colour.
+ * rather than a lighter shade, so neither cue depends on seeing colour. Discard
+ * is the same idea once more: a struck-through label, not a shade of grey that
+ * an unfiled booking could be mistaken for.
  */
 const props = defineProps<{
 	item: CalendarItem
@@ -46,8 +52,27 @@ const ICONS: Record<string, Component> = {
 	bus: BusIcon,
 }
 
+/**
+ * A trip's type, as luggage — and all three stay luggage on purpose.
+ *
+ * The suitcase is what says *this is a trip, not a booking*: its partners are the
+ * plane, the bed and the car, and below 640px it is the only thing the container
+ * query leaves standing. A briefcase and a backpack refine that marker; a necktie
+ * or a parasol would have spent it, reading as a fourth kind of thing. The three
+ * silhouettes stay distinct at the 12px the bar draws them at.
+ *
+ * The plain suitcase is the **common** case, not a fallback for a broken one:
+ * `trips.type` is nullable and never inferred — nothing in an extracted booking
+ * says whether travel was for work — so an unclassified trip has to look
+ * deliberate, and it keeps the glyph it has always had.
+ */
+const TRIP_ICONS: Record<string, Component> = {
+	work: BriefcaseIcon,
+	leisure: BagPersonalIcon,
+}
+
 const icon = computed(() => props.item.kind === 'trip'
-	? BagSuitcaseIcon
+	? (TRIP_ICONS[props.item.type ?? ''] ?? BagSuitcaseIcon)
 	: (ICONS[props.item.type ?? ''] ?? MapMarkerIcon))
 
 /**
@@ -68,10 +93,16 @@ const icon = computed(() => props.item.kind === 'trip'
  * than like a third thing. **Colour on this view means one thing only: which
  * trip.** What kind of booking it is, is carried by the icon — which is why every
  * bar has one.
+ *
+ * A discarded booking is handed no tint at all, so calendar.css can mute it: it
+ * belongs to no trip (discarding unlinks it), and an inline custom property would
+ * outrank the stylesheet and leave a rejected booking wearing a trip's colour.
+ * Only rows discarded before the unlink rule existed still carry a trip id, which
+ * is exactly the case that would otherwise slip through.
  */
 const tint = computed(() => {
-	const { color, kind } = props.item
-	if (color === null) {
+	const { color, kind, reviewState } = props.item
+	if (color === null || reviewState === 'discarded') {
 		return {}
 	}
 	return kind === 'trip'
@@ -89,7 +120,10 @@ const tint = computed(() => {
 const description = computed(() => {
 	const { item } = props
 	if (item.kind === 'trip') {
-		return item.label
+		// The type rides in the icon, and an icon is not in the accessibility tree
+		// — nor visible to anyone reading the bar at a glance in a narrow column.
+		// Empty for an unclassified trip, which is the common case, so filter.
+		return [item.label, tripTypeLabel(item.type)].filter(Boolean).join(' · ')
 	}
 	return [
 		item.label,
@@ -119,6 +153,7 @@ const description = computed(() => {
 		class="tm-cal-bar"
 		:class="{
 			'tm-cal-bar-draft': item.reviewState === 'draft',
+			'tm-cal-bar-discarded': item.reviewState === 'discarded',
 			'tm-cal-bar-continues-left': continuesLeft,
 			'tm-cal-bar-continues-right': continuesRight,
 			'tm-cal-bar-selected': selected,
