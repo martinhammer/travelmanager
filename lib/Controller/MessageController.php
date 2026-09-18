@@ -115,6 +115,51 @@ class MessageController extends OCSController {
 		}
 	}
 
+	/**
+	 * Discard a message, so it stops counting as needing attention
+	 *
+	 * For the rows a retry cannot help: an email that is genuinely about travel
+	 * but carries nothing a booking needs will be refused again however often it
+	 * is re-run. The row itself is kept — it is the dedup key, and deleting it
+	 * would only have the next mailbox read ingest the same email again.
+	 *
+	 * @param int $id Id of the message
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerMessage, array{}>
+	 * @throws OCSNotFoundException Message not found
+	 *
+	 * 200: Message discarded
+	 * 404: Message not found
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'POST', url: '/api/messages/{id}/discard')]
+	public function discard(int $id): DataResponse {
+		try {
+			return new DataResponse($this->ingestionService->discardMessage($this->uid(), $id, true)->jsonSerialize());
+		} catch (DoesNotExistException) {
+			throw new OCSNotFoundException();
+		}
+	}
+
+	/**
+	 * Restore a discarded message, so it counts as needing attention again
+	 *
+	 * @param int $id Id of the message
+	 * @return DataResponse<Http::STATUS_OK, TravelManagerMessage, array{}>
+	 * @throws OCSNotFoundException Message not found
+	 *
+	 * 200: Message restored
+	 * 404: Message not found
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'DELETE', url: '/api/messages/{id}/discard')]
+	public function restore(int $id): DataResponse {
+		try {
+			return new DataResponse($this->ingestionService->discardMessage($this->uid(), $id, false)->jsonSerialize());
+		} catch (DoesNotExistException) {
+			throw new OCSNotFoundException();
+		}
+	}
+
 	private function uid(): string {
 		return $this->userId ?? '';
 	}

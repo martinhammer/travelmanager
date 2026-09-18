@@ -32,12 +32,35 @@ export const retryable = (message: Message): boolean =>
 	message.canRetry && message.status !== 'processing'
 
 /**
- * Messages where the app failed to get a booking out of an email that may well
- * have contained one — the rows worth a human's attention.
+ * Statuses where the app failed to get a booking out of an email that may well
+ * have contained one. A fact about the pipeline, so it is the *unfiltered* half
+ * of the rule — see needsAttention for the user's half.
+ */
+const ATTENTION_STATUSES = ['failed', 'dropped']
+
+/**
+ * Whether this row is one the app could not extract a booking from — regardless
+ * of whether the user has since discarded it. This is what decides that a
+ * Discard button is worth offering at all, and it has to stay true *after* the
+ * button is pressed, or the control that undoes the action would disappear along
+ * with the action.
+ * @param message the ledger row
+ */
+export const unresolved = (message: Message): boolean =>
+	ATTENTION_STATUSES.includes(message.status)
+
+/**
+ * The rows worth a human's attention: the app failed to get a booking out of the
+ * email, **and** the user has not discarded the row.
+ *
+ * Two axes, exactly as a booking has: `status` is what the pipeline observed and
+ * `discarded` is what the user decided about it. A correct refusal — an email
+ * genuinely about travel that carries no departure time — would otherwise sit in
+ * this count for ever, which is how a counter gets ignored.
  * @param items the ledger rows
  */
 export const needsAttention = (items: Message[]): Message[] =>
-	items.filter((m) => m.status === 'failed' || m.status === 'dropped')
+	items.filter((m) => unresolved(m) && !m.discarded)
 
 /**
  * Filter the ledger by status. Beyond the real statuses it accepts two
@@ -52,6 +75,12 @@ export const filterMessagesByStatus = (items: Message[], status: string): Messag
 	}
 	if (status === 'attention') {
 		return needsAttention(items)
+	}
+	// Discarded rows stay in every other filter, including their own status: the
+	// ledger is a record of what happened, and discarding changes what the app
+	// asks of you, not what it did. This chip is how you find them again.
+	if (status === 'discarded') {
+		return items.filter((m) => m.discarded)
 	}
 	return items.filter((m) => m.status === status)
 }
@@ -185,6 +214,15 @@ const failureNotice = (message: Message): MessageNotice | null => {
  * status badge alone says *what* happened, not whether it needs you.
  * @param message the ledger row
  */
+// Info, never warning: the row is settled, and re-raising the alarm on something
+// the user has already answered is how a notice area stops being read.
+const discardedNotice = (message: Message): MessageNotice | null => message.discarded
+	? {
+		type: 'info',
+		text: 'You discarded this message, so it no longer counts as needing attention. Its record is kept, which is also what stops the email being ingested again.',
+	}
+	: null
+
 const outcomeNotice = (message: Message): MessageNotice | null => {
 	switch (message.status) {
 	case 'related':
@@ -215,7 +253,10 @@ const outcomeNotice = (message: Message): MessageNotice | null => {
  * @param created the bookings this message produced (see bookingsFromMessage)
  */
 export const messageNotices = (message: Message, created: Booking[] = []): MessageNotice[] => {
-	const notices = [failureNotice(message), outcomeNotice(message)]
+	// The discard sits directly after the outcome it answers: the failure is still
+	// described in full (that is what prompt tuning reads), and this says what the
+	// user decided about it.
+	const notices = [failureNotice(message), outcomeNotice(message), discardedNotice(message)]
 
 	// Read off the booking this run produced, not off the message: a possible
 	// duplicate is a relation between bookings, and the message is only where it

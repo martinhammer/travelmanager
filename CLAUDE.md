@@ -83,7 +83,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   duplicate-detection candidate query)
   + `Version2100Date2026090100…` (adds `bookings.possible_duplicate_of`)
   + `Version2200Date2026090200…` / `…2026090210…` (replaces it with
-  `bookings.duplicate_group_id`: convert, then drop).
+  `bookings.duplicate_group_id`: convert, then drop)
+  + `Version2300Date2026091700…` (adds `messages.discarded`)
+  + `Version2400Date2026091800…` / `…2026091810…` (renames it from the
+  `dismissed` the 1.17.0 build shipped for a few hours: copy, then drop).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -98,7 +101,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `ExtractionIssue::REASON_*` slugs from the last attempt (the branchable form of
   what `error` says in prose; cleared on retry), `related_booking_ids` =
   comma-separated ids of the bookings a `related` email matched but did not touch
-  (same rationale; cleared on retry), `attempts` counts extraction runs. Holds
+  (same rationale; cleared on retry), `attempts` counts extraction runs,
+  **`discarded`** is the user's own decision that the row is not worth keeping
+  open (see §3 — cleared on retry, and the only column here a user writes). Holds
   `subject`, `sender` (display form of the From header — grid metadata only,
   never a dedup or classification input; null on rows ingested before it was
   captured, since the envelope is not retained and cannot be backfilled),
@@ -575,6 +580,50 @@ code follows the overrides.
   `failure_kind = provider` (transport/timeout, where retrying verbatim usually
   works) is a deliberate later step. `attempts` is already counted so that
   bound exists when it lands.
+- **A message has two axes too: what the pipeline saw, and what the user decided**
+  (2026-09-17, app version 1.17.0). `messages.status` stays the pipeline's and is
+  written only by it; **`messages.discarded`** is the user's and is written only
+  by an explicit action (`POST`/`DELETE /api/messages/{id}/discard` →
+  `IngestionService::discardMessage`). The attention counter is now
+  `unresolved(m) && !m.discarded`.
+  **Why:** `failed`/`dropped` is a good bucket for "the app got no booking out of
+  an email that looked like it had one", but `dropped` covers both *the model got
+  it wrong* and *the email genuinely carries nothing a booking needs* — a real
+  itinerary email with a reference, an airline and no departure time is refused
+  correctly, and refused again on every retry. Such a row sat in the counter
+  permanently, which is how a counter gets ignored. Retry answers the first case;
+  this answers the second. Consequences:
+  - **Never flattened into `status`.** A discarded row still has to say *why*
+    nothing was extracted — that text is what prompt tuning reads — so the
+    diagnosis and the decision cannot share a column. Same reasoning as
+    `bookings.status` vs `review_state`, and the same mistake avoided.
+  - **Not a delete**, and softer than a booking's discard in exactly one way:
+    the row is the dedup key, so removing it would have the next mailbox read
+    ingest the same email into the same dead end. It is also what a retry needs
+    if the prompt improves later. The toast and the row's notice both say so, so
+    "keep a copy, stop asking" reads as deliberate rather than half-finished.
+  - **Discard / Restore, not a word of its own.** A booking already uses both
+    for this idea and discarding is soft there too, so the vocabulary is learned
+    once. **Archive was considered and rejected**: on a booking it means the
+    travel happened and is done with, and a dead-end extraction was never
+    completed work — overloading it would have made both weaker. `Restore` is
+    reused without that worry, since it means only "the way back".
+  - **Both axes show, as on the Bookings grid**: the status badge keeps its
+    wording (the diagnosis, and what prompt tuning reads) and a second
+    **Discarded** lozenge carries the decision. The amber leaves with it — amber
+    means "this wants something from you" — and the row mutes (`tm-muted`, the
+    class discarded bookings already use) rather than hiding, because the ledger
+    records what happened.
+  - **`unresolved()` is deliberately not `needsAttention()`.** It tests the
+    status alone, so it stays true after a discard — otherwise the button that
+    undoes the action would disappear along with the action. It is also what
+    keeps the button off rows that never asked for anything.
+  - **Discarded rows stay in every other filter**, including their own status,
+    plus a **Discarded** chip so one can be found again. Discarding changes what
+    the app asks of you, not what it did.
+  - **A retry clears it**, because re-running is how you say you think it can work
+    after all — and that attempt's outcome is unknown, so a failure the user has
+    not seen yet must be able to ask again.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -685,6 +734,13 @@ debug panel for iterating without waiting for cron:
   Copy button. `Llm/ProviderInfo` + `ILlmService::describeProvider()` +
   `src/LlmInfo.vue`, shared by both panels. No migration, no endpoint, no
   version bump. See §3.
+- ✅ **Messages can be discarded** (2026-09-17, app version 1.17.0; renamed from
+  `dismissed` in 1.17.1 — see the gotcha in §7 about why that took two more
+  migrations rather than an edit):
+  `messages.discarded` + `Version2300Date20260917000000…`, a Discard / Restore
+  button beside Retry, a Discarded filter chip and lozenge, and an attention
+  counter that respects both. See §3 for why a correct refusal needed
+  an answer that is not a retry.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1179,6 +1235,21 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
 - **Settings registration** is via `info.xml` `<settings>` (admin/admin-section/
   personal/personal-section) and `<background-jobs>`. **Bump the app version** when
   adding settings so Nextcloud re-registers them.
+- **A shipped migration is immutable — `select('*')` makes a stale column fatal.**
+  `messages.dismissed` was renamed to `discarded` hours after it was written, and
+  editing `Version2300` in place was wrong for both halves of the change: an
+  instance that already ran it has `installed_version` at 1.17.0 and never runs it
+  again, so it kept a `dismissed` column *and* never got a `discarded` one. That
+  is not cosmetic. Every mapper here does `select('*')` + `findEntities`, and
+  `Entity::fromRow` calls a setter per **column**, so a column with no matching
+  entity property throws `BadFunctionCallException` — `GET /api/messages` returned
+  500, `Promise.all` in `store.ts::reload` rejected, and the whole app showed
+  "Could not load travel data" with an empty calendar. The symptom names no
+  column, so recognise the shape: one endpoint 500s, the others are fine, and the
+  entity was edited recently. Fix is the `Version2200` pattern — add-and-copy,
+  then drop, in two classes, because the schema step runs before the data step —
+  plus a version bump, since `installed_version` is what decides whether anything
+  runs at all.
 - **Only bump the app version when an upgrade has to *run* something**: a
   migration, or a settings/job registration change that needs `info.xml` re-read.
   Ordinary work during internal testing — prompt wording, frontend, services,

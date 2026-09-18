@@ -160,10 +160,42 @@ class IngestionService {
 		// to replace.
 		$record->setIssueReasons(null);
 		$record->setRelatedBookingIds(null);
+		// Re-running is how the user says they think it can work after all, so a
+		// discard cannot survive it: the outcome of this attempt is unknown, and a
+		// failure the user has not seen yet must be able to ask for attention.
+		$record->setDiscarded(false);
 		$record->setProcessedAt($this->timeFactory->getDateTime());
 		$this->processedMessageMapper->update($record);
 
 		$this->scheduleExtraction($record, $this->describeRecord($record));
+	}
+
+	/**
+	 * Record, or take back, the user's decision to discard a ledger row.
+	 *
+	 * The counterpart of a booking's review state: `status` keeps saying what the
+	 * pipeline observed, and this says whether the user still wants to be asked
+	 * about it. Not a delete — the row is the dedup key, so removing it would only
+	 * have the next mailbox read ingest the same email into the same dead end.
+	 *
+	 * Allowed on any row rather than only the failed ones. It is a no-op for the
+	 * attention count anywhere else, and the alternative is a rule the API has to
+	 * explain and the UI has to duplicate; the button is offered only where it
+	 * does something.
+	 */
+	public function discardMessage(string $userId, int $id, bool $discarded): ProcessedMessage {
+		$record = $this->processedMessageMapper->find($id, $userId);
+		$record->setDiscarded($discarded);
+		$this->processedMessageMapper->update($record);
+
+		// persist, not schedule: this writes stored state and starts nothing.
+		$this->activityLog->info(
+			$userId,
+			IngestionLog::STEP_PERSIST,
+			($discarded ? 'Discarded ' : 'Restored ') . $this->describeRecord($record),
+		);
+
+		return $record;
 	}
 
 	/**

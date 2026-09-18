@@ -5,7 +5,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
-import { fetchMessageBody, retryMessage } from './api'
+import { discardMessage, fetchMessageBody, retryMessage } from './api'
 import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import {
 	type MessageSort,
@@ -16,6 +16,7 @@ import {
 	messageNotices,
 	messageStatusLabel,
 	retryable,
+	unresolved,
 	sortMessages,
 } from './messages'
 import { isOpen, openDetail, route } from './navigation'
@@ -94,6 +95,10 @@ const filters: { key: string, label: string }[] = [
 	{ key: 'related', label: t('travelmanager', 'Related') },
 	{ key: 'no_booking', label: t('travelmanager', 'No booking') },
 	{ key: 'processing', label: t('travelmanager', 'Waiting') },
+	// Last, and outside the status run above it: these rows keep whatever status
+	// they had. The chip is how you find one again, so that discarding is
+	// undoable rather than a one-way trip.
+	{ key: 'discarded', label: t('travelmanager', 'Discarded') },
 ]
 
 const copyText = async (text: string) => {
@@ -138,6 +143,21 @@ const onRetry = async (id: number) => {
 		showError(t('travelmanager', 'Could not re-run the extraction'))
 	}
 }
+
+const onDiscard = async (id: number, discarded: boolean) => {
+	try {
+		await discardMessage(id, discarded)
+		// Names where it went, because the row does not move: with the default
+		// "All" filter it stays exactly where it was, only quieter, and a toast
+		// that said merely "Discarded" would leave the user looking for it.
+		showSuccess(discarded
+			? t('travelmanager', 'Discarded — it no longer counts as needing attention, and stays under the Discarded filter')
+			: t('travelmanager', 'This message counts as needing attention again'))
+		await reload()
+	} catch (e) {
+		showError(t('travelmanager', 'Could not update this message'))
+	}
+}
 </script>
 
 <template>
@@ -179,7 +199,10 @@ const onRetry = async (id: number) => {
 		<ol v-if="visible.length > 0" ref="rows" class="tm-rows">
 			<li v-for="item in visible" :key="item.id">
 				<details :data-message="item.id"
-					:class="['tm-row', { 'tm-row-selected': isOpen('message', item.id) }]">
+					:class="['tm-row', {
+						'tm-row-selected': isOpen('message', item.id),
+						'tm-muted': item.discarded,
+					}]">
 					<summary :class="['tm-row-summary', $style.columns]">
 						<svg class="tm-chevron"
 							viewBox="0 0 24 24"
@@ -202,10 +225,20 @@ const onRetry = async (id: number) => {
 						<span class="tm-cell-meta">{{ formatTimestamp(item.sentAt) }}</span>
 						<span class="tm-cell-meta">{{ formatTimestamp(item.processedAt) }}</span>
 						<span class="tm-cell-meta">{{ item.attempts }}</span>
-						<span :class="['tm-badge', 'tm-cell-status', {
-							'tm-badge-warning': item.status === 'failed' || item.status === 'dropped',
-						}]">
-							{{ messageStatusLabel(item.status) }}
+						<!-- Both axes, as the Bookings grid shows its own two: the status
+						     keeps saying what the pipeline observed — that is the diagnosis,
+						     and what prompt tuning reads — while Discarded says what the user
+						     decided. The amber goes with the decision, because amber means
+						     "this wants something from you" and this row no longer does. -->
+						<span class="tm-badges tm-cell-status">
+							<span :class="['tm-badge', {
+								'tm-badge-warning': unresolved(item) && !item.discarded,
+							}]">
+								{{ messageStatusLabel(item.status) }}
+							</span>
+							<span v-if="item.discarded" class="tm-badge">
+								{{ t('travelmanager', 'Discarded') }}
+							</span>
 						</span>
 					</summary>
 					<div class="tm-row-body">
@@ -260,6 +293,23 @@ const onRetry = async (id: number) => {
 								:disabled="!retryable(item)"
 								@click="onRetry(item.id)">
 								{{ t('travelmanager', 'Retry extraction') }}
+							</NcButton>
+							<!-- The other answer to a failure, for the rows a retry cannot
+							     fix: an email genuinely about travel that carries nothing a
+							     booking needs will be refused again however often it is
+							     re-run. Discard/Restore rather than a word of its own — a
+							     booking already uses both for the same idea, and discarding
+							     is soft there too. Offered only where it does something — a
+							     row that never asked for attention has nothing to discard —
+							     but it must stay offered *after* the click, or the control
+							     that undoes the action would vanish with the action. Hence
+							     `unresolved`, which is about the status alone. -->
+							<NcButton v-if="unresolved(item)"
+								variant="secondary"
+								@click="onDiscard(item.id, !item.discarded)">
+								{{ item.discarded
+									? t('travelmanager', 'Restore')
+									: t('travelmanager', 'Discard') }}
 							</NcButton>
 							<span v-if="!item.canRetry" class="tm-meta">
 								{{ t('travelmanager', 'The email text is no longer retained, so this cannot be re-run.') }}

@@ -49,6 +49,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	lastResponse: null,
 	attempts: 1,
 	canRetry: true,
+	discarded: false,
 	sentAt: null,
 	processedAt: null,
 	...overrides,

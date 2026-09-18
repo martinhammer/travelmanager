@@ -6,8 +6,10 @@ import {
 	messageDetails,
 	messageNotices,
 	messageStatusLabel,
+	filterMessagesByStatus,
 	needsAttention,
 	retryable,
+	unresolved,
 	sortMessages,
 } from '../../src/messages'
 
@@ -32,6 +34,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	lastResponse: null,
 	attempts: 1,
 	canRetry: true,
+	discarded: false,
 	sentAt: null,
 	processedAt: null,
 	...overrides,
@@ -48,6 +51,37 @@ describe('needsAttention', () => {
 			message({ id: 5, status: 'processing' }),
 		]
 		expect(needsAttention(items).map((m) => m.id)).toEqual([2, 3])
+	})
+
+	it('drops a row the user has discarded, whatever the pipeline said about it', () => {
+		const items = [
+			message({ id: 1, status: 'dropped' }),
+			// Correctly refused — the email is about travel and carries no departure
+			// time, so re-running it will refuse it again. Nothing left to ask.
+			message({ id: 2, status: 'dropped', discarded: true }),
+			message({ id: 3, status: 'failed', discarded: true }),
+		]
+		expect(needsAttention(items).map((m) => m.id)).toEqual([1])
+	})
+})
+
+describe('unresolved', () => {
+	it('stays true after a discard, so the undo control survives the action', () => {
+		expect(unresolved(message({ status: 'dropped', discarded: true }))).toBe(true)
+	})
+
+	it('is false for a row that never asked for anything', () => {
+		expect(unresolved(message({ status: 'processed' }))).toBe(false)
+		expect(unresolved(message({ status: 'no_booking' }))).toBe(false)
+	})
+})
+
+describe('filterMessagesByStatus', () => {
+	it('keeps a discarded row under its own status, since the ledger records what happened', () => {
+		const items = [message({ id: 1, status: 'dropped', discarded: true })]
+		expect(filterMessagesByStatus(items, 'dropped').map((m) => m.id)).toEqual([1])
+		expect(filterMessagesByStatus(items, 'attention')).toEqual([])
+		expect(filterMessagesByStatus(items, 'discarded').map((m) => m.id)).toEqual([1])
 	})
 })
 

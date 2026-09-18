@@ -162,6 +162,12 @@ export interface Message {
 	attempts: number
 	/** False once the retained body has been dropped — no re-extraction possible. */
 	canRetry: boolean
+	/**
+	 * The user discarded this row, so it no longer asks for attention — the same
+	 * word a booking uses, meaning the same thing. Orthogonal to `status`, which
+	 * keeps saying what the pipeline observed. Cleared by a retry.
+	 */
+	discarded: boolean
 	sentAt: string | null
 	processedAt: string | null
 }
@@ -260,6 +266,19 @@ export const fetchMessageBody = async (id: number): Promise<string | null> => {
  */
 export const retryMessage = async (id: number): Promise<Message> => {
 	const res = await axios.post(base(`messages/${id}/retry`), {})
+	return unwrap(res.data)
+}
+
+/**
+ * Discard a ledger row, or restore it — for the failures a retry cannot fix.
+ * The row itself is kept either way: it is the dedup key, so deleting it would
+ * only have the next mailbox read ingest the same email again.
+ * @param id the message to discard
+ * @param discarded true to discard, false to have it count again
+ */
+export const discardMessage = async (id: number, discarded: boolean): Promise<Message> => {
+	const url = base(`messages/${id}/discard`)
+	const res = discarded ? await axios.post(url, {}) : await axios.delete(url)
 	return unwrap(res.data)
 }
 

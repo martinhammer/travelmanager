@@ -41,6 +41,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setLastResponse(?string $lastResponse)
  * @method \DateTime|null getProcessedAt()
  * @method void setProcessedAt(?\DateTime $processedAt)
+ * @method bool getDiscarded()
+ * @method void setDiscarded(bool $discarded)
  *
  * @psalm-import-type TravelManagerMessage from \OCA\TravelManager\ResponseDefinitions
  *
@@ -102,6 +104,15 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 	/** Raw model output from the last attempt, truncated — the thing you read to diagnose a failure. */
 	protected ?string $lastResponse = null;
 	protected ?\DateTime $processedAt = null;
+	/**
+	 * The user's own decision, and the only column here they write: this row is
+	 * not worth keeping open and should stop asking for attention — the same word
+	 * a booking uses, meaning the same thing. Orthogonal to `status`, which
+	 * stays what the pipeline observed — a discarded row still says *why* nothing
+	 * was extracted, which is what prompt tuning reads. Cleared by a retry, since
+	 * re-running is how you say you think it can work after all.
+	 */
+	protected bool $discarded = false;
 
 	public function __construct() {
 		$this->addType('uidValidity', 'integer');
@@ -109,6 +120,7 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 		$this->addType('attempts', 'integer');
 		$this->addType('sentAt', 'datetime');
 		$this->addType('processedAt', 'datetime');
+		$this->addType('discarded', 'boolean');
 	}
 
 	/** A retry needs the source text; without it the only route back is IMAP. */
@@ -140,6 +152,7 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 			// The body itself is deliberately not serialised — it is bulky and
 			// the list view only needs to know whether a retry is possible.
 			'canRetry' => $this->canRetry(),
+			'discarded' => $this->discarded,
 			'sentAt' => $this->sentAt?->format(\DateTimeInterface::ATOM),
 			'processedAt' => $this->processedAt?->format(\DateTimeInterface::ATOM),
 		];

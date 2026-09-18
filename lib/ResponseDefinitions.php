@@ -42,6 +42,7 @@ namespace OCA\TravelManager;
  *     lastResponse: string|null,
  *     attempts: int,
  *     canRetry: bool,
+ *     discarded: bool,
  *     sentAt: string|null,
  *     processedAt: string|null,
  * }
