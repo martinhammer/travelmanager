@@ -86,7 +86,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `bookings.duplicate_group_id`: convert, then drop)
   + `Version2300Date2026091700…` (adds `messages.discarded`)
   + `Version2400Date2026091800…` / `…2026091810…` (renames it from the
-  `dismissed` the 1.17.0 build shipped for a few hours: copy, then drop).
+  `dismissed` the 1.17.0 build shipped for a few hours: copy, then drop)
+  + `Version2500Date2026091800…` (no schema change: moves the global feature flag
+  off the server's reserved `enabled` app-config key and repairs the row — see
+  the gotcha in §7, which is the whole reason it exists).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
@@ -1221,6 +1224,42 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   framework false-positives; fix real issues instead of baselining them.
 - **`doctrine/dbal`** is a dev-dependency purely so Psalm can resolve the
   `Doctrine\DBAL\Schema\Table` type that `ISchemaWrapper` returns in migrations.
+- **`enabled` is the server's app-config key, not yours — and taking it down
+  takes the whole instance down.** Nextcloud records whether an app is enabled at
+  `oc_appconfig(<app>, 'enabled')`, as the string `yes` with declared type
+  **`VALUE_MIXED`**. MIXED is permissive on purpose: `OC\AppConfig::setTypedValue`
+  skips its type-conflict check entirely when the stored type is MIXED, so a
+  `setValueBool(APP_ID, 'enabled', …)` **succeeds silently**, rewriting both the
+  value (`yes` → `1`) and the type (MIXED → `VALUE_BOOL`). Nothing fails at that
+  moment — the settings save returns 200.
+  The next request is the one that dies. `getAppInstalledVersions()` reads every
+  app's `enabled` as a **string**, which against a BOOL-typed row throws
+  `AppConfigTypeConflictException`, and it is reached from
+  `Memcache\Factory::getGlobalPrefix()` while building `OC\User\Manager` — i.e.
+  during **bootstrap**. So it is uncaught on every request, web *and* `occ`. One
+  app's wrong key name is a total instance outage, and since `occ status` fatals
+  too, a dev container can mistake it for an uninstalled server and re-run
+  `maintenance:install`, overwriting `config.php` (which regenerates `secret` and
+  `passwordsalt`, so every `ICredentialsManager` value — our IMAP password
+  included — becomes undecryptable). That is the full blast radius of one key name.
+  Hence `ConfigService::APP_PIPELINE_ENABLED = 'pipeline_enabled'`, and
+  `Version2500Date20260918000000` repairs the row on instances that already saved
+  the panel. It writes SQL directly because the row's *type* must change back and
+  `updateType()` is internal to `OC\AppConfig` — deliberately not on `IAppConfig`.
+  **Treat `enabled`, `installed_version` and `types` as core's** and namespace any
+  app-level key that could collide. The per-user `USER_ENABLED = 'enabled'` is
+  *not* affected: `oc_preferences` is a different namespace with no reserved
+  meaning for it, and it is read and written as a string throughout.
+- **A credential that will not decrypt must not take down the screen that fixes
+  it.** `ICredentialsManager` decrypts with the instance's `secret`; if that is
+  ever regenerated, every stored credential throws `HMAC does not match` from
+  `Crypto::decrypt` on read. Uncaught, that reached `PersonalSettings::getForm()`
+  via `hasImapPassword()` and 500'd the panel — locking the user out of the only
+  page where the password can be re-entered, so the app could never recover on its
+  own. `getImapPassword()` therefore catches and returns null: an unreadable
+  password *is* an absent one, and absent is a state the UI already handles. It
+  does not delete the row (a getter that writes is a trap); the next save
+  overwrites it. Apply the same rule to any future secret.
 - **App config:** use `IAppConfig` (`getValueBool/Int`, `setValue…`) —
   `IConfig::getAppValue/setAppValue` are **deprecated** and Psalm flags them.
   **User config uses `OCP\Config\IUserConfig`** (`getValueString/Int/Bool`,

@@ -9,6 +9,7 @@ use OCP\Config\IUserConfig;
 use OCP\IAppConfig;
 use OCP\IUserManager;
 use OCP\Security\ICredentialsManager;
+use Psr\Log\LoggerInterface;
 
 /**
  * Central access point for all app and per-user configuration, plus the
@@ -24,7 +25,18 @@ class ConfigService {
 	private const CREDENTIAL_KEY = Application::APP_ID . '_imap_password';
 
 	// App-level (admin) keys.
-	public const APP_ENABLED = 'enabled';
+	//
+	// NOT 'enabled': that key is reserved by the server, which records whether an
+	// app is enabled at `oc_appconfig(<app>, 'enabled')` as the string 'yes'/'no'.
+	// Writing our own flag there rewrote both the value and its declared type, and
+	// core reads every app's `enabled` as a string from
+	// `OC\AppConfig::getAppInstalledVersions()` — which runs during bootstrap, via
+	// Memcache\Factory::getGlobalPrefix() building OC\User\Manager. A bool-typed
+	// row therefore threw AppConfigTypeConflictException on *every* request, web
+	// and occ alike, taking the whole instance down hard enough that the container
+	// entrypoint mistook it for an uninstalled server. See
+	// Version2500Date20260918000000 for the repair.
+	public const APP_PIPELINE_ENABLED = 'pipeline_enabled';
 	public const APP_RATE_LIMIT_PER_RUN = 'rate_limit_per_run';
 	public const APP_LOCAL_CONCURRENCY = 'local_concurrency';
 
@@ -44,6 +56,7 @@ class ConfigService {
 		private IUserConfig $userConfig,
 		private IUserManager $userManager,
 		private ICredentialsManager $credentialsManager,
+		private LoggerInterface $logger,
 	) {
 	}
 
@@ -51,11 +64,11 @@ class ConfigService {
 
 	/** Global feature flag — the whole pipeline is off unless this is true. */
 	public function isFeatureEnabled(): bool {
-		return $this->appConfig->getValueBool(Application::APP_ID, self::APP_ENABLED, false);
+		return $this->appConfig->getValueBool(Application::APP_ID, self::APP_PIPELINE_ENABLED, false);
 	}
 
 	public function setFeatureEnabled(bool $enabled): void {
-		$this->appConfig->setValueBool(Application::APP_ID, self::APP_ENABLED, $enabled);
+		$this->appConfig->setValueBool(Application::APP_ID, self::APP_PIPELINE_ENABLED, $enabled);
 	}
 
 	/** Max messages to enqueue per user per run (throttle external/local load). */
@@ -139,9 +152,40 @@ class ConfigService {
 		$this->credentialsManager->store($userId, self::CREDENTIAL_KEY, $password);
 	}
 
+	/**
+	 * The stored app password, or null when there is not a usable one.
+	 *
+	 * "Not usable" includes a credential that will not decrypt. `ICredentialsManager`
+	 * decrypts with the instance's `secret`, so if that is ever regenerated — a
+	 * botched restore, a re-run installer — every stored credential becomes
+	 * undecryptable and `Crypto::decrypt` throws `HMAC does not match`. Left
+	 * uncaught that throw reaches `PersonalSettings::getForm()` through
+	 * `hasImapPassword()`, and the panel 500s: the one screen the user needs in
+	 * order to re-enter the password is the one the unreadable password takes
+	 * away. Treating it as absent is both honest — we have no password we can use
+	 * — and the state the UI already knows how to offer a fix for, since saving
+	 * overwrites the unreadable value.
+	 *
+	 * Deliberately *not* deleted here. A getter that writes is a trap for the next
+	 * reader, and the row costs nothing while it waits to be overwritten.
+	 */
 	public function getImapPassword(string $userId): ?string {
-		/** @var string|null $value */
-		$value = $this->credentialsManager->retrieve($userId, self::CREDENTIAL_KEY);
+		try {
+			/** @var string|null $value */
+			$value = $this->credentialsManager->retrieve($userId, self::CREDENTIAL_KEY);
+		} catch (\Throwable $e) {
+			// Warning, not error: nothing is broken that re-entering the password
+			// will not fix. Logged at all because a whole instance losing its
+			// `secret` is worth one line of explanation in the log — otherwise the
+			// password merely appears to have unset itself.
+			$this->logger->warning(
+				'Travel Manager: stored IMAP password for ' . $userId
+				. ' could not be decrypted and is being treated as unset'
+				. ' (the instance secret may have changed); the user must re-enter it',
+				['exception' => $e],
+			);
+			return null;
+		}
 		return ($value === null || $value === '') ? null : $value;
 	}
 
