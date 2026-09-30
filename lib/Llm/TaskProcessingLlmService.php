@@ -7,6 +7,7 @@ namespace OCA\TravelManager\Llm;
 use OCP\Exceptions\AppConfigUnknownKeyException;
 use OCP\IAppConfig;
 use OCP\TaskProcessing\Exception\Exception as TaskProcessingException;
+use OCP\TaskProcessing\Exception\NotFoundException;
 use OCP\TaskProcessing\IManager;
 use OCP\TaskProcessing\Task;
 use OCP\TaskProcessing\TaskTypes\TextToText;
@@ -142,5 +143,17 @@ class TaskProcessingLlmService implements ILlmService {
 
 	public function readOutputText(array $output): ?string {
 		return isset($output['output']) && is_string($output['output']) ? $output['output'] : null;
+	}
+
+	public function findTask(int $taskId): ?Task {
+		try {
+			return $this->taskProcessingManager->getTask($taskId);
+		} catch (NotFoundException) {
+			// Caught before its parent class below: this is the one answer that
+			// means "gone", and it must not be confused with "could not ask".
+			return null;
+		} catch (TaskProcessingException $e) {
+			throw new \RuntimeException('Could not look up task #' . $taskId . ': ' . $e->getMessage(), 0, $e);
+		}
 	}
 }

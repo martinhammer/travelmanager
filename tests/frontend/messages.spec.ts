@@ -49,6 +49,8 @@ describe('needsAttention', () => {
 			// A newsletter really had no booking in it — nothing for a human to do.
 			message({ id: 4, status: 'no_booking' }),
 			message({ id: 5, status: 'processing' }),
+			// Waiting behind the extraction limits is the system working, not a fault.
+			message({ id: 6, status: 'queued' }),
 		]
 		expect(needsAttention(items).map((m) => m.id)).toEqual([2, 3])
 	})
@@ -83,6 +85,17 @@ describe('filterMessagesByStatus', () => {
 		expect(filterMessagesByStatus(items, 'attention')).toEqual([])
 		expect(filterMessagesByStatus(items, 'discarded').map((m) => m.id)).toEqual([1])
 	})
+
+	it('puts queued and sent under one Waiting chip — neither has been answered yet', () => {
+		const items = [
+			message({ id: 1, status: 'queued' }),
+			message({ id: 2, status: 'processing' }),
+			message({ id: 3, status: 'processed' }),
+		]
+		expect(filterMessagesByStatus(items, 'waiting').map((m) => m.id)).toEqual([1, 2])
+		// The raw statuses still filter on their own.
+		expect(filterMessagesByStatus(items, 'queued').map((m) => m.id)).toEqual([1])
+	})
 })
 
 describe('retryable', () => {
@@ -98,11 +111,22 @@ describe('retryable', () => {
 		// vanish mid-run — canRetry drives visibility, retryable drives enablement.
 		expect(inFlight.canRetry).toBe(true)
 	})
+
+	it('does not offer a retry while the message is queued either', () => {
+		// It is already on its way; a second attempt would put two tasks in flight
+		// for one email, and the backend refuses it.
+		expect(retryable(message({ status: 'queued', canRetry: true }))).toBe(false)
+	})
 })
 
 describe('messageStatusLabel', () => {
 	it('words the two zero-booking outcomes differently', () => {
 		expect(messageStatusLabel('no_booking')).not.toBe(messageStatusLabel('dropped'))
+	})
+
+	it('tells queued apart from sent', () => {
+		expect(messageStatusLabel('queued')).toBe('Queued')
+		expect(messageStatusLabel('queued')).not.toBe(messageStatusLabel('processing'))
 	})
 
 	it('falls back to the raw status it does not know', () => {
@@ -111,6 +135,13 @@ describe('messageStatusLabel', () => {
 })
 
 describe('messageNotices', () => {
+	it('explains why a queued message is waiting, so it does not read as stuck', () => {
+		const notices = messageNotices(message({ status: 'queued', attempts: 0 }))
+		expect(notices).toHaveLength(1)
+		expect(notices[0].type).toBe('info')
+		expect(notices[0].text).toContain('waiting to be sent to the model')
+	})
+
 	it('explains a related row as information, not a fault', () => {
 		const [notice] = messageNotices(message({ status: 'related' }))
 		expect(notice.type).toBe('info')

@@ -81,8 +81,9 @@ namespace OCA\TravelManager;
  *
  * @psalm-type TravelManagerAdminSettings = array{
  *     enabled: bool,
- *     rateLimitPerRun: int,
- *     localConcurrency: int,
+ *     fetchPerRun: int,
+ *     maxInFlight: int,
+ *     maxPerHour: int,
  * }
  *
  * @psalm-type TravelManagerConnectionTest = array{

@@ -35,14 +35,29 @@ const onSave = async () => {
 			{{ t('travelmanager', 'Enable the Travel Manager extraction pipeline') }}
 		</NcCheckboxRadioSwitch>
 
-		<NcTextField v-model="form.rateLimitPerRun"
+		<!-- Reading and sending are separate steps, so these are separate settings:
+		     the first decides how much mail is stored, the other two how fast it
+		     reaches the model. Each helper text says what the setting cannot do as
+		     well — the old "concurrent extractions" field promised a bound no app
+		     can enforce, and a setting that overpromises is worse than none. -->
+		<NcTextField v-model="form.fetchPerRun"
 			:class="$style.field"
 			type="number"
-			:label="t('travelmanager', 'Max messages processed per user per run')" />
-		<NcTextField v-model="form.localConcurrency"
+			min="1"
+			:label="t('travelmanager', 'Messages read from each mailbox per run')"
+			:helper-text="t('travelmanager', 'How many of the newest messages each mailbox read looks at. Reading only stores them; the two limits below decide when they reach the model.')" />
+		<NcTextField v-model="form.maxInFlight"
 			:class="$style.field"
 			type="number"
-			:label="t('travelmanager', 'Max concurrent local-model extractions')" />
+			min="1"
+			:label="t('travelmanager', 'Extractions waiting on the model at once')"
+			:helper-text="t('travelmanager', 'Across all users. Keeps a large backlog from filling the AI queue other apps share. How many actually run in parallel is set by the server\'s AI workers, not here.')" />
+		<NcTextField v-model="form.maxPerHour"
+			:class="$style.field"
+			type="number"
+			min="0"
+			:label="t('travelmanager', 'Extractions started per hour')"
+			:helper-text="t('travelmanager', 'Across all users; 0 means no limit. Keep it below your AI provider\'s rate limit to avoid \'Too many requests\' failures.')" />
 
 		<div :class="$style.actions">
 			<NcButton variant="primary" :disabled="saving" @click="onSave">

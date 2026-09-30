@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace OCA\TravelManager\Listener;
 
 use OCA\TravelManager\AppInfo\Application;
+use OCA\TravelManager\Service\ConfigService;
+use OCA\TravelManager\Service\ExtractionQueue;
 use OCA\TravelManager\Service\ExtractionResultHandler;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use OCP\TaskProcessing\Events\TaskFailedEvent;
+use Psr\Log\LoggerInterface;
 
 /**
  * Records Task Processing failures against the source message (V5).
@@ -19,6 +22,9 @@ use OCP\TaskProcessing\Events\TaskFailedEvent;
 class TaskFailedListener implements IEventListener {
 	public function __construct(
 		private ExtractionResultHandler $handler,
+		private ExtractionQueue $queue,
+		private ConfigService $configService,
+		private LoggerInterface $logger,
 	) {
 	}
 
@@ -34,5 +40,24 @@ class TaskFailedListener implements IEventListener {
 			return;
 		}
 		$this->handler->handleFailure($task, $event->getErrorMessage());
+		$this->topUp();
+	}
+
+	/**
+	 * A finished task frees a slot, so this is when the next queued message
+	 * should go — not up to fifteen minutes later on the dispatcher's tick. Gated
+	 * on the feature flag like all automatic work; never allowed to throw, since
+	 * the result above is already recorded and a pump failure must not undo that
+	 * in the caller's eyes.
+	 */
+	private function topUp(): void {
+		if (!$this->configService->isFeatureEnabled()) {
+			return;
+		}
+		try {
+			$this->queue->pump();
+		} catch (\Throwable $e) {
+			$this->logger->warning('Travel Manager: could not send queued messages: ' . $e->getMessage(), ['exception' => $e]);
+		}
 	}
 }

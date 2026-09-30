@@ -1497,7 +1497,8 @@
         "/ocs/v2.php/apps/travelmanager/api/dev/ingest": {
             "post": {
                 "operationId": "dev-ingest",
-                "summary": "Read the mailbox now and schedule extraction for any new messages",
+                "summary": "Read the mailbox now and queue any new messages for extraction",
+                "description": "Queued messages are sent to the model straight away as far as the extraction limits allow; the rest wait their turn.",
                 "tags": [
                     "dev"
                 ],
@@ -1523,7 +1524,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Number of newly scheduled messages returned",
+                        "description": "Number of newly queued messages returned",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2148,7 +2149,7 @@
             "post": {
                 "operationId": "message-retry",
                 "summary": "Re-run the extraction for a message",
-                "description": "Uses the retained email body, so it neither re-reads the mailbox nor is blocked by the dedup ledger. The model answers asynchronously, so the result appears once the task completes.",
+                "description": "Uses the retained email body, so it neither re-reads the mailbox nor is blocked by the dedup ledger. The message is queued like any other: it goes to the model at once when the extraction limits allow, and waits its turn when they do not. The model answers asynchronously, so the result appears once the task completes.",
                 "tags": [
                     "message"
                 ],
@@ -2184,7 +2185,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Extraction re-scheduled",
+                        "description": "Extraction queued",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2242,7 +2243,7 @@
                         }
                     },
                     "400": {
-                        "description": "The email body was not retained, so it cannot be re-extracted",
+                        "description": "The email body was not retained, or the message is already waiting for the model",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3453,7 +3454,7 @@
     "tags": [
         {
             "name": "admin",
-            "description": "Admin-only settings: global feature flag and LLM throttling."
+            "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, and the two limits on how hard extraction leans on the model."
         },
         {
             "name": "dev",

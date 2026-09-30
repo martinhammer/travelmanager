@@ -94,7 +94,7 @@ const filters: { key: string, label: string }[] = [
 	{ key: 'processed', label: t('travelmanager', 'Extracted') },
 	{ key: 'related', label: t('travelmanager', 'Related') },
 	{ key: 'no_booking', label: t('travelmanager', 'No booking') },
-	{ key: 'processing', label: t('travelmanager', 'Waiting') },
+	{ key: 'waiting', label: t('travelmanager', 'Waiting') },
 	// Last, and outside the status run above it: these rows keep whatever status
 	// they had. The chip is how you find one again, so that discarding is
 	// undoable rather than a one-way trip.

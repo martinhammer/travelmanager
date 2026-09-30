@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Llm;
 
+use OCP\TaskProcessing\Task;
+
 /**
  * Abstraction over LLM access. The MVP has a single implementation backed by
  * Nextcloud's Task Processing API (platform strategy); the provider is whatever
@@ -44,4 +46,16 @@ interface ILlmService {
 	 * @param array<array-key, mixed> $output
 	 */
 	public function readOutputText(array $output): ?string;
+
+	/**
+	 * Look up a task we scheduled, to learn what became of it when its
+	 * completion event never reached us.
+	 *
+	 * Null **only** when the platform no longer knows the task — that is the
+	 * signal a task is lost. Any other failure to ask (a database hiccup) throws:
+	 * treating "could not check" as "gone" would fail healthy work.
+	 *
+	 * @throws \RuntimeException when the platform could not be asked
+	 */
+	public function findTask(int $taskId): ?Task;
 }

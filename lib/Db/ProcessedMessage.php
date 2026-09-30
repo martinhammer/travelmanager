@@ -49,6 +49,14 @@ use OCP\AppFramework\Db\Entity;
  * @psalm-suppress PropertyNotSetInConstructor
  */
 class ProcessedMessage extends Entity implements \JsonSerializable {
+	/**
+	 * Read from the mailbox and stored, not yet sent to the model. Reading and
+	 * scheduling are separate steps so that how much mail we read never decides
+	 * how hard we lean on the provider — ExtractionQueue releases these under the
+	 * admin's in-flight cap and hourly budget.
+	 */
+	public const STATUS_QUEUED = 'queued';
+	/** Sent to the model; waiting for Task Processing to report back. */
 	public const STATUS_PROCESSING = 'processing';
 	public const STATUS_PROCESSED = 'processed';
 	public const STATUS_FAILED = 'failed';

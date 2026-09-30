@@ -108,7 +108,7 @@ const onRunNow = async () => {
 	running.value = true
 	try {
 		const res = await runIngestNow()
-		showSuccess(t('travelmanager', 'Read the mailbox: {count} new message(s) scheduled for extraction', { count: res.enqueued }))
+		showSuccess(t('travelmanager', 'Read the mailbox: {count} new message(s) queued for extraction', { count: res.enqueued }))
 	} catch (e) {
 		showError(t('travelmanager', 'Reading the mailbox failed — see the activity log below'))
 	} finally {

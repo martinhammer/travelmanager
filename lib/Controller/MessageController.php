@@ -90,15 +90,17 @@ class MessageController extends OCSController {
 	 * Re-run the extraction for a message
 	 *
 	 * Uses the retained email body, so it neither re-reads the mailbox nor is
-	 * blocked by the dedup ledger. The model answers asynchronously, so the
-	 * result appears once the task completes.
+	 * blocked by the dedup ledger. The message is queued like any other: it goes
+	 * to the model at once when the extraction limits allow, and waits its turn
+	 * when they do not. The model answers asynchronously, so the result appears
+	 * once the task completes.
 	 *
 	 * @param int $id Id of the message
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerMessage, array{}>
 	 * @throws OCSNotFoundException Message not found
-	 * @throws OCSBadRequestException The email body was not retained, so it cannot be re-extracted
+	 * @throws OCSBadRequestException The email body was not retained, or the message is already waiting for the model
 	 *
-	 * 200: Extraction re-scheduled
+	 * 200: Extraction queued
 	 * 400: Message cannot be retried
 	 * 404: Message not found
 	 */

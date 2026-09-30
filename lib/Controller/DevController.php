@@ -39,12 +39,15 @@ class DevController extends OCSController {
 	}
 
 	/**
-	 * Read the mailbox now and schedule extraction for any new messages
+	 * Read the mailbox now and queue any new messages for extraction
+	 *
+	 * Queued messages are sent to the model straight away as far as the
+	 * extraction limits allow; the rest wait their turn.
 	 *
 	 * @return DataResponse<Http::STATUS_OK, array{enqueued: int}, array{}>
 	 * @throws OCSBadRequestException Mailbox could not be read
 	 *
-	 * 200: Number of newly scheduled messages returned
+	 * 200: Number of newly queued messages returned
 	 * 400: Mailbox could not be read
 	 */
 	#[NoAdminRequired]

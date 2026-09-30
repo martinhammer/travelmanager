@@ -24,18 +24,23 @@
                 "type": "object",
                 "required": [
                     "enabled",
-                    "rateLimitPerRun",
-                    "localConcurrency"
+                    "fetchPerRun",
+                    "maxInFlight",
+                    "maxPerHour"
                 ],
                 "properties": {
                     "enabled": {
                         "type": "boolean"
                     },
-                    "rateLimitPerRun": {
+                    "fetchPerRun": {
                         "type": "integer",
                         "format": "int64"
                     },
-                    "localConcurrency": {
+                    "maxInFlight": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "maxPerHour": {
                         "type": "integer",
                         "format": "int64"
                     }
@@ -213,19 +218,26 @@
                                         "default": null,
                                         "description": "Whether the extraction pipeline is enabled instance-wide"
                                     },
-                                    "rateLimitPerRun": {
+                                    "fetchPerRun": {
                                         "type": "integer",
                                         "format": "int64",
                                         "nullable": true,
                                         "default": null,
-                                        "description": "Max messages processed per user per run"
+                                        "description": "How many of the newest messages one mailbox read looks at, per user"
                                     },
-                                    "localConcurrency": {
+                                    "maxInFlight": {
                                         "type": "integer",
                                         "format": "int64",
                                         "nullable": true,
                                         "default": null,
-                                        "description": "Max concurrent local-model extractions"
+                                        "description": "Most extractions waiting on the model at once, instance-wide (at least 1)"
+                                    },
+                                    "maxPerHour": {
+                                        "type": "integer",
+                                        "format": "int64",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Most extractions started per rolling hour, instance-wide (0 for no limit)"
                                     }
                                 }
                             }
@@ -338,7 +350,7 @@
     "tags": [
         {
             "name": "admin",
-            "description": "Admin-only settings: global feature flag and LLM throttling."
+            "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, and the two limits on how hard extraction leans on the model."
         },
         {
             "name": "dev",

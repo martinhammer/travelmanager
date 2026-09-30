@@ -366,8 +366,12 @@ export interface LlmDiagnostics {
 
 export interface AdminSettings {
 	enabled: boolean
-	rateLimitPerRun: number
-	localConcurrency: number
+	/** How many of the newest messages one mailbox read looks at, per user. */
+	fetchPerRun: number
+	/** Most extractions waiting on the model at once, instance-wide; at least 1. */
+	maxInFlight: number
+	/** Most extractions started per rolling hour, instance-wide; 0 means no limit. */
+	maxPerHour: number
 }
 
 export const saveAdminSettings = async (settings: Partial<AdminSettings>): Promise<AdminSettings> => {

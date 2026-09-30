@@ -37,8 +37,23 @@ class ConfigService {
 	// entrypoint mistook it for an uninstalled server. See
 	// Version2500Date20260918000000 for the repair.
 	public const APP_PIPELINE_ENABLED = 'pipeline_enabled';
-	public const APP_RATE_LIMIT_PER_RUN = 'rate_limit_per_run';
-	public const APP_LOCAL_CONCURRENCY = 'local_concurrency';
+	// How many recent messages one mailbox read looks at. The stored key keeps its
+	// old name — renaming it would take a migration for no behavioural gain — but
+	// it is no longer a rate limit of any kind: reading and sending to the model
+	// are separate steps now, and the two settings below govern the second.
+	public const APP_FETCH_PER_RUN = 'rate_limit_per_run';
+	// Our tasks waiting in Task Processing at once, instance-wide. Replaces
+	// `local_concurrency`, which promised a bound on "concurrent local-model
+	// extractions" that nothing enforced — and which no app could enforce,
+	// since how many tasks *run* at once is the server's worker count.
+	public const APP_MAX_IN_FLIGHT = 'max_in_flight';
+	// Tasks we start per rolling hour, instance-wide; 0 = unlimited. A cap alone
+	// never slows anything down, and an external provider's limit is a rate.
+	public const APP_MAX_PER_HOUR = 'max_per_hour';
+
+	public const DEFAULT_FETCH_PER_RUN = 20;
+	public const DEFAULT_MAX_IN_FLIGHT = 2;
+	public const DEFAULT_MAX_PER_HOUR = 60;
 
 	// Per-user keys.
 	public const USER_ENABLED = 'enabled';
@@ -71,21 +86,33 @@ class ConfigService {
 		$this->appConfig->setValueBool(Application::APP_ID, self::APP_PIPELINE_ENABLED, $enabled);
 	}
 
-	/** Max messages to enqueue per user per run (throttle external/local load). */
-	public function getRateLimitPerRun(): int {
-		return $this->appConfig->getValueInt(Application::APP_ID, self::APP_RATE_LIMIT_PER_RUN, 20);
+	/** How many of the newest messages one mailbox read looks at, per user. */
+	public function getFetchPerRun(): int {
+		return $this->appConfig->getValueInt(Application::APP_ID, self::APP_FETCH_PER_RUN, self::DEFAULT_FETCH_PER_RUN);
 	}
 
-	public function setRateLimitPerRun(int $value): void {
-		$this->appConfig->setValueInt(Application::APP_ID, self::APP_RATE_LIMIT_PER_RUN, max(1, $value));
+	public function setFetchPerRun(int $value): void {
+		$this->appConfig->setValueInt(Application::APP_ID, self::APP_FETCH_PER_RUN, max(1, $value));
 	}
 
-	public function getLocalConcurrency(): int {
-		return $this->appConfig->getValueInt(Application::APP_ID, self::APP_LOCAL_CONCURRENCY, 1);
+	/** At most this many of our extractions waiting on the model at once; at least 1. */
+	public function getMaxInFlight(): int {
+		return max(1, $this->appConfig->getValueInt(Application::APP_ID, self::APP_MAX_IN_FLIGHT, self::DEFAULT_MAX_IN_FLIGHT));
 	}
 
-	public function setLocalConcurrency(int $value): void {
-		$this->appConfig->setValueInt(Application::APP_ID, self::APP_LOCAL_CONCURRENCY, max(1, $value));
+	public function setMaxInFlight(int $value): void {
+		// Never 0: a cap of nothing stops the pipeline with no error anywhere to
+		// explain it. Turning extraction off is what the feature flag is for.
+		$this->appConfig->setValueInt(Application::APP_ID, self::APP_MAX_IN_FLIGHT, max(1, $value));
+	}
+
+	/** At most this many extractions started per rolling hour; 0 means unlimited. */
+	public function getMaxPerHour(): int {
+		return max(0, $this->appConfig->getValueInt(Application::APP_ID, self::APP_MAX_PER_HOUR, self::DEFAULT_MAX_PER_HOUR));
+	}
+
+	public function setMaxPerHour(int $value): void {
+		$this->appConfig->setValueInt(Application::APP_ID, self::APP_MAX_PER_HOUR, max(0, $value));
 	}
 
 	/* ----------------------------------------------------------------- user */

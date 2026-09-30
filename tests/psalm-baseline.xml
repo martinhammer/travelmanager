@@ -192,6 +192,11 @@
       <code><![CDATA[deleteImapPassword]]></code>
     </PossiblyUnusedMethod>
   </file>
+  <file src="lib/Service/ExtractionQueue.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
   <file src="lib/Service/ExtractionResultHandler.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>

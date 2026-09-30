@@ -46,6 +46,13 @@ class ExtractionResultHandler {
 		if ($map === null) {
 			return; // Not one of our tasks.
 		}
+		if ($map->getStatus() !== TaskMap::STATUS_PENDING) {
+			// Already settled. The listener and ExtractionQueue::reconcile() can
+			// both arrive at one task — the reconciler exists for events that went
+			// missing — and applying an extraction twice would write its bookings
+			// twice.
+			return;
+		}
 
 		$userId = $map->getUserId();
 		$text = $this->llmService->readOutputText($output);
@@ -166,8 +173,8 @@ class ExtractionResultHandler {
 	public function handleFailure(Task $task, string $error): void {
 		$taskId = (int)$task->getId();
 		$map = $this->taskMapMapper->findByTaskId($taskId);
-		if ($map === null) {
-			return;
+		if ($map === null || $map->getStatus() !== TaskMap::STATUS_PENDING) {
+			return; // Not ours, or already settled — see handleSuccess.
 		}
 		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
 		$this->activityLog->error(
@@ -189,6 +196,31 @@ class ExtractionResultHandler {
 		$this->setIssueReasons($message, []);
 		$this->setRelatedBookingIds($message, []);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $error, ProcessedMessage::FAILURE_PROVIDER);
+		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
+	}
+
+	/**
+	 * A task that will never report back: Task Processing no longer knows it.
+	 *
+	 * Recorded as a provider failure, because that is what it is from where the
+	 * user stands — the model never answered — and `provider` is the failure
+	 * kind whose retry usually works. Without this a lost task would hold one of
+	 * the in-flight slots for ever, and enough of them stop the queue dead with
+	 * nothing on screen saying why.
+	 */
+	public function handleLost(TaskMap $map, string $reason): void {
+		if ($map->getStatus() !== TaskMap::STATUS_PENDING) {
+			return;
+		}
+		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
+		$this->activityLog->error(
+			$map->getUserId(),
+			IngestionLog::STEP_LLM_RESPONSE,
+			'Extraction task #' . $map->getTaskId() . ' was lost: ' . $reason,
+		);
+		$this->setIssueReasons($message, []);
+		$this->setRelatedBookingIds($message, []);
+		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $reason, ProcessedMessage::FAILURE_PROVIDER);
 		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}
 

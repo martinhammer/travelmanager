@@ -25,8 +25,9 @@ class AdminSettings implements ISettings {
 	public function getForm(): TemplateResponse {
 		$this->initialState->provideInitialState('adminSettings', [
 			'enabled' => $this->configService->isFeatureEnabled(),
-			'rateLimitPerRun' => $this->configService->getRateLimitPerRun(),
-			'localConcurrency' => $this->configService->getLocalConcurrency(),
+			'fetchPerRun' => $this->configService->getFetchPerRun(),
+			'maxInFlight' => $this->configService->getMaxInFlight(),
+			'maxPerHour' => $this->configService->getMaxPerHour(),
 		]);
 		// Read-only diagnostics: which model extractions actually go to, and the
 		// instructions they are sent with. The admin sees the endpoint URL in

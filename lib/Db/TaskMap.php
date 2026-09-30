@@ -24,6 +24,12 @@ class TaskMap extends Entity {
 	public const STATUS_PENDING = 'pending';
 	public const STATUS_COMPLETED = 'completed';
 	public const STATUS_FAILED = 'failed';
+	/**
+	 * A newer attempt for the same message exists, so this one's outcome no longer
+	 * matters and must not overwrite the message. Set by ExtractionQueue when it
+	 * finds an old attempt still pending.
+	 */
+	public const STATUS_SUPERSEDED = 'superseded';
 
 	protected int $taskId = 0;
 	protected string $userId = '';

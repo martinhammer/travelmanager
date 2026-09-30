@@ -21,16 +21,22 @@ share the flight shape (see §3).
 
 ```
 DispatcherJob (TimedJob, ~15min, no parallel runs)
+  ├─ ExtractionQueue.reconcile()  # settle tasks whose events never arrived
+  ├─ ExtractionQueue.pump()       # the queue's only clock — see below
   └─ enumerates enrolled users ─→ enqueues UserIngestionJob (QueuedJob) per user
        └─ IngestionService.ingestForUser(uid)
             ├─ IImapClient.fetchRecent()        # READ-ONLY IMAP
             ├─ dedup via ProcessedMessageMapper # by RFC Message-ID
-            └─ ILlmService.scheduleText2Text(prompt, uid, customId=messageId)
-                 └─ Nextcloud Task Processing (core:text2text), provider = admin-global
+            └─ store as messages.status = queued, then ExtractionQueue.pump()
+ExtractionQueue.pump()   # instance-wide: in-flight cap + hourly budget (QueuePlanner)
+  └─ claim queued → processing, oldest first, users taking turns
+       └─ ILlmService.scheduleText2Text(prompt, uid, customId=messageId)
+            └─ Nextcloud Task Processing (core:text2text), provider = admin-global
 TaskSuccessfulEvent / TaskFailedEvent
-  └─ ExtractionResultHandler  (correlates by task_id → TaskMap → user+message)
-       ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
-       └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
+  ├─ ExtractionResultHandler  (correlates by task_id → TaskMap → user+message)
+  │    ├─ ExtractionService.parseAndValidate()  # JSON repair + validation
+  │    └─ BookingService.applyExtraction()      # writes DRAFT bookings (+ details JSON)
+  └─ ExtractionQueue.pump()   # a finished task frees a slot
 UI (Vue, OCS API) — four views: Calendar | Bookings | Trips | Messages
   ├─ Calendar: **the default view**. Month grid, trips and bookings drawn as
   │            bars across the days they cover; ‹ › Today paging, a month-scoped
@@ -64,6 +70,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `ExtractedBooking` plus `Dto/MatchCandidate[]` and returns a `Dto/BookingMatch`
   or null. Second-most-tested unit after `ExtractionService`, and for the same
   reason: it is where the judgement calls live.
+- `Service/QueuePlanner` — **pure, dependency-free** rules for which queued
+  messages go to the model now: the in-flight cap, the hourly budget, and users
+  taking turns. `Service/ExtractionQueue` does the I/O around it (claiming,
+  scheduling, reconciling lost tasks). See the decision in §3.
 - `Service/IngestionService`, `Service/ExtractionResultHandler`, `Service/BookingService`, `Service/ConfigService`.
 - `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy);
   `Llm/ProviderInfo` is its read-only description of the model in use.
@@ -95,9 +105,11 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   (per-user data wipe) — see §9 (dev/debug tooling).
 
 ### Data model (5 tables, prefix `travelmanager_`)
-- `messages` — IMAP dedup + ingestion audit + **retry source**; unique
-  `(user_id, message_id)`; `status` =
-  processing/processed/failed/no_booking/**dropped**/**related** (`related` =
+- `messages` — IMAP dedup + ingestion audit + **retry source** + **the
+  extraction queue**; unique `(user_id, message_id)`; `status` =
+  **queued**/processing/processed/failed/no_booking/**dropped**/**related**
+  (`queued` = read and stored, not yet sent — see "Model load is paced" in §3;
+  `processing` = sent, awaiting the model; `related` =
   every booking in it already exists, see §3; see the extraction contract
   below — `dropped` is the retry-worthy one), `failure_kind` =
   schedule/provider/validation, `issue_reasons` = comma-separated
@@ -627,6 +639,78 @@ code follows the overrides.
   - **A retry clears it**, because re-running is how you say you think it can work
     after all — and that attempt's outcome is unknown, so a failure the user has
     not seen yet must be able to ask again.
+- **Model load is paced by the app, not by how much mail is read** (2026-09-30).
+  Reading the mailbox and sending to the model are **separate steps**: ingestion
+  stores new mail as `messages.status = queued`, and `ExtractionQueue` releases
+  it under two admin settings. Before this, fetching *was* scheduling —
+  `rate_limit_per_run` was simultaneously "how far back we look" and "how many
+  tasks we start", and those pull in opposite directions (a backfill wants the
+  first large, load protection wants the second small). Consequences:
+  - **Two limits, because they protect different things.** `max_in_flight`
+    (default 2) bounds how many of our tasks wait in Task Processing at once —
+    that is what stops a backlog flooding the queue every other app shares, and
+    what bounds a local model. `max_per_hour` (default 60, 0 = off) bounds how
+    many we *start*. **A cap never slows anything down**: each completion frees a
+    slot and the next task goes at once, so the rate is whatever provider latency
+    makes it. The 429s of 2026-09-18 happened under the old cap with cron running
+    tasks one at a time — a *rate* problem, which only a rate limit addresses.
+    The budget is a rolling count over `tasks.created_at`, so it needs no counter
+    of its own and survives restarts; retries count, because they are requests.
+  - **Instance-wide, not per user.** The provider and the shared queue are
+    global, so per-user caps would multiply with enrolment. `QueuePlanner::pick`
+    serves users **in turns**, longest-waiting first, so one user's backfill
+    cannot starve another's new mail. Within a user it is strictly oldest first
+    (by row id), which keeps the §7 "oldest first" contract.
+  - **No clock of its own.** The queue runs on the dispatcher tick, after every
+    task completion (the listeners), and on a user's Read-mailbox-now or Retry.
+    Completions keep a backlog moving; the tick is what resumes it once an hourly
+    budget frees up. It **never sleeps** for a slot — that is exactly how
+    `integration_openai` handles a 429, and it blocks every other app's AI tasks
+    for the duration. Hence also **per hour, not per minute**: with cron-granular
+    wake-ups a per-minute rate is not something this code could honour.
+  - **Lost tasks are reconciled, or the cap wedges.** Uncapped, a task that never
+    reports back strands one row; capped, it holds a slot for ever and enough of
+    them stop the queue with nothing on screen saying why. Each tick,
+    `reconcile()` asks Task Processing (`ILlmService::findTask`) about pending
+    tasks older than 10 minutes: still scheduled/running is left alone however
+    old (a busy queue is not ours to cut short); ended with no event handled for
+    10 minutes is settled through the ordinary handlers; unknown to the platform
+    is `handleLost` → `failed`/`provider`, which is retryable. **"Could not ask"
+    is never "gone"** — `findTask` throws on anything but not-found. An older
+    pending attempt for a message that has since been retried is marked
+    `superseded` and never allowed to overwrite the newer one, and the handlers
+    now ignore a TaskMap that is no longer `pending`, since the listener and the
+    reconciler can arrive at the same task.
+  - **Races are tolerated, not prevented.** `claimQueued` is a conditional
+    update, so a message is never sent twice. The limits are guarded by a lock in
+    the locking cache; with no locking cache configured that lock is NullCache and
+    always succeeds, and concurrent pumps can overshoot the cap by a few. Fine for
+    load protection; nothing treats the cap as an invariant.
+  - **No provider means wait, not fail.** `pump()` checks `hasProvider()` before
+    claiming anything, so an unconfigured provider leaves mail queued instead of
+    turning each email into a failure to retry by hand.
+  - **The feature flag gates automatic work only.** The dispatcher and the
+    listeners check it; Read mailbox now and Retry do not, as before — a user
+    asking explicitly has always worked with the pipeline off.
+  - **Retry goes through the queue** and is refused (400) while a message is
+    `queued` or `processing`: a second attempt in flight for one email means
+    whichever answer lands last wins.
+  - **`local_concurrency` is gone.** It promised "max concurrent local-model
+    extractions", was read by nothing, and could not have been honoured by any app
+    — how many tasks *run* at once is the server's AI worker count. The admin
+    panel's helper texts now say what each setting cannot do, too. The stale row
+    is left in `oc_appconfig`; deleting it would take a migration for nothing.
+  - **UI:** `queued` is labelled *Queued*, shares the *Waiting* filter chip with
+    `processing` (from the user's side both mean "not answered yet"), never counts
+    as needing attention, and carries a notice saying *why* it waits — a queued
+    row with no reason reads as stuck. The activity log says which limit is
+    holding work back.
+  - **Still open: the read window.** `fetchRecent` still reads only the newest
+    `rate_limit_per_run` messages by sequence number, with no cursor — anything
+    older on first enrolment, or any burst larger than that between runs, is
+    never seen. `messages.imap_uid`/`uid_validity` are stored and unread; a UID
+    high-water mark is the planned fix, and this queue is what makes reading
+    everything safe.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -638,9 +722,11 @@ code follows the overrides.
 debug panel for iterating without waiting for cron:
 - **Read mailbox now** — `POST /api/dev/ingest` runs `IngestionService::ingestForUser`
   synchronously for the current user (bypasses the dispatcher/enabled fan-out;
-  still requires the mailbox to be *configured*). It schedules the async
-  extraction tasks; **model responses still arrive later** via the task-event
-  listeners, so the UI hint says to refresh the log after a moment.
+  still requires the mailbox to be *configured*). It **queues** new mail and then
+  pumps the queue, so messages go to the model at once as far as the limits
+  allow and the activity log says why the rest wait; **model responses still
+  arrive later** via the task-event listeners, so the UI hint says to refresh
+  the log after a moment.
 - **Activity log** — `IngestionLogger` writes a per-user, step-by-step row
   (`connect`/`fetch`/`dedup`/`schedule`/`llm_response`/`persist`/`wipe`) to the
   `logs` table as the pipeline runs; `IngestionService` and
@@ -744,6 +830,13 @@ debug panel for iterating without waiting for cron:
   button beside Retry, a Discarded filter chip and lozenge, and an attention
   counter that respects both. See §3 for why a correct refusal needed
   an answer that is not a retry.
+- ✅ **Extraction queue** (2026-09-30): reading and sending to the model are
+  separate steps. New mail is stored as `queued` and released by
+  `ExtractionQueue` under an instance-wide in-flight cap and hourly budget, with
+  users taking turns and lost tasks reconciled on each tick. `QueuePlanner` +
+  `Dto/{QueueCapacity,QueuedMessage}`; `local_concurrency` replaced by
+  `max_in_flight` + `max_per_hour`. No migration, no version bump (`status` is a
+  string). See the decision in §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1216,6 +1309,7 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   `ExtractionService` uses literal type strings, not `Booking::TYPE_*`).
 - Run the pure tests standalone with:
   `php vendor-bin/phpunit/vendor/phpunit/phpunit/phpunit --bootstrap vendor/autoload.php --no-configuration tests/unit/Service/ExtractionServiceTest.php`
+  (`QueuePlannerTest` and `BookingMatcherTest` run the same way).
 - **Psalm** is `errorLevel=1` + `findUnusedCode=true`. DI-instantiated classes,
   `info.xml`-registered classes (jobs/settings/migration) and reserved public API
   look "unused" — these are captured in `tests/psalm-baseline.xml`. Entities carry

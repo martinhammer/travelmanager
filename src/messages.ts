@@ -7,6 +7,7 @@ import type { SortColumn, SortDirection } from './grid'
  * only the second is the app's fault and worth retrying.
  */
 const STATUS_LABELS: Record<string, string> = {
+	queued: 'Queued',
 	processing: 'Submitted',
 	processed: 'Bookings extracted',
 	no_booking: 'No booking',
@@ -23,13 +24,20 @@ const STATUS_LABELS: Record<string, string> = {
 export const messageStatusLabel = (status: string): string => STATUS_LABELS[status] ?? status
 
 /**
+ * Statuses where the message is still on its way to a result: queued behind the
+ * extraction limits, or sent and awaiting the model's answer.
+ */
+const WAITING_STATUSES = ['queued', 'processing']
+
+/**
  * Whether a retry can be performed *right now* — drives the button's enabled
- * state, while `canRetry` alone decides whether it is shown at all. Retrying
- * while a task is in flight would only queue a duplicate.
+ * state, while `canRetry` alone decides whether it is shown at all. Retrying a
+ * message that is still waiting would put a second attempt in flight for one
+ * email, and the backend refuses it for that reason.
  * @param message the ledger row
  */
 export const retryable = (message: Message): boolean =>
-	message.canRetry && message.status !== 'processing'
+	message.canRetry && !WAITING_STATUSES.includes(message.status)
 
 /**
  * Statuses where the app failed to get a booking out of an email that may well
@@ -63,11 +71,12 @@ export const needsAttention = (items: Message[]): Message[] =>
 	items.filter((m) => unresolved(m) && !m.discarded)
 
 /**
- * Filter the ledger by status. Beyond the real statuses it accepts two
- * sentinels: 'all', and 'attention' for the failed/dropped rows a human should
- * look at — the reason someone opens this view in the first place.
+ * Filter the ledger by status. Beyond the real statuses it accepts sentinels:
+ * 'all'; 'attention' for the failed/dropped rows a human should look at — the
+ * reason someone opens this view in the first place; 'waiting' for everything
+ * not yet answered, queued or sent; and 'discarded'.
  * @param items the ledger rows
- * @param status the status to keep, 'attention', or 'all' for no filtering
+ * @param status the status to keep, or one of the sentinels above
  */
 export const filterMessagesByStatus = (items: Message[], status: string): Message[] => {
 	if (status === 'all') {
@@ -81,6 +90,11 @@ export const filterMessagesByStatus = (items: Message[], status: string): Messag
 	// asks of you, not what it did. This chip is how you find them again.
 	if (status === 'discarded') {
 		return items.filter((m) => m.discarded)
+	}
+	// One chip for both: from the user's side, "queued" and "sent" are the same
+	// answer to the question they came with — it has not been read yet.
+	if (status === 'waiting') {
+		return items.filter((m) => WAITING_STATUSES.includes(m.status))
 	}
 	return items.filter((m) => m.status === status)
 }
@@ -225,6 +239,12 @@ const discardedNotice = (message: Message): MessageNotice | null => message.disc
 
 const outcomeNotice = (message: Message): MessageNotice | null => {
 	switch (message.status) {
+	// Says *why* it waits, because a queued row with no reason reads as stuck.
+	case 'queued':
+		return {
+			type: 'info',
+			text: 'This email is waiting to be sent to the model. Extractions are released a few at a time so the AI provider is not overwhelmed, and this one goes as soon as its turn comes.',
+		}
 	case 'related':
 		return {
 			type: 'info',
