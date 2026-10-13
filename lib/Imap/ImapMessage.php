@@ -23,6 +23,12 @@ class ImapMessage {
 		 * classification input.
 		 */
 		public readonly ?string $from = null,
+		/**
+		 * The MIME tree, one part per line (MimeText::describe), carried only
+		 * when no text could be found — the one case where how the email was
+		 * built is worth reporting.
+		 */
+		public readonly ?string $structure = null,
 	) {
 	}
 }

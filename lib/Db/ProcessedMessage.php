@@ -83,6 +83,12 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 	public const FAILURE_SCHEDULE = 'schedule';
 	public const FAILURE_PROVIDER = 'provider';
 	public const FAILURE_VALIDATION = 'validation';
+	/**
+	 * Nothing readable was found in the email, so it was never sent: asking the
+	 * model about an empty body only gets a confident "no booking" back, which
+	 * hides the fault. Not retryable — there is no text to retry with.
+	 */
+	public const FAILURE_NO_TEXT = 'no_text';
 
 	protected string $userId = '';
 	protected string $mailbox = '';

@@ -192,6 +192,13 @@ describe('messageNotices', () => {
 		expect(notice.text).toBe('No response from AI provider')
 	})
 
+	it('reports an email with no readable text as our failure, not the model\'s verdict', () => {
+		const notices = messageNotices(message({ status: 'failed', failureKind: 'no_text' }))
+		expect(notices).toHaveLength(1)
+		expect(notices[0].type).toBe('error')
+		expect(notices[0].text).toMatch(/not sent to the model/)
+	})
+
 	it('says nothing for a clean extraction', () => {
 		expect(messageNotices(message({ status: 'processed' }))).toEqual([])
 	})

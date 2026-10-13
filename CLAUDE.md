@@ -78,7 +78,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `Llm/ILlmService` → `TaskProcessingLlmService` (single platform strategy);
   `Llm/ProviderInfo` is its read-only description of the model in use.
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
-  `Imap/Html` is the pure HTML→text helper for HTML-only bodies.
+  `Imap/Html` is the pure HTML→text helper for HTML-only bodies;
+  `Imap/MimeText` decides which MIME parts make up the text (see §7).
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
 - `Listener/TaskSuccessfulListener`, `Listener/TaskFailedListener`.
 - `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date2026062100…`
@@ -1563,6 +1564,22 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   asynchronous, so with more than one AI worker the results can still arrive out
   of order. A hard guarantee would mean serialising per user or holding results
   until earlier ones are applied, both of which fight the async design; not done.
+- **The body is every inline text part, not Horde's `findBody()`** (2026-10-13).
+  `findBody` returns the *first* inline text part, and a real forward
+  ("Fwd: Booking Summary and receipt Z6VSLM") reached the model as a bare
+  subject line: an empty forward note came first, so the model answered "no
+  booking" — correctly, for what it was given — and the row then claimed its text
+  was "no longer retained". `MimeText` reads every inline text part in order,
+  follows an attached `message/rfc822` (on a forward-as-attachment it *is* the
+  content), and within an alternative takes plain only when it is not blank. An
+  email that still yields nothing is **never sent**: it lands as
+  `failed`/`no_text` with the MIME tree in `error`, because an empty prompt earns
+  a confident "no booking" that hides our fault behind the model's verdict.
+  Reading more parts surfaced the next trap at once: **`mb_convert_encoding`
+  throws `ValueError` on a charset mbstring lacks** (`windows-1256` was the real
+  one) — `@` does not stop it, and uncaught it ended the *whole* mailbox read on
+  every run. `MimeText::toUtf8` falls back to iconv and always scrubs to valid
+  UTF-8, and a part that still fails to decode costs only that part.
 - **Loading the bundled Composer autoloader.** Nextcloud only auto-includes an
   app's **`<app>/composer/autoload.php`** (`OC_App::registerAutoloading`), **not
   `<app>/vendor/autoload.php`**. Our build ships the autoloader under `vendor/`,

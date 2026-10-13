@@ -117,6 +117,25 @@ final class IngestionServiceTest extends TestCase {
 		$this->assertSame(1, $this->service->ingestForUser('alice'));
 	}
 
+	public function testAnEmailWithNoReadableTextIsNeverSentToTheModel(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			new ImapMessage('<empty@example.com>', 1, 1, 'Fwd: Booking', new \DateTimeImmutable(), '', null, "0 multipart/mixed\n1 text/plain, 2 bytes"),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+
+		// Recorded as our failure rather than queued: the model would answer an
+		// empty prompt with a confident "no booking" and hide the fault.
+		$this->processedMessageMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (ProcessedMessage $m) => $m->getStatus() === ProcessedMessage::STATUS_FAILED
+				&& $m->getFailureKind() === ProcessedMessage::FAILURE_NO_TEXT
+				&& str_contains((string)$m->getError(), '1 text/plain, 2 bytes')
+				&& $m->getAttempts() === 0));
+
+		$this->assertSame(0, $this->service->ingestForUser('alice'));
+	}
+
 	public function testMessagesAreQueuedInTheOrderTheMailboxReturnedThem(): void {
 		// IImapClient hands messages over oldest-first, and ingestion must not
 		// re-order them: the queue releases by row id, and booking deduplication

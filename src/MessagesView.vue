@@ -312,7 +312,9 @@ const onDiscard = async (id: number, discarded: boolean) => {
 									: t('travelmanager', 'Discard') }}
 							</NcButton>
 							<span v-if="!item.canRetry" class="tm-meta">
-								{{ t('travelmanager', 'The email text is no longer retained, so this cannot be re-run.') }}
+								{{ item.failureKind === 'no_text'
+									? t('travelmanager', 'There was no email text to send, so this cannot be re-run.')
+									: t('travelmanager', 'The email text is no longer retained, so this cannot be re-run.') }}
 							</span>
 						</div>
 					</div>

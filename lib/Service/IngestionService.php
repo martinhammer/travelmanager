@@ -128,9 +128,31 @@ class IngestionService {
 		$record->setSender($message->from === null ? null : mb_substr($message->from, 0, 255));
 		$record->setSentAt($message->date === null ? null : \DateTime::createFromImmutable($message->date));
 		$record->setBodyText($message->textBody);
-		$record->setStatus(ProcessedMessage::STATUS_QUEUED);
 		$record->setAttempts(0);
 		$record->setProcessedAt($this->timeFactory->getDateTime());
+
+		// An empty prompt is answered "no booking" with full confidence, which
+		// reads as the model's judgement rather than our failure to read the
+		// email. Record it as what it is, with the MIME tree to diagnose it by.
+		if (trim($message->textBody) === '') {
+			$error = 'No readable text was found in this email, so it was not sent to the model.';
+			if ($message->structure !== null) {
+				$error .= "\n\nMIME structure:\n" . $message->structure;
+			}
+			$record->setStatus(ProcessedMessage::STATUS_FAILED);
+			$record->setFailureKind(ProcessedMessage::FAILURE_NO_TEXT);
+			$record->setError($error);
+			$this->processedMessageMapper->insert($record);
+			$this->activityLog->warning(
+				$userId,
+				IngestionLog::STEP_FETCH,
+				'No readable text in message, not sent to the model: ' . $this->describe($message),
+				$message->structure,
+			);
+			return false;
+		}
+
+		$record->setStatus(ProcessedMessage::STATUS_QUEUED);
 		$this->processedMessageMapper->insert($record);
 
 		$this->activityLog->info(

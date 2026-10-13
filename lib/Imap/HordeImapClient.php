@@ -9,6 +9,7 @@ use Horde_Imap_Client_Exception;
 use Horde_Imap_Client_Fetch_Query;
 use Horde_Imap_Client_Ids;
 use Horde_Imap_Client_Socket;
+use Horde_Mime_Part;
 use OCA\TravelManager\Exception\ImapException;
 use Psr\Log\LoggerInterface;
 
@@ -33,7 +34,7 @@ use Psr\Log\LoggerInterface;
  * @psalm-suppress PossiblyInvalidCast
  */
 class HordeImapClient implements IImapClient {
-	/** Hard cap on body text handed to the LLM, in characters. */
+	/** Hard cap on body text handed to the LLM, in bytes (of UTF-8). */
 	private const MAX_BODY_LENGTH = 20000;
 
 	public function __construct(
@@ -173,8 +174,10 @@ class HordeImapClient implements IImapClient {
 		$subject = (string)$envelope->subject;
 		$date = $this->toDate($envelope->date);
 		$body = $this->extractText($client, $mailbox, $data);
+		// Only worth carrying when there is nothing else to go on.
+		$structure = $body === '' ? MimeText::describe($data->getStructure()) : null;
 
-		return new ImapMessage($messageId, $uid, $uidValidity, $subject, $date, $body, $this->firstAddress($envelope->from));
+		return new ImapMessage($messageId, $uid, $uidValidity, $subject, $date, $body, $this->firstAddress($envelope->from), $structure);
 	}
 
 	/**
@@ -204,25 +207,22 @@ class HordeImapClient implements IImapClient {
 	}
 
 	/**
-	 * Fetch and decode the best text body (plain preferred, HTML stripped as a
-	 * fallback), normalised to UTF-8 and capped in length.
+	 * Fetch and decode the text of every inline text part (see MimeText for
+	 * which ones, and why not just the first), normalised to UTF-8 and capped
+	 * in length.
 	 */
 	private function extractText(Horde_Imap_Client_Socket $client, string $mailbox, mixed $data): string {
 		$structure = $data->getStructure();
-
-		$isHtml = false;
-		$partId = $structure->findBody('plain');
-		if ($partId === null) {
-			$partId = $structure->findBody('html');
-			$isHtml = $partId !== null;
-		}
-		if ($partId === null) {
+		$partIds = MimeText::partIds($structure);
+		if ($partIds === []) {
 			return '';
 		}
 
 		$query = new Horde_Imap_Client_Fetch_Query();
-		// `peek` => do NOT set the \Seen flag (read-only, V6).
-		$query->bodyPart($partId, ['peek' => true]);
+		foreach ($partIds as $partId) {
+			// `peek` => do NOT set the \Seen flag (read-only, V6).
+			$query->bodyPart($partId, ['peek' => true]);
+		}
 		$result = $client->fetch($mailbox, $query, ['ids' => new Horde_Imap_Client_Ids([$data->getUid()])]);
 
 		$bodyData = null;
@@ -234,27 +234,23 @@ class HordeImapClient implements IImapClient {
 			return '';
 		}
 
-		$part = $structure->getPart($partId);
-		$part->setContents(
-			$bodyData->getBodyPart($partId),
-			['encoding' => $bodyData->getBodyPartDecode($partId)],
-		);
-		$decoded = (string)$part->getContents();
-		$text = $this->toUtf8($decoded, (string)$part->getCharset());
-
-		if ($isHtml) {
-			$text = Html::toText($text);
-		}
+		$text = MimeText::text($structure, function (Horde_Mime_Part $part) use ($bodyData): string {
+			$partId = $part->getMimeId();
+			// One part that will not decode costs that part, never the message
+			// or the rest of the mailbox read: this runs inside the fetch loop,
+			// and the same email is read again on every run.
+			try {
+				$part->setContents(
+					(string)$bodyData->getBodyPart($partId),
+					['encoding' => $bodyData->getBodyPartDecode($partId)],
+				);
+				return MimeText::toUtf8((string)$part->getContents(), (string)$part->getCharset());
+			} catch (\Throwable $e) {
+				$this->logger->warning('Travel Manager: could not decode MIME part ' . $partId . ': ' . $e->getMessage());
+				return '';
+			}
+		});
 		return $this->normalise($text);
-	}
-
-	private function toUtf8(string $text, string $charset): string {
-		$charset = strtoupper(trim($charset));
-		if ($charset === '' || $charset === 'UTF-8' || $charset === 'US-ASCII' || $charset === 'ASCII') {
-			return $text;
-		}
-		$converted = @mb_convert_encoding($text, 'UTF-8', $charset);
-		return $converted === false ? $text : $converted;
 	}
 
 	private function normalise(string $text): string {
@@ -262,7 +258,9 @@ class HordeImapClient implements IImapClient {
 		$text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 		$text = trim($text);
 		if (strlen($text) > self::MAX_BODY_LENGTH) {
-			$text = substr($text, 0, self::MAX_BODY_LENGTH);
+			// mb_strcut, not substr: a cut through a multibyte character would
+			// leave invalid UTF-8 for the database and the prompt.
+			$text = mb_strcut($text, 0, self::MAX_BODY_LENGTH, 'UTF-8');
 		}
 		return $text;
 	}

@@ -217,6 +217,10 @@ const failureNotice = (message: Message): MessageNotice | null => {
 		return { type: 'error', text: 'Model response could not be parsed' }
 	case 'schedule':
 		return { type: 'error', text: 'The extraction task could not be scheduled' }
+	// Never sent: an empty prompt only earns a confident "no booking", which
+	// would read as the model's judgement rather than our failure to read it.
+	case 'no_text':
+		return { type: 'error', text: 'No readable text was found in this email, so it was not sent to the model' }
 	default:
 		return null
 	}
