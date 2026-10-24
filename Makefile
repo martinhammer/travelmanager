@@ -128,7 +128,6 @@ package: build
 	       $(release_stage)/vitest.config.ts \
 	       $(release_stage)/tsconfig.json \
 	       $(release_stage)/stylelint.config.cjs \
-	       $(release_stage)/rector.php \
 	       $(release_stage)/psalm.xml \
 	       $(release_stage)/composer.json \
 	       $(release_stage)/composer.lock \
@@ -167,7 +166,7 @@ stage: build
 	      --exclude='.gitignore' \
 	      --exclude='package.json' --exclude='package-lock.json' \
 	      --exclude='vite.config.ts' --exclude='vitest.config.ts' --exclude='tsconfig.json' \
-	      --exclude='stylelint.config.cjs' --exclude='rector.php' \
+	      --exclude='stylelint.config.cjs' \
 	      --exclude='psalm.xml' --exclude='composer.json' --exclude='composer.lock' \
 	      --exclude='openapi.json' --exclude='CLAUDE.md' \
 	      --exclude='CHANGELOG.md' --exclude='CODE_OF_CONDUCT.md' \
