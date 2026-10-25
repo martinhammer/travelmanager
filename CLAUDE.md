@@ -1280,13 +1280,13 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
 composer install        # PHP deps + dev tools (bamarni bin plugin)
 composer psalm          # static analysis, errorLevel 1, findUnusedCode
 composer cs:fix         # php-cs-fixer
-composer test:unit      # PHPUnit — runs inside a Nextcloud server checkout
+composer test:unit      # PHPUnit — standalone, or inside a server checkout (see §7)
 
 npm ci                  # frontend deps (needs package-lock.json — committed)
 npm run lint            # eslint
-npm run type-check      # vue-tsc --noEmit
+npm run type-check      # vue-tsc --noEmit (alias ts:check — what lint-typescript.yml runs)
 npm run stylelint       # stylelint
-npm run test:frontend   # vitest (tests/frontend/**)
+npm run test:frontend   # vitest (tests/frontend/**) (alias test — what node-test.yml runs)
 npm run build           # vite build (Vue 3 + @nextcloud/vite-config)
 ```
 
@@ -1295,18 +1295,24 @@ A **`Makefile`** wraps these for build/package/deploy. Key targets: `make dev`
 (frontend + isolated prod composer install), `make package` (app-store zip from
 `git archive HEAD`), `make stage` (deployable tree from the **working tree**,
 including uncommitted changes — rsync to a test server), `make clean` /
-`make distclean`. `make check` = lint + psalm + test + openapi. Note `make test`
-and `make check` include `composer test:unit`, which only passes inside a full
-Nextcloud checkout (see §7); run those in CI / a dev server.
+`make distclean`. `make check` = lint + psalm + test + openapi.
+
+CI runs all three test suites on every PR: `phpunit-sqlite.yml` (PHPUnit inside a
+`nextcloud/server` checkout), `node-test.yml` (vitest) and `lint-typescript.yml`
+(vue-tsc). The `ts:check` and `test` npm aliases exist only because those
+templates call them with `--if-present` — remove one and its job goes green
+while running nothing.
 
 ## 7. Gotchas (learned the hard way — read before editing)
 
-- **OCP is static-analysis stubs, not runtime classes.** `OCP\AppFramework\Db\
-  Entity`, `QBMapper`, `IRequest` etc. are **not runtime-autoloadable** from this
-  repo alone. Therefore tests that mock mapper/controller/OCP types only run
-  inside a full Nextcloud server checkout (via `tests/bootstrap.php`, like the
-  skeleton `ApiTest` and `IngestionServiceTest`). **Keep extraction/parsing logic
-  free of OCP types** so it stays unit-testable standalone (that is why
+- **`tests/bootstrap.php` has two modes, and CI uses the other one.**
+  `nextcloud/ocp` ships stubs with no autoloader of its own, so standalone the
+  bootstrap registers them as PSR-4 and the whole suite runs from this repo alone.
+  `phpunit-sqlite.yml` instead removes `nextcloud/ocp`, installs the app at
+  `<server>/apps/travelmanager`, and the bootstrap loads the server's
+  `tests/bootstrap.php` so `OCP\*` are the real classes. A test that passes only
+  in one mode is a bug in the test. **Keep extraction/parsing logic free of OCP
+  types** anyway, so it stays testable with no stubs at all (that is why
   `ExtractionService` uses literal type strings, not `Booking::TYPE_*`).
 - Run the pure tests standalone with:
   `php vendor-bin/phpunit/vendor/phpunit/phpunit/phpunit --bootstrap vendor/autoload.php --no-configuration tests/unit/Service/ExtractionServiceTest.php`
@@ -1317,8 +1323,21 @@ Nextcloud checkout (see §7); run those in CI / a dev server.
   `@psalm-suppress PropertyNotSetInConstructor` for the base `$id`. Regenerate the
   baseline with `psalm --set-baseline=tests/psalm-baseline.xml` only for genuine
   framework false-positives; fix real issues instead of baselining them.
-- **`doctrine/dbal`** is a dev-dependency purely so Psalm can resolve the
-  `Doctrine\DBAL\Schema\Table` type that `ISchemaWrapper` returns in migrations.
+- **`doctrine/dbal` lives in `vendor-bin/psalm` and `vendor-bin/phpunit`, never in
+  the app's own `composer.json`.** Psalm needs it to resolve the
+  `Doctrine\DBAL\Schema\Table` type that `ISchemaWrapper` returns in migrations
+  (`psalm.xml` lists it under `extraFiles`); standalone PHPUnit needs it because
+  the OCP stubs define `IQueryBuilder::PARAM_*` as `Doctrine\DBAL\ParameterType`
+  constants. Inside a server checkout the server's own DBAL wins, because the
+  server's autoloader registers later and Composer prepends. It used to be in
+  `require-dev`, which put a second DBAL in
+  `vendor/`. `Application::__construct()` requires `vendor/autoload.php`, so on any
+  server where the app was installed *with* dev dependencies, that copy shadowed
+  the server's own and `occ app:enable` died with `Undefined constant
+  Doctrine\DBAL\Types\Types::NUMBER`. `--no-dev` builds were never affected, which
+  is why it went unnoticed until PHPUnit ran in CI. The same rule holds for any
+  library the server already ships: a dev tool's dependency goes in its `vendor-bin`
+  namespace.
 - **`enabled` is the server's app-config key, not yours — and taking it down
   takes the whole instance down.** Nextcloud records whether an app is enabled at
   `oc_appconfig(<app>, 'enabled')`, as the string `yes` with declared type

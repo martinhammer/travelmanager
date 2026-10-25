@@ -33,7 +33,6 @@
 		"php": "^8.2"
 	},
 	"require-dev": {
-		"doctrine/dbal": "^4.2",
 		"nextcloud/ocp": "dev-stable33"
 	},
 	"config": {

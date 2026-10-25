@@ -18,5 +18,8 @@
     </projectFiles>
 	<extraFiles>
 		<directory name="vendor"/>
+		<!-- Doctrine\DBAL\Schema\Table, which ISchemaWrapper returns in migrations.
+		     Lives in vendor-bin, never vendor/: the server ships its own DBAL. -->
+		<directory name="vendor-bin/psalm/vendor/doctrine/dbal/src"/>
 	</extraFiles>
 </psalm>

@@ -1,6 +1,7 @@
 {
 	"require-dev": {
-		"vimeo/psalm": "^5.23"
+		"vimeo/psalm": "^5.23",
+		"doctrine/dbal": "^4.2"
 	},
 	"config": {
 		"platform": {
