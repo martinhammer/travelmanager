@@ -9,6 +9,8 @@
     "lint": "eslint src",
     "stylelint": "stylelint src/**/*.vue src/**/*.scss src/**/*.css",
     "type-check": "vue-tsc --noEmit",
+    "ts:check": "npm run type-check",
+    "test": "npm run test:frontend",
     "test:frontend": "vitest run",
     "test:frontend:watch": "vitest",
     "watch": "vite --mode development build --watch"

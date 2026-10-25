@@ -1280,13 +1280,13 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
 composer install        # PHP deps + dev tools (bamarni bin plugin)
 composer psalm          # static analysis, errorLevel 1, findUnusedCode
 composer cs:fix         # php-cs-fixer
-composer test:unit      # PHPUnit — runs inside a Nextcloud server checkout
+composer test:unit      # PHPUnit — standalone, or inside a server checkout (see §7)
 
 npm ci                  # frontend deps (needs package-lock.json — committed)
 npm run lint            # eslint
-npm run type-check      # vue-tsc --noEmit
+npm run type-check      # vue-tsc --noEmit (alias ts:check — what lint-typescript.yml runs)
 npm run stylelint       # stylelint
-npm run test:frontend   # vitest (tests/frontend/**)
+npm run test:frontend   # vitest (tests/frontend/**) (alias test — what node-test.yml runs)
 npm run build           # vite build (Vue 3 + @nextcloud/vite-config)
 ```
 
@@ -1295,9 +1295,13 @@ A **`Makefile`** wraps these for build/package/deploy. Key targets: `make dev`
 (frontend + isolated prod composer install), `make package` (app-store zip from
 `git archive HEAD`), `make stage` (deployable tree from the **working tree**,
 including uncommitted changes — rsync to a test server), `make clean` /
-`make distclean`. `make check` = lint + psalm + test + openapi. Note `make test`
-and `make check` include `composer test:unit`, which only passes inside a full
-Nextcloud checkout (see §7); run those in CI / a dev server.
+`make distclean`. `make check` = lint + psalm + test + openapi.
+
+CI runs all three test suites on every PR: `phpunit-sqlite.yml` (PHPUnit inside a
+`nextcloud/server` checkout), `node-test.yml` (vitest) and `lint-typescript.yml`
+(vue-tsc). The `ts:check` and `test` npm aliases exist only because those
+templates call them with `--if-present` — remove one and its job goes green
+while running nothing.
 
 ## 7. Gotchas (learned the hard way — read before editing)
 
