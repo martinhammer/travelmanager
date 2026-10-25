@@ -216,16 +216,16 @@
         },
         {
             "name": "bytestream/horde-imap-client",
-            "version": "v2.34.2",
+            "version": "v2.34.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bytestream/Imap_Client.git",
-                "reference": "f01ae2032800430b033a4b36624124fdba46216f"
+                "reference": "c0d125586594f7234df9935ebe1bc2e55c43af0b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bytestream/Imap_Client/zipball/f01ae2032800430b033a4b36624124fdba46216f",
-                "reference": "f01ae2032800430b033a4b36624124fdba46216f",
+                "url": "https://api.github.com/repos/bytestream/Imap_Client/zipball/c0d125586594f7234df9935ebe1bc2e55c43af0b",
+                "reference": "c0d125586594f7234df9935ebe1bc2e55c43af0b",
                 "shasum": ""
             },
             "require": {
@@ -267,9 +267,9 @@
             "description": "Horde IMAP client library",
             "homepage": "https://www.horde.org/libraries/Horde_Imap_Client",
             "support": {
-                "source": "https://github.com/bytestream/Imap_Client/tree/v2.34.2"
+                "source": "https://github.com/bytestream/Imap_Client/tree/v2.34.3"
             },
-            "time": "2026-09-21T09:19:14+00:00"
+            "time": "2026-10-14T10:29:38+00:00"
         },
         {
             "name": "bytestream/horde-listheaders",
@@ -325,16 +325,16 @@
         },
         {
             "name": "bytestream/horde-mail",
-            "version": "v2.7.2",
+            "version": "v2.7.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bytestream/Mail.git",
-                "reference": "5054666fe1a43f86a85e911111c115a133d80334"
+                "reference": "1dce1f9e84ce747e9075fdfa1a4c9391c7ba9244"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bytestream/Mail/zipball/5054666fe1a43f86a85e911111c115a133d80334",
-                "reference": "5054666fe1a43f86a85e911111c115a133d80334",
+                "url": "https://api.github.com/repos/bytestream/Mail/zipball/1dce1f9e84ce747e9075fdfa1a4c9391c7ba9244",
+                "reference": "1dce1f9e84ce747e9075fdfa1a4c9391c7ba9244",
                 "shasum": ""
             },
             "require": {
@@ -374,22 +374,22 @@
             "description": "Horde mail library",
             "homepage": "https://www.horde.org/libraries/Horde_Mail",
             "support": {
-                "source": "https://github.com/bytestream/Mail/tree/v2.7.2"
+                "source": "https://github.com/bytestream/Mail/tree/v2.7.3"
             },
-            "time": "2026-02-12T11:00:50+00:00"
+            "time": "2026-10-19T07:51:05+00:00"
         },
         {
             "name": "bytestream/horde-mime",
-            "version": "v2.14.1",
+            "version": "v2.14.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bytestream/Mime.git",
-                "reference": "6cd0216b850ea811ebc543c4b5731ef3a256ba89"
+                "reference": "6c4eaa6462efd6cdaddc8cf72b96f6d3b3b06a72"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bytestream/Mime/zipball/6cd0216b850ea811ebc543c4b5731ef3a256ba89",
-                "reference": "6cd0216b850ea811ebc543c4b5731ef3a256ba89",
+                "url": "https://api.github.com/repos/bytestream/Mime/zipball/6c4eaa6462efd6cdaddc8cf72b96f6d3b3b06a72",
+                "reference": "6c4eaa6462efd6cdaddc8cf72b96f6d3b3b06a72",
                 "shasum": ""
             },
             "require": {
@@ -438,9 +438,9 @@
             "description": "MIME library",
             "homepage": "https://www.horde.org/libraries/Horde_Mime",
             "support": {
-                "source": "https://github.com/bytestream/Mime/tree/v2.14.1"
+                "source": "https://github.com/bytestream/Mime/tree/v2.14.2"
             },
-            "time": "2026-03-30T09:58:39+00:00"
+            "time": "2026-10-19T13:14:23+00:00"
         },
         {
             "name": "bytestream/horde-secret",
