@@ -34,8 +34,7 @@
 	},
 	"require-dev": {
 		"doctrine/dbal": "^4.2",
-		"nextcloud/ocp": "dev-stable33",
-		"roave/security-advisories": "dev-latest"
+		"nextcloud/ocp": "dev-stable33"
 	},
 	"config": {
 		"allow-plugins": {
