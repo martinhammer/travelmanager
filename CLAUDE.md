@@ -1303,6 +1303,22 @@ CI runs all three test suites on every PR: `phpunit-sqlite.yml` (PHPUnit inside 
 templates call them with `--if-present` — remove one and its job goes green
 while running nothing.
 
+**The workflows are the `nextcloud/.github` org templates, synced, not edited**
+(guide: `~/Code/nextcloud-guides/nextcloud-github-ci.md`). The only deviations
+are `ubuntu-latest` for the org-only `ubuntu-latest-low` runner, plus two
+`.github/workflows/*.yml.patch` files that every sync re-applies:
+- **`update-nextcloud-ocp-matrix.yml.patch`** removes the
+  `repository_owner == 'nextcloud'` guard (without it the job is skipped here,
+  which shows as success, and the `nextcloud/ocp` bump PRs simply stop). It also
+  removes the self-approve + auto-merge steps, as does
+  **`npm-audit-fix.yml.patch`**: this repo does not let Actions approve PRs and
+  has auto-merge off, so those steps would fail every run. Bot PRs are reviewed
+  and merged by hand.
+- **`appstore-build-publish.yml` is deliberately absent** although
+  `app_template` ships it: releases are built by hand (`make package`), and the
+  workflow needs an app-store signing certificate plus `APP_PRIVATE_KEY` /
+  `APPSTORE_TOKEN` secrets the repo does not have.
+
 ## 7. Gotchas (learned the hard way — read before editing)
 
 - **`tests/bootstrap.php` has two modes, and CI uses the other one.**
