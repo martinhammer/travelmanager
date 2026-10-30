@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTimestamp, nextSortDirection } from '../../src/grid'
+import { formatTimestamp, nextSortDirection, sortMarker } from '../../src/grid'
 import { MESSAGE_COLUMNS } from '../../src/messages'
 import { BOOKING_COLUMNS } from '../../src/bookings'
 
@@ -17,8 +17,23 @@ describe('nextSortDirection', () => {
 
 	it('works the same for the Bookings grid — the behaviour is the columns, not the view', () => {
 		expect(nextSortDirection(BOOKING_COLUMNS, 'added', 'title', 'asc')).toBe('desc')
-		expect(nextSortDirection(BOOKING_COLUMNS, 'travel', 'title', 'desc')).toBe('asc')
 		expect(nextSortDirection(BOOKING_COLUMNS, 'title', 'title', 'asc')).toBe('desc')
+	})
+
+	it('cycles Travel dates through smart, plain descending and plain ascending', () => {
+		expect(nextSortDirection(BOOKING_COLUMNS, 'travel', 'title', 'desc')).toBe('smart')
+		expect(nextSortDirection(BOOKING_COLUMNS, 'travel', 'travel', 'smart')).toBe('desc')
+		expect(nextSortDirection(BOOKING_COLUMNS, 'travel', 'travel', 'desc')).toBe('asc')
+		expect(nextSortDirection(BOOKING_COLUMNS, 'travel', 'travel', 'asc')).toBe('smart')
+	})
+})
+
+describe('sortMarker', () => {
+	it('marks only the active column, with a diamond for the smart order — no direction to claim', () => {
+		expect(sortMarker('travel', 'title', 'asc')).toBe('')
+		expect(sortMarker('travel', 'travel', 'asc')).toBe('▲')
+		expect(sortMarker('travel', 'travel', 'desc')).toBe('▼')
+		expect(sortMarker('travel', 'travel', 'smart')).toBe('◆')
 	})
 })
 

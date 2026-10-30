@@ -10,15 +10,22 @@
 /** Which way a column is ordered. */
 export type SortDirection = 'asc' | 'desc'
 
-/** A sortable column: its key, and the direction its first click applies. */
-export interface SortColumn<K extends string> {
+/**
+ * A sortable column: its key, the direction its first click applies, and —
+ * for the rare column with more than two orderings — the modes its heading
+ * cycles through. `D` is the grid's own direction type, so a grid that only
+ * ever sorts asc/desc never has to handle a mode it cannot reach.
+ */
+export interface SortColumn<K extends string, D extends string = SortDirection> {
 	key: K
-	defaultDirection: SortDirection
+	defaultDirection: D
+	cycle?: D[]
 }
 
 /**
  * The direction a column should take when the user clicks its heading: its own
- * default on first click, then flipped on every click after that.
+ * default on first click, then the next mode on every click after that —
+ * flipping asc/desc, or stepping through the column's `cycle` when it has one.
  *
  * Defaults differ by column type — dates and counts open descending (newest,
  * most attempts: what you came to look at), text ascending (A→Z, which is what
@@ -28,30 +35,42 @@ export interface SortColumn<K extends string> {
  * @param current the column currently sorted on
  * @param direction the direction currently applied
  */
-export const nextSortDirection = <K extends string>(
-	columns: SortColumn<K>[],
+export const nextSortDirection = <K extends string, D extends string = SortDirection>(
+	columns: SortColumn<K, D>[],
 	column: K,
 	current: K,
-	direction: SortDirection,
-): SortDirection => {
+	direction: D,
+): D => {
+	const definition = columns.find((c) => c.key === column)
 	if (column !== current) {
-		return columns.find((c) => c.key === column)?.defaultDirection ?? 'desc'
+		return definition?.defaultDirection ?? ('desc' as D)
 	}
-	return direction === 'asc' ? 'desc' : 'asc'
+	const cycle = definition?.cycle ?? (['asc', 'desc'] as D[])
+	return cycle[(cycle.indexOf(direction) + 1) % cycle.length]
 }
 
 /**
  * The ▲/▼ next to the column currently sorted on, empty for the others. Shared
- * by every grid — they differ only in which state they pass in.
+ * by every grid — they differ only in which state they pass in. Any mode other
+ * than asc/desc (the Bookings grid's 'smart' travel order) gets a ◆: it runs
+ * forward from today and then back through the past, so an arrow either way
+ * would misdescribe most of the list.
  * @param active the column the grid is sorted on
  * @param column the column being rendered
  * @param direction the direction currently applied
  */
-export const sortMarker = (active: string, column: string, direction: SortDirection): string => {
+export const sortMarker = (active: string, column: string, direction: string): string => {
 	if (active !== column) {
 		return ''
 	}
-	return direction === 'asc' ? '▲' : '▼'
+	switch (direction) {
+	case 'asc':
+		return '▲'
+	case 'desc':
+		return '▼'
+	default:
+		return '◆'
+	}
 }
 
 /**

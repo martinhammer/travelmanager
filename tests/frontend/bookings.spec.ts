@@ -124,7 +124,35 @@ describe('sortBookings', () => {
 	it('puts the next trip first, past travel below, undated last', () => {
 		// 2 and 4 are ahead (soonest first); 5 and 1 are past (most recent
 		// first); 3 has no date at all.
-		expect(sortBookings(pool, 'travel', 'asc', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
+		expect(sortBookings(pool, 'travel', 'smart', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
+	})
+
+	it('defaults to the smart order', () => {
+		expect(sortBookings(pool, 'travel').map((b) => b.id)).toEqual(sortBookings(pool, 'travel', 'smart').map((b) => b.id))
+	})
+
+	it('counts a booking still under way as upcoming, not past', () => {
+		// Matches tripPeriod: past means ended. A stay that began before today
+		// and checks out after it is the most current thing there is, so it
+		// leads the upcoming group by its earlier start.
+		const stays = [
+			booking({ id: 1, startDate: '2026-08-20T10:00:00', endDate: null }),
+			booking({ id: 2, startDate: '2026-08-10T14:00:00', endDate: '2026-08-18T11:00:00' }),
+			booking({ id: 3, startDate: '2026-08-01T09:00:00', endDate: '2026-08-05T09:00:00' }),
+			booking({ id: 4, startDate: '2026-08-12T09:00:00', endDate: '2026-08-14T08:00:00' }),
+		]
+		// 4 ends today (still current), 3 ended before today (past).
+		expect(sortBookings(stays, 'travel', 'smart', now).map((b) => b.id)).toEqual([2, 4, 1, 3])
+	})
+
+	it('keeps the incoming order for bookings that start at the same moment', () => {
+		// The comparator must report a tie as a tie, so the stable sort keeps
+		// the API order rather than whatever the engine does with an
+		// inconsistent comparator.
+		const twins = [3, 1, 2].map((id) => booking({ id, startDate: '2026-09-01T08:00:00' }))
+		expect(sortBookings(twins, 'travel', 'smart', now).map((b) => b.id)).toEqual([3, 1, 2])
+		const past = [3, 1, 2].map((id) => booking({ id, startDate: '2026-07-01T08:00:00' }))
+		expect(sortBookings(past, 'travel', 'smart', now).map((b) => b.id)).toEqual([3, 1, 2])
 	})
 
 	it('counts a booking travelling today as upcoming, however late it is read', () => {
@@ -135,13 +163,17 @@ describe('sortBookings', () => {
 			booking({ id: 1, startDate: '2026-08-28T08:00:00' }),
 			booking({ id: 2, startDate: '2026-08-27T08:00:00' }),
 		]
-		expect(sortBookings(sameDay, 'travel', 'asc', evening).map((b) => b.id)).toEqual([1, 2])
+		expect(sortBookings(sameDay, 'travel', 'smart', evening).map((b) => b.id)).toEqual([1, 2])
 	})
 
 	it('falls back to plain reverse chronology descending — looking back, not ahead', () => {
-		// Deliberately NOT the reverse of the ascending order: that one groups
+		// Deliberately NOT the reverse of the smart order: that one groups
 		// future before past, which only makes sense pointing forwards.
 		expect(sortBookings(pool, 'travel', 'desc', now).map((b) => b.id)).toEqual([4, 2, 5, 1, 3])
+	})
+
+	it('offers a plain chronology ascending, undated still last', () => {
+		expect(sortBookings(pool, 'travel', 'asc', now).map((b) => b.id)).toEqual([1, 5, 2, 4, 3])
 	})
 
 	it('orders by creation when asked', () => {
@@ -174,7 +206,7 @@ describe('sortBookings', () => {
 
 	it('does not mutate the input', () => {
 		const copy = [...pool]
-		sortBookings(pool, 'travel', 'asc', now)
+		sortBookings(pool, 'travel', 'smart', now)
 		expect(pool).toEqual(copy)
 	})
 })

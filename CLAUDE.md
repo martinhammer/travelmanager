@@ -1209,10 +1209,20 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
 - **The first data column is the row's identity and the link into the sidebar**
   in all three grids (Subject / Title / Trip). Keep it first if columns are
   reordered.
-- **`sortBookings('travel', 'asc')` is deliberately not a plain date sort**: next
-  trip first, then further-off ones, *then past travel in reverse*, undated last.
-  Ascending by date would bury what is coming up under everything that already
-  happened. Descending is plain reverse chronology (looking back, not ahead).
+- **Travel dates has three sort modes, and the default is not a plain date
+  sort.** `sortBookings('travel', 'smart')` puts what is under way or coming up
+  first (soonest start first), *then past travel in reverse*, undated last —
+  ascending by date would bury what is coming up under everything that already
+  happened. "Past" means **ended** (`endDate ?? startDate`, by calendar day), as
+  in `tripPeriod`: a stay that began yesterday is current, not history. Plain
+  `'desc'` and `'asc'` are ordinary chronologies by start. The heading cycles
+  smart → desc → asc (`BOOKING_COLUMNS[].cycle`, which `nextSortDirection`
+  steps through; columns without one just flip), marked ◆ / ▼ / ▲ — a diamond,
+  not an arrow, because smart mode runs forward from today and then backward
+  through the past, so any arrow misdescribes most of the list. The heading
+  carries a `title` naming the mode, because the marker is `aria-hidden`. The
+  mode type is `BookingSortDirection`; `SortColumn` is generic over it so
+  Messages and Trips never see `'smart'`.
 - **`sortTrips('travel')` is the opposite call, on purpose**: a plain chronology,
   because the Current/Future/Past chips already answer "what is coming up" and
   re-ranking the column around today as well would fight them.

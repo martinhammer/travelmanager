@@ -6,23 +6,24 @@ import ContentDuplicateIcon from 'vue-material-design-icons/ContentDuplicate.vue
 import { t } from '@nextcloud/l10n'
 import {
 	type BookingSort,
+	type BookingSortDirection,
 	BOOKING_COLUMNS,
 	bookingSpan,
 	filterBookings,
 	hasPossibleDuplicate,
 	sortBookings,
 } from './bookings'
-import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
+import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import { bookingStatusLabel, reviewStateLabel, typeName } from './labels'
 import { isOpen, openDetail } from './navigation'
 import { availableTypes, bookings, loading, tripColors, tripNames } from './store'
 
-// This view's own filter/sort state. 'travel' ascending is the default: what is
-// coming up next, first.
+// This view's own filter/sort state. 'travel' in 'smart' mode is the default:
+// what is under way or coming up next, first.
 const filter = ref('all')
 const type = ref('all')
 const sort = ref<BookingSort>('travel')
-const direction = ref<SortDirection>('asc')
+const direction = ref<BookingSortDirection>('smart')
 
 const filtered = computed(() => sortBookings(
 	filterBookings(bookings.value, filter.value, type.value),
@@ -52,6 +53,17 @@ const columnLabels: Record<BookingSort, string> = {
 }
 
 const columns = BOOKING_COLUMNS.map((column) => ({ key: column.key, label: columnLabels[column.key] }))
+
+// The Travel dates heading cycles three modes, and the ▲/▼/◆ marker is
+// aria-hidden, so the heading says in words which one is applied.
+const travelModeLabels: Record<BookingSortDirection, string> = {
+	smart: t('travelmanager', 'Sorted from today: upcoming first, then past, most recent first'),
+	desc: t('travelmanager', 'Sorted by travel date, latest first'),
+	asc: t('travelmanager', 'Sorted by travel date, earliest first'),
+}
+
+const headingTitle = (column: BookingSort): string | undefined =>
+	column === 'travel' && sort.value === 'travel' ? travelModeLabels[direction.value] : undefined
 
 const onSortColumn = (column: BookingSort): void => {
 	direction.value = nextSortDirection(BOOKING_COLUMNS, column, sort.value, direction.value)
@@ -113,6 +125,7 @@ const filters: { key: string, label: string }[] = [
 				:key="column.key"
 				type="button"
 				:class="['tm-column-heading', { 'tm-column-heading-active': sort === column.key }]"
+				:title="headingTitle(column.key)"
 				@click="onSortColumn(column.key)">
 				<span class="tm-heading-label">{{ column.label }}</span>
 				<span class="tm-sort-marker" aria-hidden="true">

@@ -274,6 +274,12 @@ export const filterByReviewState = (items: Booking[], reviewState: string): Book
 /** The Bookings grid's sortable columns — one per column heading. */
 export type BookingSort = 'title' | 'trip' | 'type' | 'provider' | 'reference' | 'travel' | 'added' | 'reviewState'
 
+/**
+ * The Bookings grid's sort modes: the shared asc/desc, plus 'smart', the
+ * travel-from-today order only the Travel dates column offers (see sortBookings).
+ */
+export type BookingSortDirection = SortDirection | 'smart'
+
 /** Trip names by id, for the columns that show or sort on a booking's trip. */
 export type TripNames = Record<number, string>
 
@@ -283,15 +289,16 @@ export type TripNames = Record<number, string>
  * and this module stays free of @nextcloud/* imports (§7 of CLAUDE.md).
  *
  * 'travel' is the default, and the only column with an ordering specific to
- * travel rather than to text or time — see sortBookings.
+ * travel rather than to text or time — see sortBookings. It opens on 'smart'
+ * and its heading cycles smart → plain descending → plain ascending → smart.
  */
-export const BOOKING_COLUMNS: SortColumn<BookingSort>[] = [
+export const BOOKING_COLUMNS: SortColumn<BookingSort, BookingSortDirection>[] = [
 	{ key: 'title', defaultDirection: 'asc' },
 	{ key: 'trip', defaultDirection: 'asc' },
 	{ key: 'type', defaultDirection: 'asc' },
 	{ key: 'provider', defaultDirection: 'asc' },
 	{ key: 'reference', defaultDirection: 'asc' },
-	{ key: 'travel', defaultDirection: 'asc' },
+	{ key: 'travel', defaultDirection: 'smart', cycle: ['smart', 'desc', 'asc'] },
 	{ key: 'added', defaultDirection: 'desc' },
 	{ key: 'reviewState', defaultDirection: 'asc' },
 ]
@@ -337,36 +344,40 @@ const sortValue = (item: Booking, sort: BookingSort, tripNames: TripNames): stri
 /**
  * Order bookings by one column, valueless rows last in both directions.
  *
- * 'travel' ascending is special-cased and is the view's default: the next trip
- * first, then further-off ones, with **past travel below in reverse order** and
- * undated bookings last. Plain ascending by date would bury what is coming up
- * under everything that already happened — which is the whole reason this view
- * does not simply sort the column like any other. Descending is a plain reverse
- * chronology, for when you are looking back rather than ahead.
+ * 'travel' with direction 'smart' is the view's default: what is under way or
+ * coming up first (soonest start first), then **past travel below in reverse
+ * order**, undated bookings last. Plain ascending by date would bury what is
+ * coming up under everything that already happened — which is the whole reason
+ * this mode exists. A booking is past only once it has *ended*, as in
+ * tripPeriod: a hotel stay that began yesterday is the most current thing you
+ * have, not history. Plain 'asc' and 'desc' are ordinary chronologies by start,
+ * for when you want the whole record in order rather than a view from today.
  * @param items the bookings to order (not mutated)
  * @param sort the column to order by
- * @param direction 'asc' or 'desc'
+ * @param direction 'asc', 'desc', or 'smart' (meaningful for 'travel' only;
+ *   any other column treats it as 'asc')
  * @param now reference point for "past"; injectable so tests do not depend on today
  * @param tripNames trip names by id, needed only by the 'trip' column
  */
 export const sortBookings = (
 	items: Booking[],
 	sort: BookingSort,
-	direction: SortDirection = 'asc',
+	direction: BookingSortDirection = 'smart',
 	now: Date = new Date(),
 	tripNames: TripNames = {},
 ): Booking[] => {
 	const copy = [...items]
 
-	if (sort === 'travel' && direction === 'asc') {
+	if (sort === 'travel' && direction === 'smart') {
 		// By calendar date, matching tripPeriod: anything travelling today counts
-		// as upcoming, not past, however late in the day it is read.
+		// as upcoming, not past, however late in the day it is read — and anything
+		// still under way counts too, so it is the end that decides, not the start.
 		const today = localDate(now)
 		const rank = (item: Booking): number => {
 			if (!item.startDate) {
 				return 2
 			}
-			return item.startDate.slice(0, 10) >= today ? 0 : 1
+			return (item.endDate ?? item.startDate).slice(0, 10) >= today ? 0 : 1
 		}
 		return copy.sort((a, b) => {
 			const ra = rank(a)
@@ -379,12 +390,12 @@ export const sortBookings = (
 			}
 			// Upcoming ascending (soonest first); past descending (most recent first).
 			return ra === 0
-				? (a.startDate! < b.startDate! ? -1 : 1)
+				? byDateDesc(b.startDate, a.startDate)
 				: byDateDesc(a.startDate, b.startDate)
 		})
 	}
 
-	const sign = direction === 'asc' ? 1 : -1
+	const sign = direction === 'desc' ? -1 : 1
 	return copy.sort((a, b) => {
 		const av = sortValue(a, sort, tripNames)
 		const bv = sortValue(b, sort, tripNames)
