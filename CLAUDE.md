@@ -1314,9 +1314,19 @@ templates call them with `--if-present` — remove one and its job goes green
 while running nothing.
 
 **The workflows are the `nextcloud/.github` org templates, synced, not edited**
-(guide: `~/Code/nextcloud-guides/nextcloud-github-ci.md`). The only deviations
-are `ubuntu-latest` for the org-only `ubuntu-latest-low` runner, plus two
-`.github/workflows/*.yml.patch` files that every sync re-applies:
+(guide: `~/Code/nextcloud-guides/nextcloud-github-ci.md`). The deviations are
+two mechanical rewrites done by the guide's **post-sync step** after every sync,
+plus two `.github/workflows/*.yml.patch` files that every sync re-applies. The
+post-sync step:
+- replaces the org-only `ubuntu-latest-low` runner with `ubuntu-latest`;
+- **drops matrix entries for `stableNN` branches this repo does not have.** The org
+  template runs `npm-audit-fix.yml` on its current stable branches too, and since
+  upstream's 2026-10-01 change a missing branch is a red job every week. It is a
+  step, not a patch, because upstream rotates that list at every branch-off and EOL,
+  and a hunk naming `'stable35'` would stop applying at the next rotation. Skip it
+  and the guide's audit reports `BRANCH`.
+
+The patches, and one deliberate absence:
 - **`update-nextcloud-ocp-matrix.yml.patch`** removes the
   `repository_owner == 'nextcloud'` guard (without it the job is skipped here,
   which shows as success, and the `nextcloud/ocp` bump PRs simply stop). It also
