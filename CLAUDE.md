@@ -1528,9 +1528,14 @@ are `ubuntu-latest` for the org-only `ubuntu-latest-low` runner, plus two
   props (`title`, `fillColor` defaulting to `currentColor`, `size`). Delete the
   shim if the package ever fixes its exports map. Note `fillColor`'s default is
   what lets CSS `color` drive an icon, which the calendar's bars rely on.
-- **`@nextcloud/dialogs` must be ^7** (v6 pins a `@nextcloud/vue ^8` peer that
-  conflicts with v9 and blocks `npm install`). v7 dropped the `@nextcloud/vue`
-  peer. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5
+- **`@nextcloud/dialogs` must be ^7 or later** (v6 pins a `@nextcloud/vue ^8`
+  peer that conflicts with v9 and blocks `npm install`). v7 dropped the
+  `@nextcloud/vue` peer. **Since v8 its styles are imported by the package's own
+  entry points** and the `@nextcloud/dialogs/style.css` export is gone — do not
+  re-add an explicit import (the build fails on it). Before v8 we needed one:
+  the toast CSS only reached the bundle transitively, and when it stopped doing
+  so the toast container lost `position: fixed` and every toast rendered
+  invisibly at the end of `<body>`. If toasts vanish again, check that first. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5
   pins Vue 2 / `@nextcloud/vue ^8`; v6 dropped the peers and is Vue-3 clean).
 - **OCS URL helper must not encode path slashes.** `generateOcsUrl(url, params)`
   runs `encodeURIComponent` on every `{param}` (option `escape` defaults to
