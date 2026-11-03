@@ -6,6 +6,7 @@ import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import { discardMessage, fetchMessageBody, retryMessage } from './api'
+import GridSortMenu from './GridSortMenu.vue'
 import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import {
 	type MessageSort,
@@ -161,11 +162,15 @@ const onDiscard = async (id: number, discarded: boolean) => {
 </script>
 
 <template>
-	<div class="tm-content">
+	<div class="tm-content tm-grid-view">
 		<div class="tm-toolbar">
 			<h2 class="tm-toolbar-heading">
 				{{ t('travelmanager', 'Messages') }}
 			</h2>
+			<GridSortMenu :columns="columns"
+				:sort="sort"
+				:direction="direction"
+				@select="onSortColumn($event as MessageSort)" />
 		</div>
 		<div class="tm-chips">
 			<NcButton v-for="chip in filters"
@@ -333,27 +338,67 @@ const onDiscard = async (id: number, discarded: boolean) => {
 
 /* Columns drop as space runs out, least-scanned first. The expanded row body no
    longer repeats this metadata, so a dropped column is genuinely not shown at
-   that width — only Attempts survives, inside the Model response text. */
-@media (max-width: 1100px) {
-	.columns {
+   that width — only Attempts survives, inside the Model response text.
+   Steps follow the space the grid has, not the window — see the note in
+   BookingsView. Exclusive ranges, doubled class, same reasons. */
+@container tm-grid (780px <= width < 1100px) {
+	.columns.columns {
 		grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 180px 200px;
 	}
 
 	/* Last processed, Attempts. */
-	.columns > *:nth-child(5),
-	.columns > *:nth-child(6) {
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(6) {
 		display: none;
 	}
 }
 
-@media (max-width: 800px) {
-	.columns {
+@container tm-grid (600px <= width < 780px) {
+	.columns.columns {
 		grid-template-columns: 16px minmax(0, 1fr) auto;
 	}
 
-	/* From, Date received — the subject and the status are what you scan for. */
-	.columns > *:nth-child(3),
-	.columns > *:nth-child(4) {
+	/* From, Date received — the subject and the status are what you scan for.
+	   Last processed and Attempts, as in the step above. */
+	.columns.columns > *:nth-child(3),
+	.columns.columns > *:nth-child(4),
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(6) {
+		display: none;
+	}
+}
+
+/* Compact: a two-line card — subject and status, then sender and when it
+   arrived. The chevron keeps its own column so the row still reads as
+   something that opens.
+   Two auto columns, not one: the end of each line spans what the other line's
+   end leaves, so the status and the (much wider) timestamp each take only
+   their own width. With one shared column the subject gave up the timestamp's
+   ~140px as well, leaving it ~120px on a 360px phone. 600px: keep in step with the compact block in grid.css. */
+@container tm-grid (width < 600px) {
+	.columns.columns {
+		grid-template-columns: 16px minmax(0, 1fr) auto auto;
+		grid-template-areas:
+			'chev subject subject  status'
+			'.    sender  received received';
+	}
+
+	.columns.columns > *:nth-child(1) { grid-area: chev; }
+	.columns.columns > *:nth-child(2) { grid-area: subject; }
+	.columns.columns > *:nth-child(3) { grid-area: sender; }
+
+	.columns.columns > *:nth-child(4) {
+		grid-area: received;
+		justify-self: end;
+	}
+
+	.columns.columns > *:nth-child(7) {
+		grid-area: status;
+		justify-self: end;
+	}
+
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(6) {
 		display: none;
 	}
 }

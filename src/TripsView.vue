@@ -4,6 +4,7 @@ import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import { t } from '@nextcloud/l10n'
 import { openTripEditor } from './dialogs'
+import GridSortMenu from './GridSortMenu.vue'
 import { type SortDirection, formatSpan, nextSortDirection, sortMarker } from './grid'
 import { tripLabel, tripTypeLabel, typeName } from './labels'
 import { isOpen, openDetail } from './navigation'
@@ -47,11 +48,15 @@ const onNewTrip = () => openTripEditor(null)
 </script>
 
 <template>
-	<div class="tm-content">
+	<div class="tm-content tm-grid-view">
 		<div class="tm-toolbar">
 			<h2 class="tm-toolbar-heading">
 				{{ t('travelmanager', 'Trips') }}
 			</h2>
+			<GridSortMenu :columns="columns"
+				:sort="sort"
+				:direction="direction"
+				@select="onSortColumn($event as TripSort)" />
 			<NcButton variant="primary" @click="onNewTrip">
 				{{ t('travelmanager', 'Create trip') }}
 			</NcButton>
@@ -140,26 +145,79 @@ const onNewTrip = () => openTripEditor(null)
 	grid-template-columns: minmax(0, 1fr) 110px 190px 340px;
 }
 
-@media (max-width: 900px) {
+/* Steps follow the space the grid has, not the window — see the note in
+   BookingsView. Exclusive ranges, doubled class, same reasons. */
+@container tm-grid (600px <= width < 950px) {
 	/* The booking-lozenge strip is the widest thing here and the least urgent;
 	   the bookings themselves are one click away in the detail panel. */
-	.columns {
+	.columns.columns {
 		grid-template-columns: minmax(0, 1fr) 110px 190px;
 	}
 
-	.columns > *:nth-child(4) {
+	.columns.columns > *:nth-child(4) {
 		display: none;
 	}
 }
 
-@media (max-width: 680px) {
-	/* Then Type: it is the narrowest, but the name and the dates are what you
-	   scan a trip list for. */
-	.columns {
-		grid-template-columns: minmax(0, 1fr) 190px;
+/* Compact: a two-line card — name and type, then dates and the booking count.
+   Only the count survives of the lozenge strip; the per-type lozenges would
+   overflow a phone, and the bookings are one tap away in the panel.
+   600px: keep in step with the compact block in grid.css. */
+@container tm-grid (width < 600px) {
+	.columns.columns {
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas:
+			'name   type'
+			'travel bookings';
 	}
 
-	.columns > *:nth-child(2) {
+	.columns.columns > *:nth-child(1) { grid-area: name; }
+	.columns.columns > *:nth-child(3) { grid-area: travel; }
+
+	/* Top, not centred: beside a name that wraps, a centred badge lands on
+	   its second line and reads as belonging to the dates below. */
+	.columns.columns > *:nth-child(2) {
+		grid-area: type;
+		justify-self: end;
+		align-self: start;
+	}
+
+	.columns.columns > *:nth-child(4) {
+		grid-area: bookings;
+		justify-self: end;
+	}
+
+	/* The name is the row's identity, so on a phone it wraps instead of
+	   truncating: a card has the height to spare, and a trip list of
+	   "UAE Nov…" ellipses cannot be told apart. The dot sits on the first line
+	   rather than centring on a two-line name.
+	   :global, because these are grid.css classes and a module would otherwise
+	   hash them into names nothing carries. */
+	.columns.columns > *:nth-child(1) {
+		align-items: flex-start;
+	}
+
+	.columns.columns > *:nth-child(1) :global(.tm-swatch) {
+		margin-block-start: calc((1lh - 14px) / 2);
+	}
+
+	.columns.columns > *:nth-child(1) :global(.tm-cell-text) {
+		min-width: 0;
+		overflow: visible;
+		white-space: normal;
+		overflow-wrap: anywhere;
+		text-overflow: clip;
+	}
+
+	/* Dates may break at the arrow rather than run under the count badge. */
+	.columns.columns > *:nth-child(3) {
+		min-width: 0;
+		white-space: normal;
+	}
+
+	/* Only the count: the per-type lozenges are the strip the full layout has a
+	   340px column for. */
+	.columns.columns > *:nth-child(4) :global(.tm-badge) + :global(.tm-badge) {
 		display: none;
 	}
 }
