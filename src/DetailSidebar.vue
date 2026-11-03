@@ -254,7 +254,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 	     with a ::before on Nextcloud's own heading row (see .tm-sidebar-swatch in
 	     grid.css) because the panel takes its name as a string. -->
 	<NcAppSidebar :name="title"
-		:class="{ 'tm-sidebar-swatch': headerColor !== null }"
+		:class="['tm-sidebar', { 'tm-sidebar-swatch': headerColor !== null }]"
 		:style="{ '--tm-sidebar-swatch': headerColor ?? undefined }"
 		@update:open="emit('close')">
 		<!-- The sidebar's slot runs flush to its edge; the title above it is
@@ -294,7 +294,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					     kind of thing this is, the link says which one. -->
 					<li v-if="bookingTrip !== null" :class="$style.linkRow">
 						<span class="tm-badge">{{ t('travelmanager', 'Trip') }}</span>
-						<NcButton variant="tertiary" @click="emit('open', 'trip', bookingTrip.id)">
+						<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'trip', bookingTrip.id)">
 							{{ tripLabel(bookingTrip) }}
 						</NcButton>
 					</li>
@@ -302,7 +302,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					     demand for bookings older than the message list's page. -->
 					<li v-if="bookingMessage !== null" :class="$style.linkRow">
 						<span class="tm-badge">{{ t('travelmanager', 'Source email') }}</span>
-						<NcButton variant="tertiary" @click="emit('open', 'message', bookingMessage.id)">
+						<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'message', bookingMessage.id)">
 							{{ bookingMessage.subject || bookingMessage.messageId }}
 						</NcButton>
 					</li>
@@ -328,7 +328,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					<ul :class="$style.links">
 						<li v-for="item in bookingDuplicates" :key="item.id" :class="$style.linkRow">
 							<span class="tm-badge">{{ typeName(item.type) }}</span>
-							<NcButton :class="$style.linkRowGrow" variant="tertiary" @click="emit('open', 'booking', item.id)">
+							<NcButton :class="[$style.link, $style.linkRowGrow]" variant="tertiary" @click="emit('open', 'booking', item.id)">
 								{{ bookingLabel(item) }}
 							</NcButton>
 							<!-- Removes *this row's* booking from the group, leaving
@@ -374,7 +374,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 				<ul :class="$style.links">
 					<li v-for="item in tripBookings" :key="item.id" :class="$style.linkRow">
 						<span class="tm-badge">{{ typeName(item.type) }}</span>
-						<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+						<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'booking', item.id)">
 							{{ bookingLabel(item) }}
 						</NcButton>
 					</li>
@@ -406,7 +406,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 				<ul :class="$style.links">
 					<li v-for="item in messageBookings" :key="item.id" :class="$style.linkRow">
 						<span class="tm-badge">{{ typeName(item.type) }}</span>
-						<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+						<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'booking', item.id)">
 							{{ bookingLabel(item) }}
 						</NcButton>
 					</li>
@@ -425,7 +425,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					<ul :class="$style.links">
 						<li v-for="item in messageRelated" :key="item.id" :class="$style.linkRow">
 							<span class="tm-badge">{{ typeName(item.type) }}</span>
-							<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+							<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'booking', item.id)">
 								{{ bookingLabel(item) }}
 							</NcButton>
 						</li>
@@ -442,7 +442,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					<ul :class="$style.links">
 						<li v-for="item in messageDuplicates" :key="item.id" :class="$style.linkRow">
 							<span class="tm-badge">{{ typeName(item.type) }}</span>
-							<NcButton variant="tertiary" @click="emit('open', 'booking', item.id)">
+							<NcButton :class="$style.link" variant="tertiary" @click="emit('open', 'booking', item.id)">
 								{{ bookingLabel(item) }}
 							</NcButton>
 						</li>
@@ -480,8 +480,9 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 	padding: 0;
 }
 
-/* Lozenge then link. The lozenge never shrinks — the title is the thing with
-   room to give. */
+/* Lozenge then link. The lozenge and any trailing button never shrink — the
+   link is the thing with room to give, and NcButton ellipsises its own text
+   once it is allowed to. */
 .linkRow {
 	display: flex;
 	align-items: center;
@@ -489,19 +490,19 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 	min-width: 0;
 }
 
-.linkRow > *:first-child {
+.linkRow > * {
 	flex-shrink: 0;
 }
 
-/* The link takes the slack and truncates; anything after it (the per-row "Not a
-   duplicate" answer) keeps its full width. */
-.linkRowGrow {
-	flex: 1;
+.linkRow > .link {
+	flex-shrink: 1;
 	min-width: 0;
 }
 
-.linkRow > *:last-child {
-	flex-shrink: 0;
+/* Where something follows the link (the per-row "Not a duplicate" answer), the
+   link takes the slack so that answer sits at the row's end. */
+.linkRow > .linkRowGrow {
+	flex: 1;
 }
 
 .none {

@@ -375,6 +375,20 @@
 	border: 1px dashed var(--color-border-maxcontrast, var(--color-border));
 }
 
+/* Below 512px NcAppSidebar becomes an overlay of width `100vw`, anchored to
+   the end of its containing block — Nextcloud's content card, which on a phone
+   is inset from the viewport and clips its overflow. So the panel ran wider
+   than the card by those insets, and the overflow went off the *start* edge:
+   the first letters of every label and of the heading were cut off. 100% is
+   the card itself. Same breakpoint as the library's own rule; the tripled
+   class outranks its `.app-sidebar[data-v-…]` (0,2,0) whatever the stylesheet
+   order. The slide-in margin is derived from the same variable, so it follows. */
+@media only screen and (max-width: 512px) {
+	.tm-sidebar.tm-sidebar.app-sidebar {
+		--app-sidebar-width: 100%;
+	}
+}
+
 /* The trip's colour in front of the detail panel's heading.
    A ::before on Nextcloud's own heading row, because NcAppSidebar takes its name
    as a string and has no slot before it. The container is a flex row, so the
