@@ -13,6 +13,7 @@ import {
 	hasPossibleDuplicate,
 	sortBookings,
 } from './bookings'
+import GridSortMenu from './GridSortMenu.vue'
 import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import { bookingStatusLabel, reviewStateLabel, typeName } from './labels'
 import { isOpen, openDetail } from './navigation'
@@ -84,11 +85,18 @@ const filters: { key: string, label: string }[] = [
 </script>
 
 <template>
-	<div class="tm-content">
+	<div class="tm-content tm-grid-view">
 		<div class="tm-toolbar">
 			<h2 class="tm-toolbar-heading">
 				{{ t('travelmanager', 'Bookings') }}
 			</h2>
+			<!-- The headings, for when they are hidden (compact only). Names the
+			     travel mode in words, as the heading's tooltip does. -->
+			<GridSortMenu :columns="columns"
+				:sort="sort"
+				:direction="direction"
+				:describe="headingTitle('travel')"
+				@select="onSortColumn($event as BookingSort)" />
 		</div>
 		<div class="tm-chips">
 			<NcButton v-for="chip in filters"
@@ -222,29 +230,81 @@ const filters: { key: string, label: string }[] = [
 
 /* Columns drop as space runs out, least-scanned first. The heading row and the
    data rows have their cells in the same order, so one set of nth-child rules
-   hides a column in both. */
-@media (max-width: 1100px) {
-	.columns {
+   hides a column in both.
+
+   Steps are measured on the space the grid has (the `tm-grid` container in
+   grid.css), not the window: the detail sidebar narrows the content without
+   changing the viewport, and a media query never noticed. Each step is an
+   exclusive range, so no step has to undo another's `display: none`. Each
+   threshold is that step's fixed widths, gaps and row padding plus a sensible
+   floor for the title.
+
+   The doubled class is load-bearing, in all three views: the headings also
+   match `.tm-grid-header .tm-column-heading { display: flex }` in grid.css,
+   which is (0,2,0) like a single-class rule here, and grid.css lands later in
+   the built CSS — so the tie went to it and the headings never hid. (0,3,0)
+   wins on specificity, whatever order the chunks come in. */
+@container tm-grid (800px <= width < 1150px) {
+	.columns.columns {
 		grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) 110px minmax(0, 2fr) 190px 135px;
 	}
 
 	/* Reference, Added — both are lookups rather than things you scan. */
-	.columns > *:nth-child(5),
-	.columns > *:nth-child(7) {
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(7) {
 		display: none;
 	}
 }
 
-@media (max-width: 800px) {
-	.columns {
+@container tm-grid (600px <= width < 800px) {
+	.columns.columns {
 		grid-template-columns: minmax(0, 1fr) 190px 135px;
 	}
 
 	/* Trip, Type, Provider — the title usually names the latter two anyway
-	   ("AMS → SOU"), and the trip is one click away in the Trips view. */
-	.columns > *:nth-child(2),
-	.columns > *:nth-child(3),
-	.columns > *:nth-child(4) {
+	   ("AMS → SOU"), and the trip is one click away in the Trips view. Reference
+	   and Added, as in the step above. */
+	.columns.columns > *:nth-child(2),
+	.columns.columns > *:nth-child(3),
+	.columns.columns > *:nth-child(4),
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(7) {
+		display: none;
+	}
+}
+
+/* Compact: a two-line card. Line one says which booking (title, with its
+   duplicate mark) and where it stands (status); line two when, which trip, and
+   what kind. Provider, Reference and Added are one tap away in the panel.
+   Same cells, same order as the heading — only the placement changes.
+   Two auto columns at the end, so status and type each take only their own
+   width rather than sharing the wider of the two (see MessagesView).
+   600px: keep in step with the compact block in grid.css. */
+@container tm-grid (width < 600px) {
+	.columns.columns {
+		grid-template-columns: max-content minmax(0, 1fr) auto auto;
+		grid-template-areas:
+			'title  title title status'
+			'travel trip  type  type';
+	}
+
+	.columns.columns > *:nth-child(1) { grid-area: title; }
+	.columns.columns > *:nth-child(2) { grid-area: trip; }
+	.columns.columns > *:nth-child(6) { grid-area: travel; }
+
+	.columns.columns > *:nth-child(3) {
+		grid-area: type;
+		justify-self: end;
+	}
+
+	.columns.columns > *:nth-child(8) {
+		grid-area: status;
+		justify-self: end;
+	}
+
+	.columns.columns > *:nth-child(4),
+	.columns.columns > *:nth-child(5),
+	.columns.columns > *:nth-child(7) {
 		display: none;
 	}
 }

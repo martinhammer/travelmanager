@@ -838,6 +838,11 @@ debug panel for iterating without waiting for cron:
   `Dto/{QueueCapacity,QueuedMessage}`; `local_concurrency` replaced by
   `max_in_flight` + `max_per_hour`. No migration, no version bump (`status` is a
   string). See the decision in §3.
+- ✅ **Phone browsers** (2026-11-03, `docs/mobile-web-spec.md`): the list
+  grids step by container width and become two-line cards below 600px with a
+  sort menu, the heading sits beside the navigation toggle, the drawer closes
+  after picking a view, and the calendar toolbar fits 360px. No backend work.
+  See "Narrow widths" under Frontend layout.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1092,6 +1097,15 @@ and the wording lives in `labels.ts`.
 - The displayed month is a component ref, **not** in the hash. It survives view
   switches (the module stays mounted) but not a reload — deliberate for now; put
   it in the route if month links ever need sharing.
+- **On a phone the toolbar still fits on one line** (`@container tm-cal
+  (max-width: 420px)`): the month heading steps down to 1.25rem and **Today**
+  shows only its `CalendarToday` icon. The button always carries the icon and an
+  `aria-label`; on a wide calendar `calendar.css` hides the icon and restores
+  NcButton's text-only padding, so the desktop look is unchanged. The ghost months
+  stay at every width.
+- **Coarse pointers get 24px bars** (`@media (pointer: coarse)`: bar 24px, gap
+  3px, week floor 134px = four lanes), because 20px is under WCAG 2.2's 24px
+  target size. `CalendarView` reads the variables back, so no script changes.
 
 ### Navigation counters
 
@@ -1130,6 +1144,7 @@ App.vue              shell only: nav, which view is showing, the detail panel
 ├─ BookingsView.vue  grid only — no dialogs, no actions
 ├─ TripsView.vue     grid + the "Create trip" button
 ├─ MessagesView.vue  grid + the expandable diagnostic body
+│   (all three)  └─ GridSortMenu.vue   the column headings as a menu, compact only
 ├─ DetailSidebar.vue  one panel for booking | trip | message, incl. its Actions
 │   └─ BookingDetails.vue   a booking's type-specific body
 └─ AppDialogs.vue    every dialog, rendered once
@@ -1178,8 +1193,9 @@ as plain `tm-`-prefixed classes (`.tm-rows`, `.tm-row`, `.tm-row-summary`,
 `.tm-cell-text`/`.tm-cell-meta`/`.tm-cell-status`, `.tm-open-link`, `.tm-badge…`,
 `.tm-list…`), imported once by `App.vue`. Plain CSS rather than a module because
 `<style module>` is per-SFC and all three views need these. Each view's own
-`<style module>` holds **only** its `grid-template-columns` (`.columns`) and the
-`nth-child` rules that drop columns at a breakpoint. Sort behaviour is shared via
+`<style module>` holds **only** its `grid-template-columns` (`.columns`), the
+`nth-child` rules that drop columns at each width step, and its compact card's
+area map (see "Narrow widths" below). Sort behaviour is shared via
 **`src/grid.ts`** (`SortColumn`, `SortDirection`, `nextSortDirection`,
 `sortMarker`, `formatSpan`, `formatTimestamp`, `localDate`) so no view's module
 imports another's. A change to how every grid looks belongs in `grid.css`, never
@@ -1273,6 +1289,46 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
   20000 chars × up to 200 rows); the Raw message section fetches it lazily from
   **`GET /api/messages/{id}/body`** on first expand and caches it by id. Do not
   fold it back into `jsonSerialize()`.
+
+#### Narrow widths
+
+- **The list grids respond to their container, not the viewport.** The three
+  list views' root carries **`.tm-grid-view`**, a container named `tm-grid`.
+  Every column step is an `@container tm-grid (…)` rule, so the grids also drop
+  columns when the detail sidebar opens. The calendar keeps its own `tm-cal`
+  container, and this is not on `.tm-content` because the calendar carries that
+  class too.
+- **Steps are exclusive ranges** (`600px <= width < 800px`), so the compact
+  layout never has to undo a wider step's `display: none`. Each threshold is the
+  step's fixed widths + gaps + row padding + a floor for the flexible column, so
+  recompute it when a column width changes.
+- **Below 600px every list is in compact mode.** `grid.css` hides the heading row,
+  shows the sort menu, gives rows a 2px row gap, wraps badges to the end, and puts
+  `.tm-chips` on one line that scrolls sideways. Each view module turns its row
+  into a **two-line card** with `grid-template-areas`: the same cells in the
+  same order, placed by `nth-child`. The first line is the row's identity and
+  status, the second its dates and context. **The literal `600px` appears in
+  `grid.css` and in all three view modules**, because a container query cannot
+  take a custom property, so change all four together.
+- **`GridSortMenu.vue`** is the headings as an `NcActions` menu of radio
+  `NcActionButton`s. It is built from the view's own `columns`/`sort`/`direction`
+  and emits `select` into the view's `onSortColumn`, so it adds no sort logic.
+  It listens to `@click`, not `update:modelValue`, because the radio only emits
+  on a change and re-picking the checked column must flip it (or cycle Travel
+  dates). The order is said in words (the item's `description` and the trigger's
+  name), with the ▲/▼/◆ marker in the icon slot. Its class sits on a wrapper
+  `<span>` it owns, so `grid.css` can toggle it without outranking NcActions.
+- **The heading sits beside the navigation toggle** below 620px of *viewport*
+  (a media query, since the toggle follows the viewport). `.tm-content`'s top
+  padding matches the toggle's offset, the toolbar is one clickable area tall,
+  and only its first item is indented. A wrapped second line starts at the
+  content edge.
+- **The drawer closes after picking a view on mobile** (`showView` in
+  `App.vue`). `NcAppNavigationItem` does this only for router links, and
+  `NcAppNavigation` 9.14 has no controlled `open` prop, so it emits
+  `toggle-navigation` on `@nextcloud/event-bus`, which is a direct dependency.
+- **Row hover is `@media (hover: hover)` only.** A touch screen keeps `:hover`
+  on the last tapped row, which reads as a selection.
 
 ## 5. Prerequisites (runtime)
 
@@ -1522,6 +1578,15 @@ The patches, and one deliberate absence:
   `-text`. Only the `-text` half inverts with the theme, so it is also the only
   one that stays readable in both. Values live in
   `apps/theming/lib/Themes/{Default,Dark}Theme.php` in a server checkout.
+- **Column headings would not hide at a breakpoint, and this hit desktop too.**
+  The view modules' `.columns > *:nth-child(n) { display: none }` is (0,2,0).
+  The headings also match `.tm-grid-header .tm-column-heading { display: flex }`
+  in `grid.css`, also (0,2,0), and that rule lands later in the built CSS. So the
+  data cells hid and the heading buttons did not: every heading row below the
+  widest step had too many cells, wrapped onto extra lines and sat over the
+  wrong columns. The hide rules are now **`.columns.columns > …`** (0,3,0). It is
+  the same chunk-order trap as `.tm-notice.tm-notice`: win on specificity,
+  never on order.
 - **Verify CSS against the server's own stylesheets, not just its variables.**
   A harness that defines `--color-*` and `--default-clickable-area` but omits
   `core/css/inputs.css` will happily measure a design that the real page does not

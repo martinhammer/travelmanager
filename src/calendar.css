@@ -358,6 +358,22 @@
 	white-space: nowrap;
 }
 
+/* Today, worded. The button carries an icon for the phone layout (below), so
+   NcButton pads it as icon-and-text; hiding the icon here and restoring the
+   text-only padding keeps the wide calendar exactly as it was. Doubled class:
+   NcButton's own rules are (0,2,0) and load later. */
+.tm-cal .tm-cal-today.tm-cal-today {
+	--button-padding: var(--button-padding-default);
+}
+
+.tm-cal .tm-cal-today .button-vue__icon {
+	display: none;
+}
+
+.tm-cal .tm-cal-today .button-vue__text {
+	padding-inline: var(--default-grid-baseline);
+}
+
 /* --- overflow ------------------------------------------------------------ */
 
 /* "+N more" *is* a button — it expands the week rather than going anywhere — so
@@ -409,9 +425,43 @@
 	}
 }
 
+/* Phones. The toolbar's first line has to hold the toggle indent (grid.css),
+   the month heading at the width of the *longest* month name, and three
+   buttons — over 312px at h2 size with a worded Today, which is all a 360px
+   phone has. So the heading steps down a size and Today becomes its icon. The
+   ghost months stay: they are what keeps the buttons still while paging. */
 @container tm-cal (max-width: 420px) {
 	.tm-cal-weekday {
 		font-size: 0.75rem;
 		padding-inline: 2px;
+	}
+
+	.tm-cal-month {
+		font-size: 1.25rem;
+	}
+
+	.tm-cal .tm-cal-today.tm-cal-today {
+		--button-padding: var(--button-radius);
+		width: var(--button-size);
+	}
+
+	.tm-cal .tm-cal-today .button-vue__icon {
+		display: flex;
+	}
+
+	.tm-cal .tm-cal-today .button-vue__text {
+		display: none;
+	}
+}
+
+/* Touch screens: 20px bars are under the 24px minimum target size (WCAG 2.2,
+   2.5.8). CalendarView reads these back with getComputedStyle, so the lane
+   count adjusts with no script change. The week floor still fits four lanes:
+   22 + 4 × (24 + 3) + 3. */
+@media (pointer: coarse) {
+	.tm-cal {
+		--tm-cal-bar-height: 24px;
+		--tm-cal-lane-gap: 3px;
+		--tm-cal-week-min: 134px;
 	}
 }

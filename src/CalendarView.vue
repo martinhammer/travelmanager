@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import ChevronLeftIcon from 'vue-material-design-icons/ChevronLeft.vue'
+import CalendarTodayIcon from 'vue-material-design-icons/CalendarToday.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import { getDayNamesMin, getFirstDay, getMonthNames, t } from '@nextcloud/l10n'
 import CalendarBar from './CalendarBar.vue'
@@ -218,7 +219,17 @@ const onOpenDuplicate = (): void => {
 						<ChevronRightIcon :size="20" />
 					</template>
 				</NcButton>
-				<NcButton variant="secondary" @click="onToday">
+				<!-- Text on a wide calendar, the icon alone on a phone: at 360px the
+				     word is what pushes the row past the screen (see .tm-cal-today in
+				     calendar.css). Named at every width, so it never loses its name
+				     when the text is hidden. -->
+				<NcButton class="tm-cal-today"
+					variant="secondary"
+					:aria-label="t('travelmanager', 'Today')"
+					@click="onToday">
+					<template #icon>
+						<CalendarTodayIcon :size="20" />
+					</template>
 					{{ t('travelmanager', 'Today') }}
 				</NcButton>
 			</div>

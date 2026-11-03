@@ -19,6 +19,16 @@
 	max-width: none;
 }
 
+/* The three list views. A container, so their column steps follow the space
+   the grid actually has: the detail sidebar narrows the content area without
+   touching the viewport, so a media query never fired when it opened. Not on
+   .tm-content itself — the calendar carries that class too, and names its own
+   container (tm-cal in calendar.css). */
+.tm-grid-view {
+	container-type: inline-size;
+	container-name: tm-grid;
+}
+
 .tm-toolbar {
 	display: flex;
 	align-items: center;
@@ -183,9 +193,13 @@
 }
 
 /* Data rows only: the heading row highlights per column, not as a whole —
-   hovering it is aiming at one heading, not selecting the row. */
-.tm-row-summary:not(.tm-grid-header):hover {
-	background-color: var(--color-background-hover);
+   hovering it is aiming at one heading, not selecting the row.
+   Pointers that can hover only: a touch screen leaves :hover on whatever was
+   tapped last, and a tinted row then reads as a selection. */
+@media (hover: hover) {
+	.tm-row-summary:not(.tm-grid-header):hover {
+		background-color: var(--color-background-hover);
+	}
 }
 
 .tm-row summary:focus-visible {
@@ -539,12 +553,105 @@
 	margin: 8px 0;
 }
 
-@media (max-width: 620px) {
-	.tm-content {
-		padding-block-start: 16px;
+/* --- compact: the list grids as cards -----------------------------------
+
+   Below 600px of *grid* width every list stops pretending to be a table: the
+   heading row goes, a sort menu (GridSortMenu) stands in for it, each row
+   becomes a two-line card — the area maps live in each view's own module — and
+   the filter chips become one line that scrolls sideways.
+
+   **600px is repeated in each view module's compact step** (BookingsView,
+   TripsView, MessagesView): a container query cannot take a custom property,
+   so the literal is the only way to say it. Change all four together. */
+
+/* Hidden outside compact. Our own wrapper, so a single class is enough. */
+.tm-sort-menu {
+	display: none;
+	margin-inline-start: auto;
+}
+
+/* The marker sits in the menu item's icon slot, which is a clickable-area
+   square; centred there it lines up down the menu like an icon would. */
+.tm-sort-menu-marker {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--default-clickable-area);
+	font-size: 0.75em;
+}
+
+@container tm-grid (width < 600px) {
+	/* Doubled to beat `.tm-row-summary { display: grid }` on specificity rather
+	   than on chunk order. */
+	.tm-grid-header.tm-grid-header {
+		display: none;
+	}
+
+	.tm-sort-menu {
+		display: inline-flex;
+	}
+
+	/* The two lines of a card read as one item; the column gap stays. */
+	.tm-row-summary {
+		row-gap: 2px;
+	}
+
+	/* Badges wrap rather than widening their column, and hug the card's end. */
+	.tm-row-summary .tm-badges {
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	/* One line, scrolled by touch, instead of four wrapped ones taking a third
+	   of a phone screen. Pulled out to the content edge (the 16px padding of
+	   .tm-content) so the line scrolls under the edge instead of stopping short
+	   of it, and padded back so the first chip still starts where text does. */
+	.tm-chips {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
+		margin-inline: -16px;
+		padding-inline: 16px;
+	}
+
+	.tm-chips::-webkit-scrollbar {
+		display: none;
+	}
+
+	/* Doubled: NcButton's own scoped rules are (0,2,0). */
+	.tm-chips.tm-chips > * {
+		flex-shrink: 0;
 	}
 
 	.tm-row-body {
 		padding-inline-start: 14px;
+	}
+}
+
+/* Narrow windows: the heading moves up *beside* the navigation toggle instead
+   of sitting 44px below it, as Files puts its breadcrumbs. The toggle is
+   placed by the viewport (Nextcloud overlays the navigation below 1024px),
+   not by the space this view has, so this is a media query and not a
+   container one.
+
+   The toggle sits at `--app-navigation-padding` from the top-left corner of
+   the content card and is one clickable area square. The content's top padding
+   matches its top offset and the first line is at least one clickable area
+   tall, so the heading centres on the toggle; the first toolbar item is pushed
+   past it. Only the first item: a toolbar that wraps should start its second
+   line at the content edge, where there is nothing to clear.
+   `--app-navigation-padding` is defined on the navigation, not on us, so the
+   fallback is what normally applies — it is the library's own value. */
+@media (max-width: 620px) {
+	.tm-content {
+		padding-block-start: var(--app-navigation-padding, 8px);
+	}
+
+	.tm-toolbar {
+		min-height: var(--default-clickable-area);
+	}
+
+	.tm-toolbar > :first-child {
+		margin-inline-start: calc(var(--default-clickable-area) + var(--app-navigation-padding, 8px));
 	}
 }

@@ -4,6 +4,8 @@ import NcAppContent from '@nextcloud/vue/components/NcAppContent'
 import NcAppNavigation from '@nextcloud/vue/components/NcAppNavigation'
 import NcAppNavigationItem from '@nextcloud/vue/components/NcAppNavigationItem'
 import NcContent from '@nextcloud/vue/components/NcContent'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
+import { emit } from '@nextcloud/event-bus'
 import { t } from '@nextcloud/l10n'
 import AppDialogs from './AppDialogs.vue'
 import BookingsView from './BookingsView.vue'
@@ -22,6 +24,7 @@ import {
 	startNavigation,
 	view,
 } from './navigation'
+import type { ViewName } from './detail'
 import { attentionCount, bookings, draftBookingCount, messages, reload, trips } from './store'
 import './grid.css'
 import './calendar.css'
@@ -47,6 +50,25 @@ onMounted(async () => {
 })
 
 onUnmounted(() => stopNavigation())
+
+const isMobile = useIsMobile()
+
+/**
+ * Switch view, and on a phone put the navigation drawer away.
+ *
+ * NcAppNavigationItem closes the drawer itself only for router links; ours are
+ * plain items (see the `@click.prevent` note in the template), so without this
+ * the drawer stayed over the view you had just picked. NcAppNavigation has no
+ * controlled `open` prop in this version, so the event bus it listens on is
+ * the way to say so. On desktop the navigation is not a drawer and stays put.
+ * @param name the view to show
+ */
+const showView = (name: ViewName): void => {
+	view.value = name
+	if (isMobile.value) {
+		emit('toggle-navigation', { open: false })
+	}
+}
 </script>
 
 <template>
@@ -67,10 +89,10 @@ onUnmounted(() => stopNavigation())
 				     whose stray hash would otherwise bounce the route back. -->
 				<NcAppNavigationItem :name="t('travelmanager', 'Calendar')"
 					:active="view === 'calendar'"
-					@click.prevent="view = 'calendar'" />
+					@click.prevent="showView('calendar')" />
 				<NcAppNavigationItem :name="t('travelmanager', 'Bookings')"
 					:active="view === 'bookings'"
-					@click.prevent="view = 'bookings'">
+					@click.prevent="showView('bookings')">
 					<template #counter>
 						<NavCounter :attention="draftBookingCount"
 							:total="bookings.length"
@@ -80,7 +102,7 @@ onUnmounted(() => stopNavigation())
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Trips')"
 					:active="view === 'trips'"
-					@click.prevent="view = 'trips'">
+					@click.prevent="showView('trips')">
 					<template #counter>
 						<NavCounter :total="trips.length"
 							:label="t('travelmanager', '{total} trip(s)', { total: trips.length })" />
@@ -88,7 +110,7 @@ onUnmounted(() => stopNavigation())
 				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('travelmanager', 'Messages')"
 					:active="view === 'messages'"
-					@click.prevent="view = 'messages'">
+					@click.prevent="showView('messages')">
 					<template #counter>
 						<NavCounter :attention="attentionCount"
 							:total="messages.length"
