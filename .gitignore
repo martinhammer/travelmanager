@@ -12,3 +12,6 @@
 /js/
 /css/
 /build/
+
+.deploy-target
+deploy.sh
