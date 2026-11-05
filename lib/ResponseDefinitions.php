@@ -100,6 +100,30 @@ namespace OCA\TravelManager;
  *     createdAt: string|null,
  * }
  *
+ * @psalm-type TravelManagerBackupCounts = array{
+ *     trips: int,
+ *     bookings: int,
+ *     messages: int,
+ * }
+ *
+ * @psalm-type TravelManagerBackupSkip = array{
+ *     kind: string,
+ *     reason: string,
+ *     label: string,
+ *     existingId: int|null,
+ * }
+ *
+ * @psalm-type TravelManagerBackupReport = array{
+ *     appVersion: string,
+ *     exportedAt: string,
+ *     includesEmailText: bool,
+ *     inFile: TravelManagerBackupCounts,
+ *     existing: TravelManagerBackupCounts,
+ *     imported: TravelManagerBackupCounts,
+ *     requeued: int,
+ *     skipped: list<TravelManagerBackupSkip>,
+ * }
+ *
  * @psalm-suppress UnusedClass
  */
 class ResponseDefinitions {

@@ -74,6 +74,43 @@ class ProcessedMessageMapper extends QBMapper {
 	}
 
 	/**
+	 * The whole ledger, oldest first. Not {@see findAllForUser}: that is the
+	 * list view's page, and a backup that stopped at 200 rows would forget the
+	 * rest of the dedup record.
+	 *
+	 * @return ProcessedMessage[]
+	 */
+	public function findAllOldestFirst(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->orderBy('id', 'ASC');
+		return $this->findEntities($qb);
+	}
+
+	/**
+	 * Every RFC Message-ID in a user's ledger, without the bulky columns.
+	 *
+	 * @return array<string, int> Message-ID => row id
+	 */
+	public function findIdsByMessageId(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'message_id')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$result = $qb->executeQuery();
+		/** @var list<array{id: string|int, message_id: string}> $rows */
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		$ids = [];
+		foreach ($rows as $row) {
+			$ids[$row['message_id']] = (int)$row['id'];
+		}
+		return $ids;
+	}
+
+	/**
 	 * Rows in a status across **all** users. The extraction limits are
 	 * instance-wide, so this is deliberately not partitioned by user — the one
 	 * place in this mapper that is not.

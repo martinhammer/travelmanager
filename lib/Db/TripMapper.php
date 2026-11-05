@@ -36,4 +36,27 @@ class TripMapper extends QBMapper {
 			->orderBy('start_date', 'DESC');
 		return $this->findEntities($qb);
 	}
+
+	/**
+	 * @return Trip[]
+	 */
+	public function findAllOldestFirst(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->orderBy('id', 'ASC');
+		return $this->findEntities($qb);
+	}
+
+	/**
+	 * Delete every trip belonging to a user. Only restoring a backup does this:
+	 * the developer wipe keeps trips, since they are not derived from the mailbox.
+	 */
+	public function deleteAllForUser(string $userId): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		$qb->executeStatement();
+	}
 }

@@ -13,6 +13,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { confirmPassword } from '@nextcloud/password-confirmation'
 import '@nextcloud/password-confirmation/style.css'
 import { t } from '@nextcloud/l10n'
+import BackupSection from './BackupSection.vue'
 import LlmInfo from './LlmInfo.vue'
 import {
 	type LlmDiagnostics,
@@ -198,6 +199,8 @@ onMounted(refreshLogs)
 	<LlmInfo :provider="llm.provider"
 		:prompt-template="llm.promptTemplate"
 		:can-see-endpoint="llm.canSeeEndpoint" />
+
+	<BackupSection @changed="refreshLogs" />
 
 	<NcSettingsSection :name="t('travelmanager', 'Developer & debugging')"
 		:description="t('travelmanager', 'Tools for testing the extraction pipeline without waiting for the background job. These act only on your own data.')">

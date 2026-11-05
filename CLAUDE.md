@@ -101,7 +101,10 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   + `Version2500Date2026091800…` (no schema change: moves the global feature flag
   off the server's reserved `enabled` app-config key and repairs the row — see
   the gotcha in §7, which is the whole reason it exists).
-- `Controller/{Booking,Message,Trip,Settings,Admin,Dev}Controller`; `Settings/*`.
+- `Controller/{Booking,Message,Trip,Settings,Admin,Dev,Backup}Controller`; `Settings/*`.
+- `Service/BackupFormat` + `Service/BackupImportPlanner` — **pure, dependency-free**
+  validation of a backup file and the decision of what to write from it;
+  `Service/BackupService` does the I/O. See the decision in §3.
 - `Service/IngestionLogger` (per-user activity log) + `Service/MaintenanceService`
   (per-user data wipe) — see §9 (dev/debug tooling).
 
@@ -712,6 +715,63 @@ code follows the overrides.
     never seen. `messages.imap_uid`/`uid_validity` are stored and unread; a UID
     high-water mark is the planned fix, and this queue is what makes reading
     everything safe.
+- **Backup and restore is one user's data in one versioned JSON file** (2026-11-05).
+  Personal settings → *Backup & restore*, `GET /api/backup/export`, `POST
+  /api/backup/preview` (writes nothing) and `POST /api/backup/import`. Importing
+  deliberately asks for **no password**, even with "replace": the preview dialog with
+  its counts is the confirmation. Consequences:
+  - **JSON, not SQLite.** SQLite would need `pdo_sqlite` on a MySQL or Postgres
+    server, and would mean opening a user-uploaded database file. `BackupFormat::VERSION`
+    guards the shape: a newer file is refused with a request to update the app.
+  - **What is in it:** trips, bookings and the whole message ledger, whose RFC
+    Message-IDs are what make the same mailbox read as already processed afterwards.
+    **What is not:** settings (the IMAP password above all), the debug log, `tasks`
+    (they point at tasks on the exporting server) and `user_id`, so a backup can move
+    between accounts. Ids stay in the file only so its links can be followed, and are
+    rewritten on the way in (`trip_id`, `duplicate_group_id`, `related_booking_ids`),
+    so a `#/bookings/42` link does not survive a restore.
+  - **Export goes through `findAllOldestFirst`, never the list view's
+    `findAllForUser`**, which caps at 200 rows and would forget the rest of the dedup
+    record. `testAnExportCoversEveryColumn` fails if a new entity column is left out.
+  - **Email text is an opt-out** (`bodyText` + `lastResponse`): a smaller, less
+    sensitive file, whose messages can never be retried. Subjects, senders and `error`
+    stay. The file is not encrypted, and the panel says so.
+  - **Replace is all or nothing.** The file is validated in full first, then the
+    deletes and every insert share one transaction. It deletes **trips** too, unlike
+    the developer wipe, because the user asked for the backup's state rather than a
+    reprocess. The activity log survives and records the import.
+  - **A row waiting for the model cannot stay that way.** Its task belongs to the
+    exporting server, so `queued`/`processing` both come back as `queued`, and the
+    next dispatcher tick sends them. The import itself never calls the model. If the
+    backup left the text out, such a row is **not imported at all**: written, it would
+    mark the email as handled with nothing to extract from, while left out it is read
+    afresh if it is still in the mailbox. The preview says how many will be sent.
+  - **Into existing data, the row already there always wins**, and nothing is
+    overwritten. Rows from the file are compared only with rows from before the import,
+    never with each other, so an empty database restores the file exactly:
+    - **Messages** match on RFC Message-ID.
+    - **Bookings** match on **same source email and same type**, one existing booking
+      per row of the file. This is deliberately **not** `BookingMatcher`: an import is
+      not new evidence about a booking, and a restore should not make judgement calls.
+      The type is what stops a flight standing in for the hotel booked in the same
+      email. A booking deleted here does come back, since deletion leaves no tombstone;
+      the same booking from a *different* email is imported, unflagged.
+    - **Trips** match by case-insensitive name, since nothing else identifies one; the
+      oldest namesake takes the imported bookings. Two different trips called "Paris"
+      merge. That is the price of importing a file twice staying clean.
+    - **Duplicate groups** span the rows written plus the existing rows that stood in
+      for the rest, so a group is not lost because one member was skipped. A group left
+      with one member is dropped. Stamping an existing row is the one write to it, and
+      it is bookkeeping as in `duplicateGroupFor`.
+  - **Everything skipped is listed**, with a link to the row it gave way to, in the
+    dialog after an import and in the activity log. The links open a **new tab**,
+    because the list lives only in that dialog and following one in place would lose
+    it; **Download import report** saves the same list as text (`importReportText`).
+    `messages.status` is left alone
+    when its booking is skipped: `source_message_id` already links the two.
+  - **The file is memory-bound and upload-bound.** `json_decode` reads it whole, and
+    PHP's `post_max_size` drops an oversized body without an error, which is why "no
+    file received" names the upload limit as a likely cause.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -729,7 +789,7 @@ debug panel for iterating without waiting for cron:
   arrive later** via the task-event listeners, so the UI hint says to refresh
   the log after a moment.
 - **Activity log** — `IngestionLogger` writes a per-user, step-by-step row
-  (`connect`/`fetch`/`dedup`/`schedule`/`llm_response`/`persist`/`wipe`) to the
+  (`connect`/`fetch`/`dedup`/`schedule`/`llm_response`/`persist`/`wipe`/`backup`) to the
   `logs` table as the pipeline runs; `IngestionService` and
   `ExtractionResultHandler` are instrumented. The prompt sent to the model and the
   raw model response are stored (truncated to 20000 chars) in the row's `context`.
@@ -843,6 +903,9 @@ debug panel for iterating without waiting for cron:
   sort menu, the heading sits beside the navigation toggle, the drawer closes
   after picking a view, and the calendar toolbar fits 360px. No backend work.
   See "Narrow widths" under Frontend layout.
+- ✅ **Backup and restore** (2026-11-05): export and import of one user's data as
+  versioned JSON, with a validating preview, "replace existing data" and a report of
+  what was skipped. No migration, no version bump. See the decision in §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1156,7 +1219,7 @@ store.ts        bookings / trips / messages / loading / reload + derived counts
 navigation.ts   the route, open/close/back, hash + history plumbing
 dialogs.ts      which dialog is open, on what, and the openX() calls
 labels.ts       how the domain is worded
-grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts   pure, unit-tested
+grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts backup.ts   pure, unit-tested
 ```
 
 Adding the fourth view (the calendar) cost exactly what that promised: one nav

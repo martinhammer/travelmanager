@@ -40,6 +40,18 @@ class BookingMapper extends QBMapper {
 	/**
 	 * @return Booking[]
 	 */
+	public function findAllOldestFirst(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->orderBy('id', 'ASC');
+		return $this->findEntities($qb);
+	}
+
+	/**
+	 * @return Booking[]
+	 */
 	public function findByReviewState(string $userId, string $reviewState): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')

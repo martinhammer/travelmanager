@@ -353,6 +353,10 @@
             "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, and the two limits on how hard extraction leans on the model."
         },
         {
+            "name": "backup",
+            "description": "Back up the current user's data to a file, and restore it here or elsewhere."
+        },
+        {
             "name": "dev",
             "description": "Developer/debugging endpoints for the current user: trigger a mailbox read on demand (no waiting for cron), inspect the step-by-step activity log, and wipe the derived data so the same messages can be reprocessed from scratch."
         },

@@ -379,6 +379,72 @@ export const saveAdminSettings = async (settings: Partial<AdminSettings>): Promi
 	return unwrap(res.data)
 }
 
+/* ---------------------------------------------------------- backup & restore */
+
+export interface BackupCounts {
+	trips: number
+	bookings: number
+	messages: number
+}
+
+/** One row of a backup that was not written, and the row it gave way to, if any. */
+export interface BackupSkip {
+	kind: 'trip' | 'booking' | 'message'
+	reason: 'trip_exists' | 'booking_exists' | 'message_exists' | 'unfinished_no_text'
+	label: string
+	existingId: number | null
+}
+
+/** What importing a file would do (a preview) or did (an import): one shape for both. */
+export interface BackupReport {
+	appVersion: string
+	/** When the file was made: the server's UTC clock, with no offset written. */
+	exportedAt: string
+	includesEmailText: boolean
+	inFile: BackupCounts
+	/** What the user had beforehand, and so what "replace" deletes. */
+	existing: BackupCounts
+	imported: BackupCounts
+	/** How many of the imported emails go to the model, having never been answered. */
+	requeued: number
+	skipped: BackupSkip[]
+}
+
+export const exportBackup = async (includeEmailText: boolean): Promise<Blob> => {
+	const res = await axios.get(base('backup/export'), {
+		params: { includeEmailText: includeEmailText ? 1 : 0 },
+		responseType: 'blob',
+	})
+	return res.data
+}
+
+const backupForm = (file: File, replace: boolean): FormData => {
+	const form = new FormData()
+	form.append('backup', file)
+	form.append('replace', replace ? '1' : '0')
+	return form
+}
+
+/**
+ * Validate a file and report what importing it would do. Writes nothing.
+ * @param file the backup
+ * @param replace whether the import would delete the existing data first
+ */
+export const previewBackup = async (file: File, replace: boolean): Promise<BackupReport> => {
+	const res = await axios.post(base('backup/preview'), backupForm(file, replace))
+	return unwrap(res.data)
+}
+
+/**
+ * Restore a file. Requires a recent password confirmation.
+ * @param file the backup
+ * @param replace whether to delete the existing data first
+ */
+export const importBackup = async (file: File, replace: boolean): Promise<BackupReport> => {
+	const res = await axios.post(base('backup/import'), backupForm(file, replace))
+	return unwrap(res.data)
+}
+
 /* -------------------------------------------------- developer / debug tools */
 
 export interface LogEntry {

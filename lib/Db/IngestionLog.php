@@ -39,6 +39,7 @@ class IngestionLog extends Entity implements \JsonSerializable {
 	public const STEP_LLM_RESPONSE = 'llm_response';
 	public const STEP_PERSIST = 'persist';
 	public const STEP_WIPE = 'wipe';
+	public const STEP_BACKUP = 'backup';
 
 	protected string $userId = '';
 	protected string $level = self::LEVEL_INFO;

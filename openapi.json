@@ -20,6 +20,96 @@
             }
         },
         "schemas": {
+            "BackupCounts": {
+                "type": "object",
+                "required": [
+                    "trips",
+                    "bookings",
+                    "messages"
+                ],
+                "properties": {
+                    "trips": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "bookings": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "messages": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            },
+            "BackupReport": {
+                "type": "object",
+                "required": [
+                    "appVersion",
+                    "exportedAt",
+                    "includesEmailText",
+                    "inFile",
+                    "existing",
+                    "imported",
+                    "requeued",
+                    "skipped"
+                ],
+                "properties": {
+                    "appVersion": {
+                        "type": "string"
+                    },
+                    "exportedAt": {
+                        "type": "string"
+                    },
+                    "includesEmailText": {
+                        "type": "boolean"
+                    },
+                    "inFile": {
+                        "$ref": "#/components/schemas/BackupCounts"
+                    },
+                    "existing": {
+                        "$ref": "#/components/schemas/BackupCounts"
+                    },
+                    "imported": {
+                        "$ref": "#/components/schemas/BackupCounts"
+                    },
+                    "requeued": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "skipped": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/BackupSkip"
+                        }
+                    }
+                }
+            },
+            "BackupSkip": {
+                "type": "object",
+                "required": [
+                    "kind",
+                    "reason",
+                    "label",
+                    "existingId"
+                ],
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "existingId": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    }
+                }
+            },
             "Booking": {
                 "type": "object",
                 "required": [
@@ -454,6 +544,355 @@
                                                         }
                                                     }
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/backup/export": {
+            "get": {
+                "operationId": "backup-export",
+                "summary": "Download a backup of the current user's bookings, trips and messages",
+                "tags": [
+                    "backup"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "includeEmailText",
+                        "in": "query",
+                        "description": "Whether to include email bodies and raw model responses",
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Backup file returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/backup/preview": {
+            "post": {
+                "operationId": "backup-preview",
+                "summary": "Check an uploaded backup and report what importing it would do",
+                "description": "Writes nothing. The file is the `backup` part of a multipart request.",
+                "tags": [
+                    "backup"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "replace": {
+                                        "type": "boolean",
+                                        "default": false,
+                                        "description": "Whether the import would first delete the existing data"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Report returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "$ref": "#/components/schemas/BackupReport"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The file is missing or is not a valid backup",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ocs/v2.php/apps/travelmanager/api/backup/import": {
+            "post": {
+                "operationId": "backup-import",
+                "summary": "Restore an uploaded backup into the current user's data",
+                "description": "The file is the `backup` part of a multipart request. It is validated in full before anything is changed, and a failure part way through changes nothing.",
+                "tags": [
+                    "backup"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "replace": {
+                                        "type": "boolean",
+                                        "default": false,
+                                        "description": "Whether to delete the existing data first"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Backup restored",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "$ref": "#/components/schemas/BackupReport"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The file is missing or is not a valid backup",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
                                             }
                                         }
                                     }
@@ -3455,6 +3894,10 @@
         {
             "name": "admin",
             "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, and the two limits on how hard extraction leans on the model."
+        },
+        {
+            "name": "backup",
+            "description": "Back up the current user's data to a file, and restore it here or elsewhere."
         },
         {
             "name": "dev",
