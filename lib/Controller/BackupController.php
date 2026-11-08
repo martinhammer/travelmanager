@@ -99,7 +99,11 @@ class BackupController extends OCSController {
 	 * @throws InvalidBackupException
 	 */
 	private function uploadedBackup(): string {
-		/** @var array<array-key, mixed>|null $file declared as array, but null when absent */
+		/**
+		 * Declared as array until stable35, which added the null it returns when absent.
+		 * @var array<array-key, mixed>|null $file
+		 * @psalm-suppress UnnecessaryVarAnnotation on stable35 and later
+		 */
 		$file = $this->request->getUploadedFile('backup');
 		// PHP drops the whole request body when post_max_size is exceeded, so a file
 		// that is too large can also arrive as no file at all.
