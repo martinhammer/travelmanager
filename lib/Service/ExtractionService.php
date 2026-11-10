@@ -150,6 +150,12 @@ JSON;
 
 		$rules = implode("\n", [
 			'You extract travel bookings from a single email.',
+			// Some booking emails say only "your ticket is attached". The PDF's text
+			// rides along under a heading per file (MessageText::section); tabs are
+			// column breaks, which is what keeps a ticket's table rows apart.
+			'The email may be followed by text taken from its PDF attachments, each starting with a line '
+				. '"--- ATTACHMENT: <name> ---". Treat that text as part of the email. A tab in it separates '
+				. 'columns of a table. When the email body and an attachment describe the same booking, return it once.',
 			'First classify each booking as flight, accommodation, car_rental, train or bus, then output ONLY that type\'s details object.',
 			'Return ONLY a JSON object matching the schema below. No prose, no markdown fences.',
 			'Only include bookings of type flight, accommodation, car_rental, train or bus.',
@@ -172,6 +178,11 @@ JSON;
 			'An identifier must name THIS booking. A customer or account number, a loyalty or frequent-flyer number, '
 				. 'a VAT number, an invoice or transaction line id, and a route, trip or service number are NOT booking '
 				. 'identifiers: never put them in booking_reference or confirmation_number.',
+			// Observed on an Amadeus e-ticket: the e-ticket number went into
+			// confirmation_number, which makes a per-passenger number a key that
+			// duplicate detection matches bookings on.
+			'A ticket or e-ticket number belongs to one passenger: put it in that passenger\'s ticketNumber and never in '
+				. 'booking_reference or confirmation_number.',
 			'provider is the operator that delivers the service: the airline, the hotel, the rental desk you collect the car from, '
 				. 'the train or coach company that runs the service. '
 				. 'When the email comes from an agency, broker or booking site, that name belongs in the type-specific details field '
@@ -195,6 +206,9 @@ JSON;
 				. 'Never leave a seat out because of where in the email it was printed.',
 			'When a summary line lists seats or tickets together and a per-passenger block also gives them one by one, the '
 				. 'per-passenger block is authoritative — the summary may pair them in a different order.',
+			// Observed: "Class: Q" became cabinClass "Economy", and in other runs "Q".
+			'Give cabinClass only when the document names the cabin (Economy, Premium Economy, Business, First). A fare or '
+				. 'booking class letter such as "Class: Q" is not a cabin: leave cabinClass null.',
 			'Give every segment a full date AND time. When the email states the journey date once and later legs show only a time, '
 				. 'use that date, rolling to the next day when a time is earlier than the leg before it.',
 			'An outbound and a return with separate booking references or tickets are two bookings; when one reference covers both, '

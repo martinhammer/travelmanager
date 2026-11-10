@@ -26,7 +26,8 @@
                     "enabled",
                     "fetchPerRun",
                     "maxInFlight",
-                    "maxPerHour"
+                    "maxPerHour",
+                    "pdfAttachments"
                 ],
                 "properties": {
                     "enabled": {
@@ -43,6 +44,47 @@
                     "maxPerHour": {
                         "type": "integer",
                         "format": "int64"
+                    },
+                    "pdfAttachments": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "Attachment": {
+                "type": "object",
+                "required": [
+                    "filename",
+                    "pages",
+                    "pagesRead",
+                    "chars",
+                    "outcome",
+                    "truncated"
+                ],
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pages": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "pagesRead": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "chars": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "outcome": {
+                        "type": "string"
+                    },
+                    "truncated": {
+                        "type": "boolean"
                     }
                 }
             },
@@ -301,6 +343,7 @@
                     "attempts",
                     "canRetry",
                     "discarded",
+                    "attachments",
                     "sentAt",
                     "processedAt"
                 ],
@@ -360,6 +403,12 @@
                     },
                     "discarded": {
                         "type": "boolean"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Attachment"
+                        }
                     },
                     "sentAt": {
                         "type": "string",
@@ -676,6 +725,12 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "Most extractions started per rolling hour, instance-wide (0 for no limit)"
+                                    },
+                                    "pdfAttachments": {
+                                        "type": "boolean",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Whether the text of PDF attachments is sent to the model with the email"
                                     }
                                 }
                             }

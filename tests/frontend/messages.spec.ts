@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Booking, Message } from '../../src/api'
+import type { Booking, Message, MessageAttachment } from '../../src/api'
 import {
 	filterMessagesByStatus,
 	hasDetails,
 	messageDetails,
 	messageNotices,
 	messageStatusLabel,
-	filterMessagesByStatus,
+	readAttachments,
 	needsAttention,
 	retryable,
 	unresolved,
@@ -30,6 +30,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	failureKind: null,
 	issueReasons: [],
 	relatedBookingIds: [],
+	attachments: [],
 	error: null,
 	lastResponse: null,
 	attempts: 1,
@@ -314,3 +315,75 @@ describe('messageDetails', () => {
 	})
 })
 
+const attachment = (overrides: Partial<MessageAttachment> = {}): MessageAttachment => ({
+	filename: 'e-ticket.pdf',
+	pages: 2,
+	pagesRead: 2,
+	chars: 3591,
+	outcome: 'read',
+	truncated: false,
+	...overrides,
+})
+
+describe('attachment notices', () => {
+	it('names every file whose text went to the model, in one note', () => {
+		const notices = messageNotices(message({
+			attachments: [attachment(), attachment({ filename: 'invoice.pdf', pages: 1, pagesRead: 1 })],
+		}))
+		expect(notices).toEqual([{
+			type: 'info',
+			text: 'The text of 2 PDF attachments was sent to the model with this email: e-ticket.pdf (2 pages), invoice.pdf (1 page).',
+		}])
+	})
+
+	it('says when only the first pages were read', () => {
+		const notices = messageNotices(message({
+			attachments: [attachment({ filename: 'terms.pdf', pages: 40, pagesRead: 10, truncated: true })],
+		}))
+		expect(notices[1]).toEqual({ type: 'info', text: 'Only the first 10 of 40 pages of "terms.pdf" were read.' })
+	})
+
+	it('says when a long text was cut', () => {
+		const notices = messageNotices(message({ attachments: [attachment({ truncated: true })] }))
+		expect(notices[1].text).toBe('"e-ticket.pdf" is long, so only the start of its text was sent.')
+	})
+
+	it('warns about each file that was not read, so none vanishes without trace', () => {
+		const outcomes = ['no_text', 'encrypted', 'failed', 'crashed', 'too_large', 'too_many']
+		const notices = messageNotices(message({
+			attachments: outcomes.map((outcome) => attachment({ outcome, pages: null, pagesRead: null, chars: null })),
+		}))
+		expect(notices.map((n) => n.type)).toEqual(outcomes.map(() => 'warning'))
+		expect(notices[0].text).toContain('probably a scanned document')
+	})
+
+	it('reports the administrator\'s switch as information, not a fault', () => {
+		const [notice] = messageNotices(message({ attachments: [attachment({ outcome: 'disabled' })] }))
+		expect(notice.type).toBe('info')
+		expect(notice.text).toContain('turned off by the administrator')
+	})
+
+	it('names an unnamed file as such', () => {
+		const [notice] = messageNotices(message({ attachments: [attachment({ filename: null, outcome: 'encrypted' })] }))
+		expect(notice.text).toMatch(/^An unnamed PDF is encrypted/)
+	})
+
+	it('follows the failure it explains', () => {
+		const notices = messageNotices(message({
+			status: 'failed',
+			failureKind: 'no_text',
+			attachments: [attachment({ outcome: 'no_text' })],
+		}))
+		expect(notices.map((n) => n.type)).toEqual(['error', 'warning'])
+	})
+
+	it('adds nothing for an email without attachments', () => {
+		expect(messageNotices(message())).toEqual([])
+	})
+
+	it('counts only the files that were read as included', () => {
+		expect(readAttachments(message({
+			attachments: [attachment(), attachment({ outcome: 'no_text' })],
+		}))).toHaveLength(1)
+	})
+})

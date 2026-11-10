@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Exception\InvalidBackupException;
+use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCA\TravelManager\Service\Dto\BackupBooking;
 use OCA\TravelManager\Service\Dto\BackupContents;
 use OCA\TravelManager\Service\Dto\BackupMessage;
@@ -204,7 +205,27 @@ class BackupFormat {
 			$this->optionalString($row, 'lastResponse', $at),
 			$this->date($row, 'processedAt', $at),
 			$this->bool($row, 'discarded', $at),
+			$this->attachments($row, $at),
 		);
+	}
+
+	/**
+	 * Optional, since files from before 1.19.0 have none. Entries that do not
+	 * make sense are dropped rather than refusing the file, as when the column
+	 * is read: it records what happened, and nothing depends on it.
+	 *
+	 * @param array<array-key, mixed> $row
+	 * @return list<array{filename: ?string, pages: ?int, pagesRead: ?int, chars: ?int, outcome: string, truncated: bool}>
+	 */
+	private function attachments(array $row, string $at): array {
+		$value = $row['attachments'] ?? null;
+		if ($value === null) {
+			return [];
+		}
+		if (!is_array($value)) {
+			throw new InvalidBackupException($this->field('attachments', $at) . ': expected a list.');
+		}
+		return AttachmentRecord::decodeList(json_encode($value, JSON_THROW_ON_ERROR));
 	}
 
 	/** @param array<array-key, mixed> $row */

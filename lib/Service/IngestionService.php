@@ -10,6 +10,7 @@ use OCA\TravelManager\Db\ProcessedMessageMapper;
 use OCA\TravelManager\Imap\IImapClient;
 use OCA\TravelManager\Imap\ImapConnection;
 use OCA\TravelManager\Imap\ImapMessage;
+use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCA\TravelManager\Service\Dto\QueueCapacity;
 use OCP\AppFramework\Utility\ITimeFactory;
 use Psr\Log\LoggerInterface;
@@ -32,6 +33,7 @@ class IngestionService {
 		private ITimeFactory $timeFactory,
 		private LoggerInterface $logger,
 		private IngestionLogger $activityLog,
+		private AttachmentService $attachmentService,
 	) {
 	}
 
@@ -97,7 +99,7 @@ class IngestionService {
 				);
 				continue;
 			}
-			if ($this->enqueue($userId, $settings->mailbox, $message)) {
+			if ($this->enqueue($userId, $connection, $message)) {
 				$enqueued++;
 			}
 		}
@@ -111,7 +113,7 @@ class IngestionService {
 		return $enqueued;
 	}
 
-	private function enqueue(string $userId, string $mailbox, ImapMessage $message): bool {
+	private function enqueue(string $userId, ImapConnection $connection, ImapMessage $message): bool {
 		// The row is the dedup record *and* the queue entry: written before anything
 		// is sent, so a re-run never ingests the same message twice however long it
 		// waits. The body is retained because the queue sends from it — and so the
@@ -119,7 +121,7 @@ class IngestionService {
 		// be gone from the mailbox, and UIDVALIDITY may have rolled).
 		$record = new ProcessedMessage();
 		$record->setUserId($userId);
-		$record->setMailbox($mailbox);
+		$record->setMailbox($connection->mailbox);
 		$record->setMessageId($message->messageId);
 		$record->setUidValidity($message->uidValidity);
 		$record->setImapUid($message->uid);
@@ -127,17 +129,29 @@ class IngestionService {
 		// Truncated to the column width: a display label, not a parseable header.
 		$record->setSender($message->from === null ? null : mb_substr($message->from, 0, 255));
 		$record->setSentAt($message->date === null ? null : \DateTime::createFromImmutable($message->date));
-		$record->setBodyText($message->textBody);
+		// Some booking emails say only "your ticket is attached"; the PDFs' text
+		// goes to the model under a heading each, and what was or was not read
+		// is recorded per file.
+		$attachments = $this->attachmentService->read($userId, $connection, $message);
+		$text = MessageText::assemble($message->textBody, $attachments->sections);
+		$record->setBodyText($text);
+		$record->setAttachments(AttachmentRecord::encodeList($attachments->records));
 		$record->setAttempts(0);
 		$record->setProcessedAt($this->timeFactory->getDateTime());
 
 		// An empty prompt is answered "no booking" with full confidence, which
 		// reads as the model's judgement rather than our failure to read the
 		// email. Record it as what it is, with the MIME tree to diagnose it by.
-		if (trim($message->textBody) === '') {
+		if (trim($text) === '') {
 			$error = 'No readable text was found in this email, so it was not sent to the model.';
 			if ($message->structure !== null) {
 				$error .= "\n\nMIME structure:\n" . $message->structure;
+			}
+			if ($attachments->records !== []) {
+				$error .= "\n\nPDF attachments:\n" . implode("\n", array_map(
+					static fn (AttachmentRecord $r): string => ($r->filename ?? '(no name)') . ': ' . $r->outcome,
+					$attachments->records,
+				));
 			}
 			$record->setStatus(ProcessedMessage::STATUS_FAILED);
 			$record->setFailureKind(ProcessedMessage::FAILURE_NO_TEXT);

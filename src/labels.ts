@@ -67,6 +67,20 @@ const bookingStatusLabels: Record<string, string> = {
 
 export const bookingStatusLabel = (status: string): string => bookingStatusLabels[status] ?? status
 
+// What became of a PDF attachment when its email was read.
+const attachmentOutcomeLabels: Record<string, string> = {
+	read: t('travelmanager', 'Read'),
+	no_text: t('travelmanager', 'No text'),
+	encrypted: t('travelmanager', 'Encrypted'),
+	failed: t('travelmanager', 'Unreadable'),
+	crashed: t('travelmanager', 'Skipped'),
+	too_large: t('travelmanager', 'Too large'),
+	too_many: t('travelmanager', 'Not read'),
+	disabled: t('travelmanager', 'Not read'),
+}
+
+export const attachmentOutcomeLabel = (outcome: string): string => attachmentOutcomeLabels[outcome] ?? outcome
+
 /**
  * Button label + success toast per target review state. Keeping them together
  * means adding a state is a single edit here plus one in reviewActions().

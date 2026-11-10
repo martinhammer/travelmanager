@@ -59,6 +59,14 @@ const onSave = async () => {
 			:label="t('travelmanager', 'Extractions started per hour')"
 			:helper-text="t('travelmanager', 'Across all users; 0 means no limit. Keep it below your AI provider\'s rate limit to avoid \'Too many requests\' failures.')" />
 
+		<!-- On by default: some booking emails carry the itinerary only in a PDF.
+		     The helper says what it cannot do, as the limits above do. -->
+		<NcCheckboxRadioSwitch v-model="form.pdfAttachments"
+			:class="$style.field"
+			:description="t('travelmanager', 'Some booking emails carry the itinerary only in an attached PDF. Its text is sent to the AI model with the email. Scanned PDFs, which hold images rather than text, cannot be read.')">
+			{{ t('travelmanager', 'Read PDF attachments') }}
+		</NcCheckboxRadioSwitch>
+
 		<div :class="$style.actions">
 			<NcButton variant="primary" :disabled="saving" @click="onSave">
 				{{ t('travelmanager', 'Save') }}
@@ -68,7 +76,8 @@ const onSave = async () => {
 
 	<LlmInfo :provider="llm.provider"
 		:prompt-template="llm.promptTemplate"
-		:can-see-endpoint="llm.canSeeEndpoint" />
+		:can-see-endpoint="llm.canSeeEndpoint"
+		:pdf-attachments="llm.pdfAttachments" />
 </template>
 
 <style module>

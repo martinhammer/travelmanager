@@ -650,6 +650,25 @@ final class ExtractionServiceTest extends TestCase {
 		$this->assertStringContainsString('Extract traveller names only', $prompt);
 	}
 
+	public function testBuildPromptExplainsAttachmentSections(): void {
+		// The heading is MessageText::section's; the two must agree.
+		$prompt = $this->service->buildPrompt("Ticket attached.\n\n--- ATTACHMENT: e-ticket.pdf (PDF, 1 page) ---\nMH1204");
+		$this->assertStringContainsString('"--- ATTACHMENT: <name> ---"', $prompt);
+		$this->assertStringContainsString('separates columns of a table', $prompt);
+		$this->assertStringContainsString('return it once', $prompt);
+	}
+
+	public function testBuildPromptKeepsTicketNumbersOnThePassenger(): void {
+		// An e-ticket number in confirmation_number becomes a matching key.
+		$prompt = $this->service->buildPrompt('Ticket number: 232 2486113027');
+		$this->assertStringContainsString('ticket or e-ticket number belongs to one passenger', $prompt);
+	}
+
+	public function testBuildPromptDoesNotReadAFareClassAsACabin(): void {
+		$prompt = $this->service->buildPrompt('Class: Q');
+		$this->assertStringContainsString('booking class letter such as "Class: Q" is not a cabin', $prompt);
+	}
+
 	public function testBuildPromptContainsEmailAndSchema(): void {
 		$prompt = $this->service->buildPrompt('Your flight is confirmed.', 'Booking confirmation');
 		$this->assertStringContainsString('Your flight is confirmed.', $prompt);

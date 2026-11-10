@@ -42,6 +42,7 @@ class AdminController extends OCSController {
 			'fetchPerRun' => $this->configService->getFetchPerRun(),
 			'maxInFlight' => $this->configService->getMaxInFlight(),
 			'maxPerHour' => $this->configService->getMaxPerHour(),
+			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
 		]);
 	}
 
@@ -52,12 +53,13 @@ class AdminController extends OCSController {
 	 * @param int|null $fetchPerRun How many of the newest messages one mailbox read looks at, per user
 	 * @param int|null $maxInFlight Most extractions waiting on the model at once, instance-wide (at least 1)
 	 * @param int|null $maxPerHour Most extractions started per rolling hour, instance-wide (0 for no limit)
+	 * @param bool|null $pdfAttachments Whether the text of PDF attachments is sent to the model with the email
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerAdminSettings, array{}>
 	 *
 	 * 200: Updated admin settings returned
 	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/admin/settings')]
-	public function update(?bool $enabled = null, ?int $fetchPerRun = null, ?int $maxInFlight = null, ?int $maxPerHour = null): DataResponse {
+	public function update(?bool $enabled = null, ?int $fetchPerRun = null, ?int $maxInFlight = null, ?int $maxPerHour = null, ?bool $pdfAttachments = null): DataResponse {
 		if ($enabled !== null) {
 			$this->configService->setFeatureEnabled($enabled);
 		}
@@ -69,6 +71,9 @@ class AdminController extends OCSController {
 		}
 		if ($maxPerHour !== null) {
 			$this->configService->setMaxPerHour($maxPerHour);
+		}
+		if ($pdfAttachments !== null) {
+			$this->configService->setPdfAttachmentsEnabled($pdfAttachments);
 		}
 		return $this->show();
 	}

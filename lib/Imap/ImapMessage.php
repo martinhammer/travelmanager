@@ -15,7 +15,10 @@ class ImapMessage {
 		public readonly int $uidValidity,
 		public readonly string $subject,
 		public readonly ?\DateTimeImmutable $date,
-		/** Plain-text body, HTML stripped, ready for the LLM. */
+		/**
+		 * Plain-text body, HTML stripped. Bounded only as a memory guard: the
+		 * budget the model sees is applied later, once the attachments are known.
+		 */
 		public readonly string $textBody,
 		/**
 		 * The From address as displayed ("KLM <noreply@klm.com>"), or null when
@@ -29,6 +32,14 @@ class ImapMessage {
 		 * built is worth reporting.
 		 */
 		public readonly ?string $structure = null,
+		/**
+		 * The PDF attachments, listed from the structure but not downloaded:
+		 * that waits until the message has passed dedup, so a mailbox read does
+		 * not fetch the same files again on every run.
+		 *
+		 * @var list<AttachmentRef>
+		 */
+		public readonly array $attachments = [],
 	) {
 	}
 }

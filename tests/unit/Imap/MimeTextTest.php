@@ -197,4 +197,96 @@ EOT);
 		$this->assertStringStartsWith('1 text/plain, ', $lines[1]);
 		$this->assertStringStartsWith('2 application/pdf (attachment), ', $lines[2]);
 	}
+	/** @return list<string> "mimeId filename" per PDF found */
+	private static function pdfs(Horde_Mime_Part $root): array {
+		return array_map(
+			static fn ($ref): string => $ref->mimeId . ' ' . ($ref->filename ?? '-'),
+			MimeText::pdfAttachments($root),
+		);
+	}
+
+	public function testPdfAttachmentsAreFoundByTypeOrByName(): void {
+		$root = self::parse('Content-Type: multipart/mixed; boundary="A"', <<<'EOT'
+--A
+Content-Type: text/plain; charset=utf-8
+
+Your ticket is attached.
+--A
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="e-ticket.pdf"
+
+JVBERi0=
+--A
+Content-Type: application/octet-stream; name="Invoice.PDF"
+Content-Disposition: attachment
+
+JVBERi0=
+--A
+Content-Type: application/x-pdf
+Content-Disposition: inline
+
+JVBERi0=
+--A
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="ticket.pdf.exe"
+
+TVo=
+--A
+Content-Type: image/png
+Content-Disposition: attachment; filename="logo.png"
+
+iVBO
+--A--
+EOT);
+		// An inline PDF counts, and so does one with no name; a renamed
+		// executable and an image do not.
+		$this->assertSame(['2 e-ticket.pdf', '3 Invoice.PDF', '4 -'], self::pdfs($root));
+	}
+
+	/** A forward-as-attachment carries the original's PDFs inside it. */
+	public function testPdfsInsideAnAttachedMessageAreFound(): void {
+		$root = self::parse('Content-Type: multipart/mixed; boundary="A"', <<<'EOT'
+--A
+Content-Type: text/plain; charset=utf-8
+
+FYI
+--A
+Content-Type: message/rfc822
+
+Subject: Your booking
+Content-Type: multipart/mixed; boundary="B"
+
+--B
+Content-Type: text/plain; charset=utf-8
+
+See attached.
+--B
+Content-Type: application/pdf; name="boarding-pass.pdf"
+
+JVBERi0=
+--B--
+--A--
+EOT);
+		$this->assertSame(['2.2 boarding-pass.pdf'], self::pdfs($root));
+	}
+
+	public function testAPdfNeverBecomesBodyText(): void {
+		$root = self::parse('Content-Type: multipart/mixed; boundary="A"', <<<'EOT'
+--A
+Content-Type: text/plain; charset=utf-8
+
+Hi
+--A
+Content-Type: application/pdf
+Content-Disposition: inline; filename="ticket.pdf"
+
+JVBERi0=
+--A--
+EOT);
+		$this->assertSame('Hi', self::text($root));
+	}
+
+	public function testAMessageWithoutPdfsHasNone(): void {
+		$this->assertSame([], self::pdfs(self::parse('Content-Type: text/plain', 'Hello')));
+	}
 }

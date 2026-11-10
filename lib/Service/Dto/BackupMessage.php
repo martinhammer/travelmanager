@@ -12,6 +12,7 @@ class BackupMessage {
 	/**
 	 * @param list<string> $issueReasons
 	 * @param list<int> $relatedBookingIds ids on the exporting server
+	 * @param list<array{filename: ?string, pages: ?int, pagesRead: ?int, chars: ?int, outcome: string, truncated: bool}> $attachments
 	 */
 	public function __construct(
 		public readonly string $mailbox,
@@ -31,6 +32,8 @@ class BackupMessage {
 		public readonly ?string $lastResponse,
 		public readonly ?string $processedAt,
 		public readonly bool $discarded,
+		/** What was read from each PDF attachment; empty in files from before 1.19.0. */
+		public readonly array $attachments = [],
 	) {
 	}
 

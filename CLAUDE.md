@@ -27,6 +27,7 @@ DispatcherJob (TimedJob, ~15min, no parallel runs)
        └─ IngestionService.ingestForUser(uid)
             ├─ IImapClient.fetchRecent()        # READ-ONLY IMAP
             ├─ dedup via ProcessedMessageMapper # by RFC Message-ID
+            ├─ AttachmentService.read()         # new mail only: PDF text, see §3
             └─ store as messages.status = queued, then ExtractionQueue.pump()
 ExtractionQueue.pump()   # instance-wide: in-flight cap + hourly budget (QueuePlanner)
   └─ claim queued → processing, oldest first, users taking turns
@@ -79,7 +80,13 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `Llm/ProviderInfo` is its read-only description of the model in use.
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
   `Imap/Html` is the pure HTML→text helper for HTML-only bodies;
-  `Imap/MimeText` decides which MIME parts make up the text (see §7).
+  `Imap/MimeText` decides which MIME parts make up the text (see §7) and lists
+  the PDF attachments.
+- `Pdf/IPdfReader` → `PrinsPdfReader` (the only class importing
+  `prinsfrank/pdfparser`); `Pdf/PdfLayout` is its pure column-break rule.
+  `Service/AttachmentService` reads one email's PDFs under the caps and the
+  crash breadcrumb; `Service/MessageText` is the **pure** assembler of
+  `body_text` (body + one section per PDF, under the budget). See §3.
 - `BackgroundJob/DispatcherJob`, `BackgroundJob/UserIngestionJob`.
 - `Listener/TaskSuccessfulListener`, `Listener/TaskFailedListener`.
 - `Db/*` entities + `QBMapper` mappers; `Migration/Version1000Date2026062100…`
@@ -100,7 +107,8 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `dismissed` the 1.17.0 build shipped for a few hours: copy, then drop)
   + `Version2500Date2026091800…` (no schema change: moves the global feature flag
   off the server's reserved `enabled` app-config key and repairs the row — see
-  the gotcha in §7, which is the whole reason it exists).
+  the gotcha in §7, which is the whole reason it exists)
+  + `Version2600Date2026111000…` (adds `messages.attachments`).
 - `Controller/{Booking,Message,Trip,Settings,Admin,Dev,Backup}Controller`; `Settings/*`.
 - `Service/BackupFormat` + `Service/BackupImportPlanner` — **pure, dependency-free**
   validation of a backup file and the decision of what to write from it;
@@ -126,13 +134,17 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `subject`, `sender` (display form of the From header — grid metadata only,
   never a dedup or classification input; null on rows ingested before it was
   captured, since the envelope is not retained and cannot be backfilled),
-  `sent_at` and the plain-text `body_text` that was fed to the model,
+  `sent_at` and the plain-text `body_text` that was fed to the model (the body,
+  then one `--- ATTACHMENT: … ---` section per PDF read),
   so an extraction can be re-run without going back to IMAP (a message may have
   been deleted, and UIDVALIDITY may have rolled), plus `last_response` — the raw
   model output of the most recent attempt, truncated to 20000 chars, so the
   Messages view can show *what came back* next to the error rather than the error
   alone. `body_text` + `last_response` are the bulky columns: both are meant to be
-  dropped once the bookings a message produced are archived.
+  dropped once the bookings a message produced are archived. **`attachments`**
+  is a JSON list of `Dto/AttachmentRecord` — every PDF found at ingestion and
+  its outcome (read / no_text / encrypted / failed / crashed / too_large /
+  too_many / disabled); null when the email had none, and untouched by a retry.
 - `trips` — user-defined grouping. Carries a user-entered **`type`** (work /
   leisure, a slug so the set can grow — validated against `Trip::TYPES`) and
   **`color`** (`#rrggbb`, stored exactly as CSS and NcColorPicker use it).
@@ -772,6 +784,57 @@ code follows the overrides.
   - **The file is memory-bound and upload-bound.** `json_decode` reads it whole, and
     PHP's `post_max_size` drops an oversized body without an error, which is why "no
     file received" names the upload limit as a likely cause.
+- **PDF attachments are read, with prinsfrank/pdfparser plus a column marker**
+  (2026-11-10, app version 1.19.0; full spec and measurements in
+  `docs/pdf-attachments-spec.md`). Some booking emails say only "your ticket is
+  attached". Their PDFs' text now goes to the model inside `body_text`, under a
+  `--- ATTACHMENT: <name> (PDF, N pages) ---` heading each, so `body_text` stays
+  exactly what the model was given and Retry, the Raw message pane and backups
+  needed no change. Three real tickets (FlixBus, Flibco, a Malaysia Airlines
+  Amadeus e-ticket) were run through every candidate and the configured model.
+  What was ruled out, so the question is not reopened:
+  - **`pdftotext` (poppler)** extracts best, and cannot be relied on: the
+    Nextcloud snap ships without it and nothing can be installed into a snap.
+  - **PDF Viewer** is pdf.js in the browser; its PHP side is a settings page.
+    No Nextcloud app offers server-side PDF text to other apps. The **Assistant**
+    reads PDFs with `smalot/pdfparser`'s `getText()`.
+  - **smalot** estimates glyph widths and spaces a gap only at **2 em or more**,
+    hard-coded. The Amadeus ticket draws every word separately with ~0.35 em
+    gaps and no space glyphs, so it came out `MH120406:40` and the model read
+    flight **MH120 at the wrong times** — which passed validation silently.
+  - **prinsfrank** computes real advance widths (bundling the 14 standard
+    fonts' metrics) and breaks words at 0.25 em; words came out right on all
+    three. Its one weakness is joining side-by-side columns with a single space,
+    which swapped a boarding pass's luggage weights and merged a shuttle's
+    origin address into its destination. `PdfLayout::separator` puts a **tab** at
+    gaps over **0.8 em** (measured: text ≤ 0.43 em, columns ≥ 1.14 em), and with
+    it all three extracted correctly. The prompt says tabs are column breaks.
+  Consequences:
+  - **Downloaded after dedup, not in `fetchRecent`**, which lists PDFs from the
+    structure (`ImapMessage::$attachments`) and leaves the bytes to
+    `IImapClient::fetchParts` — otherwise every run re-downloads the newest N
+    messages' files.
+  - **Caps:** 3 PDFs, 5 MB decoded, 10 pages and 8 000 bytes of text each;
+    `body_text` 32 000 in total, the body taking what is left and never more than
+    its old 20 000. A cut is marked `[… truncated]`.
+  - **A fatal error is guarded by a breadcrumb**, not a catch: the user config
+    `pdf_reading` holds the Message-ID while its PDFs are read. Still set on the
+    next run means that run died there, and the PDFs are skipped as `crashed` —
+    otherwise the unstored message is fetched and dies again every 15 minutes.
+  - **`messages.attachments` records every PDF found, read or not**, because a
+    skipped file that leaves no trace makes the email look as though it had
+    none. Its own column, not `issue_reasons`: those describe the last attempt
+    and a retry clears them. `no_text` is decided on the *assembled* text, so a
+    blank body plus a readable PDF is sent and a blank body plus a scan is not.
+  - **`pdf_attachments_enabled` (admin, default on)**; the Extraction model
+    section says attachment text is sent too. Off still lists the PDFs, as
+    `disabled`, which the Messages view words as information, not a fault.
+  - **UI:** notices in the expanded Messages row (one for everything read, one
+    per file not read), a muted paperclip beside the subject, and a "PDF
+    attachments" list in the sidebar's message panel.
+  - The prompt also gained two rules the test exposed: a ticket number belongs
+    on its passenger, never in an identifier column (it became a matching key),
+    and a fare-class letter ("Class: Q") is not a cabin.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -906,12 +969,17 @@ debug panel for iterating without waiting for cron:
 - ✅ **Backup and restore** (2026-11-05): export and import of one user's data as
   versioned JSON, with a validating preview, "replace existing data" and a report of
   what was skipped. No migration, no version bump. See the decision in §3.
+- ✅ **PDF attachments** (2026-11-10, app version 1.19.0): the text of up to
+  three PDF attachments goes to the model with the email, read with
+  `prinsfrank/pdfparser` plus a column-break rule, and every PDF's outcome is
+  recorded in `messages.attachments`. Admin switch, default on. Scans (OCR) are
+  out of scope. See the decision in §3 and `docs/pdf-attachments-spec.md`.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
   each step), then tune the extraction prompt against the `dropped` rows in the
-  Messages view, then enable multi-user fan-out. PDF e-ticket attachments and
-  Calendar/Notes projection remain deferred.
+  Messages view, then enable multi-user fan-out. Scanned PDF attachments (OCR)
+  and Calendar/Notes projection remain deferred.
 
 Build/implement order from here: end-to-end flight extraction (single user) →
 prompt tuning on real emails → **archive sweep + `body_text`/`last_response` GC**
@@ -1768,6 +1836,21 @@ The patches, and one deliberate absence:
   one) — `@` does not stop it, and uncaught it ended the *whole* mailbox read on
   every run. `MimeText::toUtf8` falls back to iconv and always scrubs to valid
   UTF-8, and a part that still fails to decode costs only that part.
+- **Never use prinsfrank/pdfparser's `getMarkdown()`.** It inlines every link
+  target, and a FlixBus boarding pass's manage-my-booking link carries an
+  `auth_token` — which would then sit in `body_text` and go to the model. Text
+  only, through `PrinsPdfReader`.
+- **prinsfrank/pdfparser 4.3.0 cannot decrypt RC4.** It opens an owner-only
+  file without asking (right) and then fails to inflate its streams, even with
+  the correct password (poppler reads the same files). `PrinsPdfReader` reports
+  any failure on a file carrying `/Encrypt` as `encrypted`;
+  `PrinsPdfReaderTest::testAnOwnerOnlyRc4FileIsReportedAsEncryptedForNow` pins
+  it and will fail once the library is fixed. Ghostscript writes only RC4, so
+  AES was not tested.
+- **`ext-gd` is declared in `composer.json`'s `config.platform`**, not
+  installed. prinsfrank requires GD for image rasterising, which this app never
+  calls, and Nextcloud requires GD anyway; the declaration lets Composer resolve
+  on a machine without it. The PDF tests run without GD.
 - **Loading the bundled Composer autoloader.** Nextcloud only auto-includes an
   app's **`<app>/composer/autoload.php`** (`OC_App::registerAutoloading`), **not
   `<app>/vendor/autoload.php`**. Our build ships the autoloader under `vendor/`,

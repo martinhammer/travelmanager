@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Db;
 
+use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCP\AppFramework\Db\Entity;
 
 /**
@@ -43,6 +44,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setProcessedAt(?\DateTime $processedAt)
  * @method bool getDiscarded()
  * @method void setDiscarded(bool $discarded)
+ * @method string|null getAttachments()
+ * @method void setAttachments(?string $attachments)
  *
  * @psalm-import-type TravelManagerMessage from \OCA\TravelManager\ResponseDefinitions
  *
@@ -127,6 +130,12 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 	 * re-running is how you say you think it can work after all.
 	 */
 	protected bool $discarded = false;
+	/**
+	 * JSON list of AttachmentRecord: every PDF attachment found at ingestion and
+	 * what became of it. Null when the email had none. Fixed at ingestion, so a
+	 * retry leaves it alone — see Version2600.
+	 */
+	protected ?string $attachments = null;
 
 	public function __construct() {
 		$this->addType('uidValidity', 'integer');
@@ -167,6 +176,7 @@ class ProcessedMessage extends Entity implements \JsonSerializable {
 			// the list view only needs to know whether a retry is possible.
 			'canRetry' => $this->canRetry(),
 			'discarded' => $this->discarded,
+			'attachments' => AttachmentRecord::decodeList($this->attachments),
 			'sentAt' => $this->sentAt?->format(\DateTimeInterface::ATOM),
 			'processedAt' => $this->processedAt?->format(\DateTimeInterface::ATOM),
 		];

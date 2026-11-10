@@ -15,6 +15,8 @@ const props = defineProps<{
 	 * the provider as having no URL.
 	 */
 	canSeeEndpoint: boolean
+	/** Whether the text of PDF attachments goes to the model too. */
+	pdfAttachments: boolean
 }>()
 
 const notSet = t('travelmanager', 'Not reported')
@@ -44,6 +46,9 @@ const copyPrompt = async () => {
 		     leads the section because it qualifies everything under it. -->
 		<NcNoteCard v-else type="info">
 			{{ t('travelmanager', 'Email content is sent to the AI model for extraction. The settings are configured by the administrator in the Nextcloud Assistant admin settings. Please note that bookings extracted earlier may have been produced by a different model.') }}
+			<template v-if="pdfAttachments">
+				{{ t('travelmanager', 'Text from PDF attachments is sent as well.') }}
+			</template>
 		</NcNoteCard>
 
 		<div v-if="provider" :class="$style.fields">
@@ -73,6 +78,11 @@ const copyPrompt = async () => {
 
 			<span :class="$style.label">{{ t('travelmanager', 'Typical response time') }}</span>
 			<span :class="$style.value">{{ n('travelmanager', '%n second', '%n seconds', provider.expectedRuntime) }}</span>
+
+			<span :class="$style.label">{{ t('travelmanager', 'PDF attachments') }}</span>
+			<span :class="$style.value">
+				{{ pdfAttachments ? t('travelmanager', 'Read (text only, no OCR)') : t('travelmanager', 'Not read') }}
+			</span>
 		</div>
 
 		<!-- Collapsed like the Messages view's diagnostic sections, and for the
@@ -81,7 +91,9 @@ const copyPrompt = async () => {
 		<details :class="$style.section">
 			<summary>{{ t('travelmanager', 'Extraction prompt') }}</summary>
 			<p :class="$style.meta">
-				{{ t('travelmanager', 'Sent ahead of each email, followed by the email’s subject and plain-text body.') }}
+				{{ pdfAttachments
+					? t('travelmanager', 'Sent ahead of each email, followed by the email’s subject, its plain-text body and the text of its PDF attachments.')
+					: t('travelmanager', 'Sent ahead of each email, followed by the email’s subject and plain-text body.') }}
 			</p>
 			<div :class="$style.textBox">
 				<!-- Wrapper, not the button itself: NcButton's own `position: relative`

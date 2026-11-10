@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
+import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import { discardMessage, fetchMessageBody, retryMessage } from './api'
@@ -15,6 +16,7 @@ import {
 	hasDetails,
 	messageDetails,
 	messageNotices,
+	readAttachments,
 	messageStatusLabel,
 	retryable,
 	unresolved,
@@ -221,11 +223,22 @@ const onDiscard = async (id: number, discarded: boolean) => {
 								stroke-linecap="round"
 								stroke-linejoin="round" />
 						</svg>
-						<button type="button"
-							class="tm-cell-text tm-open-link"
-							@click.stop.prevent="openDetail('message', item.id)">
-							{{ item.subject || t('travelmanager', '(no subject)') }}
-						</button>
+						<!-- The paperclip says the model was also given an attachment's
+						     text — worth knowing when reading what came back. Beside the
+						     button, not inside it, so a long subject's ellipsis cannot clip
+						     it (as the Bookings grid does with its duplicate mark). Muted,
+						     not amber: it is provenance, not a task. -->
+						<span class="tm-cell-name">
+							<button type="button"
+								class="tm-cell-text tm-open-link"
+								@click.stop.prevent="openDetail('message', item.id)">
+								{{ item.subject || t('travelmanager', '(no subject)') }}
+							</button>
+							<PaperclipIcon v-if="readAttachments(item).length > 0"
+								:class="$style.attachment"
+								:size="16"
+								:title="t('travelmanager', 'Includes text from a PDF attachment')" />
+						</span>
 						<span class="tm-cell-text">{{ item.sender }}</span>
 						<span class="tm-cell-meta">{{ formatTimestamp(item.sentAt) }}</span>
 						<span class="tm-cell-meta">{{ formatTimestamp(item.processedAt) }}</span>
@@ -330,6 +343,11 @@ const onDiscard = async (id: number, discarded: boolean) => {
 </template>
 
 <style module>
+.attachment {
+	flex-shrink: 0;
+	color: var(--color-text-maxcontrast);
+}
+
 /* Subject and From share the flexible space 3:2 — the subject is the longer
    string and the one you read; the sender only needs to be recognisable. */
 .columns {

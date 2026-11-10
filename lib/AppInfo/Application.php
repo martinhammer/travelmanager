@@ -10,6 +10,8 @@ use OCA\TravelManager\Listener\TaskFailedListener;
 use OCA\TravelManager\Listener\TaskSuccessfulListener;
 use OCA\TravelManager\Llm\ILlmService;
 use OCA\TravelManager\Llm\TaskProcessingLlmService;
+use OCA\TravelManager\Pdf\IPdfReader;
+use OCA\TravelManager\Pdf\PrinsPdfReader;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
@@ -43,6 +45,7 @@ class Application extends App implements IBootstrap {
 
 		// IMAP seam — read-only Horde-backed client (V3).
 		$context->registerServiceAlias(IImapClient::class, HordeImapClient::class);
+		$context->registerServiceAlias(IPdfReader::class, PrinsPdfReader::class);
 
 		// Task Processing result delivery (V5).
 		$context->registerEventListener(TaskSuccessfulEvent::class, TaskSuccessfulListener::class);

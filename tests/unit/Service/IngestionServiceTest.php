@@ -8,7 +8,10 @@ use OCA\TravelManager\Db\ProcessedMessage;
 use OCA\TravelManager\Db\ProcessedMessageMapper;
 use OCA\TravelManager\Imap\IImapClient;
 use OCA\TravelManager\Imap\ImapMessage;
+use OCA\TravelManager\Service\AttachmentService;
 use OCA\TravelManager\Service\ConfigService;
+use OCA\TravelManager\Service\Dto\AttachmentRecord;
+use OCA\TravelManager\Service\Dto\AttachmentText;
 use OCA\TravelManager\Service\ExtractionQueue;
 use OCA\TravelManager\Service\IngestionLogger;
 use OCA\TravelManager\Service\IngestionService;
@@ -29,6 +32,9 @@ final class IngestionServiceTest extends TestCase {
 	private IImapClient&MockObject $imapClient;
 	private ProcessedMessageMapper&MockObject $processedMessageMapper;
 	private ExtractionQueue&MockObject $queue;
+	private AttachmentService&MockObject $attachments;
+	/** What the attachment service returns; a test changes it before ingesting. */
+	private AttachmentText $attachmentText;
 	private IngestionService $service;
 
 	protected function setUp(): void {
@@ -39,6 +45,9 @@ final class IngestionServiceTest extends TestCase {
 		$this->queue = $this->createMock(ExtractionQueue::class);
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getDateTime')->willReturnCallback(static fn (): \DateTime => new \DateTime());
+		$this->attachments = $this->createMock(AttachmentService::class);
+		$this->attachmentText = new AttachmentText();
+		$this->attachments->method('read')->willReturnCallback(fn (): AttachmentText => $this->attachmentText);
 
 		$this->service = new IngestionService(
 			$this->configService,
@@ -48,6 +57,7 @@ final class IngestionServiceTest extends TestCase {
 			$time,
 			$this->createMock(LoggerInterface::class),
 			$this->createMock(IngestionLogger::class),
+			$this->attachments,
 		);
 	}
 
@@ -134,6 +144,73 @@ final class IngestionServiceTest extends TestCase {
 				&& $m->getAttempts() === 0));
 
 		$this->assertSame(0, $this->service->ingestForUser('alice'));
+	}
+
+	public function testAttachmentsAreReadOnlyForNewMail(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([$this->message('<already@example.com>')]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(true);
+
+		// Downloading PDFs of mail already processed would fetch the same files on
+		// every run.
+		$this->attachments->expects($this->never())->method('read');
+
+		$this->service->ingestForUser('alice');
+	}
+
+	/** "Your ticket is attached": the body says nothing, the PDF says everything. */
+	public function testABlankBodyWithAReadablePdfIsSentToTheModel(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			new ImapMessage('<ticket@example.com>', 1, 1, 'Your ticket', new \DateTimeImmutable(), ''),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+		$section = "--- ATTACHMENT: ticket.pdf (PDF, 1 page) ---\nMH1204 06:40\t07:45";
+		$this->attachmentText = new AttachmentText(
+			[$section],
+			[new AttachmentRecord('ticket.pdf', AttachmentRecord::OUTCOME_READ, 1, 1, 22)],
+		);
+
+		$this->processedMessageMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (ProcessedMessage $m) => $m->getStatus() === ProcessedMessage::STATUS_QUEUED
+				&& $m->getBodyText() === $section
+				&& str_contains((string)$m->getAttachments(), '"outcome":"read"')));
+
+		$this->assertSame(1, $this->service->ingestForUser('alice'));
+	}
+
+	public function testABlankBodyWithOnlyAnUnreadablePdfIsStillNoText(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			new ImapMessage('<scan@example.com>', 1, 1, 'Your ticket', new \DateTimeImmutable(), ''),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+		$this->attachmentText = new AttachmentText(
+			[],
+			[new AttachmentRecord('scan.pdf', AttachmentRecord::OUTCOME_NO_TEXT, 1, 1, 0)],
+		);
+
+		// The error says why, file by file, and the column keeps the record.
+		$this->processedMessageMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (ProcessedMessage $m) => $m->getFailureKind() === ProcessedMessage::FAILURE_NO_TEXT
+				&& str_contains((string)$m->getError(), 'scan.pdf: no_text')
+				&& str_contains((string)$m->getAttachments(), '"outcome":"no_text"')));
+
+		$this->assertSame(0, $this->service->ingestForUser('alice'));
+	}
+
+	public function testAnEmailWithoutPdfsStoresNoAttachmentRecord(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([$this->message('<plain@example.com>')]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+
+		$this->processedMessageMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (ProcessedMessage $m) => $m->getAttachments() === null));
+
+		$this->service->ingestForUser('alice');
 	}
 
 	public function testMessagesAreQueuedInTheOrderTheMailboxReturnedThem(): void {
