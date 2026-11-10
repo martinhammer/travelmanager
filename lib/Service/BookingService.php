@@ -59,15 +59,23 @@ class BookingService {
 		$created = 0;
 		/** @var list<RelatedBooking> $related */
 		$related = [];
+		// Bookings this call has just written. They are not candidates for the
+		// ones after them: the model has just said these are separate bookings,
+		// and an outward and a return sharing an order number were otherwise
+		// matched against each other — the second suppressed as a "second email"
+		// about the first, from the very same email. A duplicate draft the user
+		// can discard is recoverable; a suppressed booking is not.
+		/** @var list<int> $createdIds */
+		$createdIds = [];
 		$this->db->beginTransaction();
 		try {
 			foreach ($bookings as $extracted) {
-				$match = $this->matcher->match($extracted, $this->findCandidates($userId, $extracted));
+				$match = $this->matcher->match($extracted, $this->findCandidates($userId, $extracted, $createdIds));
 				if ($match !== null && $match->decisive) {
 					$related[] = $this->report($match, $extracted);
 					continue;
 				}
-				$this->insertBooking($userId, $messageId, $extracted, $this->duplicateGroupFor($userId, $match));
+				$createdIds[] = $this->insertBooking($userId, $messageId, $extracted, $this->duplicateGroupFor($userId, $match));
 				$created++;
 				if ($match !== null) {
 					$related[] = $this->report($match, $extracted);
@@ -88,9 +96,10 @@ class BookingService {
 	 * the model wrote, so a literal hit needs the raw form, while the normalised
 	 * form catches the same reference typed with different punctuation.
 	 *
+	 * @param list<int> $exclude bookings written earlier in the same call
 	 * @return list<MatchCandidate>
 	 */
-	private function findCandidates(string $userId, ExtractedBooking $extracted): array {
+	private function findCandidates(string $userId, ExtractedBooking $extracted, array $exclude = []): array {
 		$identifiers = [];
 		foreach ([$extracted->bookingReference, $extracted->confirmationNumber] as $value) {
 			if ($value !== null && $value !== '') {
@@ -109,6 +118,8 @@ class BookingService {
 			self::MATCH_WINDOW_DAYS,
 			array_values(array_unique($identifiers)),
 		);
+
+		$rows = array_filter($rows, static fn (Booking $booking): bool => !in_array($booking->getId(), $exclude, true));
 
 		return array_values(array_map(
 			static fn (Booking $booking): MatchCandidate => new MatchCandidate(
@@ -156,7 +167,7 @@ class BookingService {
 	 * @param ?int $duplicateGroupId the group of maybe-duplicates to store it in,
 	 *                               so both sides of the resemblance can show it
 	 */
-	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted, ?int $duplicateGroupId): void {
+	private function insertBooking(string $userId, string $messageId, ExtractedBooking $extracted, ?int $duplicateGroupId): int {
 		$now = $this->timeFactory->getDateTime();
 		$booking = new Booking();
 		$booking->setUserId($userId);
@@ -176,7 +187,7 @@ class BookingService {
 		$booking->setDetails($encodedDetails === false ? null : $encodedDetails);
 		$booking->setStartDate($this->toDateTime($extracted->startDate));
 		$booking->setEndDate($this->toDateTime($extracted->endDate));
-		$this->bookingMapper->insert($booking);
+		return $this->bookingMapper->insert($booking)->getId();
 	}
 
 	private function report(BookingMatch $match, ExtractedBooking $extracted): RelatedBooking {

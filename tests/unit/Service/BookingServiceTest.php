@@ -33,6 +33,14 @@ final class BookingServiceTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		$this->bookingMapper = $this->createMock(BookingMapper::class);
+		// As the database does: an inserted booking comes back with an id, which
+		// applyExtraction relies on to keep a call's own bookings apart. Tests
+		// that check what was inserted add their own expectation on top.
+		$nextId = 100;
+		$this->bookingMapper->method('insert')->willReturnCallback(static function (Booking $booking) use (&$nextId): Booking {
+			$booking->setId($nextId++);
+			return $booking;
+		});
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getDateTime')->willReturn(new \DateTime());
 
@@ -162,6 +170,36 @@ final class BookingServiceTest extends TestCase {
 
 		$this->assertSame(1, $applied->created);
 		$this->assertCount(1, $applied->related);
+	}
+
+	/**
+	 * Observed: an outward and a return in one email shared their order number,
+	 * and the return was matched against the outward written a moment earlier
+	 * in the same call — suppressed as a "second email" about it.
+	 */
+	public function testBookingsFromOneExtractionAreNeverMatchedAgainstEachOther(): void {
+		$outward = new ExtractedBooking('bus', 'Voyages Léonard', '37713299', '27874980', 'confirmed', 'Ghent to Charleroi Airport',
+			['segments' => [['departureLocal' => '2026-11-06T11:00:00']]], '2026-11-06T11:00:00', null, null);
+		$return = new ExtractedBooking('bus', 'Voyages Léonard', '37713299', '27874980', 'confirmed', 'Charleroi Airport to Ghent',
+			['segments' => [['departureLocal' => '2026-11-11T15:00:00']]], '2026-11-11T15:00:00', null, null);
+
+		// The mapper behaves as the database would: what was inserted is a
+		// candidate for the next lookup. Identical identifiers on purpose — even
+		// then, the model's own split stands.
+		$stored = [];
+		$this->bookingMapper->expects($this->exactly(2))->method('insert')
+			->with($this->callback(static function (Booking $b) use (&$stored): bool {
+				$stored[] = $b;
+				return true;
+			}));
+		$this->bookingMapper->method('findMatchCandidates')->willReturnCallback(static function () use (&$stored): array {
+			return $stored;
+		});
+
+		$applied = $this->service->applyExtraction('alice', '<flibco@example.com>', [$outward, $return]);
+
+		$this->assertSame(2, $applied->created);
+		$this->assertSame([], $applied->related);
 	}
 
 	public function testAPossibleDuplicateIsStoredAndFlaggedRatherThanDropped(): void {

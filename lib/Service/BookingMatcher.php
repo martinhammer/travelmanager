@@ -30,6 +30,14 @@ use OCA\TravelManager\Service\Dto\MatchCandidate;
  *   intersection too, drawn from the header *and* the type-specific details,
  *   and it is never a required term when identifiers already agree.
  *
+ * And one that the set intersection then got wrong the other way:
+ *
+ * - **An order can hold several bookings.** A Flibco outward and return shared
+ *   the order number and had a ticket number each, and a shared identifier
+ *   alone suppressed the return as a duplicate of the outward. So when each
+ *   side also carries an identifier the other lacks, sharing one is only a
+ *   possible duplicate.
+ *
  * Dates corroborate; they never veto. A change email that moves a booking is
  * still the same booking.
  */
@@ -104,6 +112,27 @@ class BookingMatcher {
 			// consulting provider or dates — a rebooking keeps its reference and
 			// changes everything else.
 			if ($sharedIds !== []) {
+				// Unless each side also carries an identifier the other lacks. That
+				// is what two bookings in one order look like: a Flibco outward
+				// and return shared the order number 27874980 and had their own
+				// tickets, 37713299 and 37713300 — and the return was suppressed
+				// as a second email about the outward. A follow-up about the
+				// *same* booking repeats what it shares and adds nothing of its
+				// own (the hotel case above: WDP1UANA alone), so it still matches.
+				// Stored and flagged rather than dropped, as with any doubt here.
+				$incomingOnly = array_values(array_diff($incomingIds, $candidateIds));
+				$candidateOnly = array_values(array_diff($candidateIds, $incomingIds));
+				if ($incomingOnly !== [] && $candidateOnly !== []) {
+					$fallback ??= new BookingMatch(
+						$candidate,
+						BookingMatch::REASON_POSSIBLE,
+						false,
+						'shared reference ' . $sharedIds[0] . ', but each also has its own ('
+							. implode(', ', $incomingOnly) . ' vs ' . implode(', ', $candidateOnly)
+							. ') — two bookings in one order look like this',
+					);
+					continue;
+				}
 				if ($this->isStrong($sharedIds) || $sharedName !== null || $sameDay) {
 					return new BookingMatch(
 						$candidate,

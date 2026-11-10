@@ -659,9 +659,12 @@ final class ExtractionServiceTest extends TestCase {
 	}
 
 	public function testBuildPromptKeepsTicketNumbersOnThePassenger(): void {
-		// An e-ticket number in confirmation_number becomes a matching key.
+		// Beside a PNR an e-ticket number in confirmation_number becomes a
+		// matching key (Amadeus); alone it is the booking's only reference (Flibco).
 		$prompt = $this->service->buildPrompt('Ticket number: 232 2486113027');
-		$this->assertStringContainsString('ticket or e-ticket number belongs to one passenger', $prompt);
+		$this->assertStringContainsString('always goes in that passenger\'s ticketNumber', $prompt);
+		$this->assertStringContainsString('the ticket number is NOT an identifier', $prompt);
+		$this->assertStringContainsString('it is the booking_reference as well', $prompt);
 	}
 
 	public function testBuildPromptDoesNotReadAFareClassAsACabin(): void {

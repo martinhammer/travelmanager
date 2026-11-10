@@ -179,10 +179,15 @@ JSON;
 				. 'a VAT number, an invoice or transaction line id, and a route, trip or service number are NOT booking '
 				. 'identifiers: never put them in booking_reference or confirmation_number.',
 			// Observed on an Amadeus e-ticket: the e-ticket number went into
-			// confirmation_number, which makes a per-passenger number a key that
-			// duplicate detection matches bookings on.
-			'A ticket or e-ticket number belongs to one passenger: put it in that passenger\'s ticketNumber and never in '
-				. 'booking_reference or confirmation_number.',
+			// confirmation_number beside the PNR, which makes a per-passenger
+			// number a key that duplicate detection matches bookings on. But a
+			// Flibco shuttle ticket has no other reference — its ticket number is
+			// what you manage the booking with — and without it the outward and
+			// return were left with only their shared order number.
+			'A ticket or e-ticket number always goes in that passenger\'s ticketNumber. When the document also gives a '
+				. 'booking reference or PNR, the ticket number is NOT an identifier: never put it in booking_reference or '
+				. 'confirmation_number. When the ticket number is the only reference the booking itself has (as on many '
+				. 'coach and shuttle tickets), it is the booking_reference as well.',
 			'provider is the operator that delivers the service: the airline, the hotel, the rental desk you collect the car from, '
 				. 'the train or coach company that runs the service. '
 				. 'When the email comes from an agency, broker or booking site, that name belongs in the type-specific details field '

@@ -98,6 +98,34 @@ final class BookingMatcherTest extends TestCase {
 		$this->assertSame(7, $match->candidate->id);
 	}
 
+	/**
+	 * Observed: a Flibco outward and return in one order. The order number
+	 * 27874980 is on both; each has its own ticket. The return was suppressed as
+	 * a second email about the outward — a booking lost without trace.
+	 */
+	public function testTwoBookingsInOneOrderAreNotOneBooking(): void {
+		$details = ['retailer' => 'Flibco.com', 'segments' => [['carrier' => 'Voyages Léonard']]];
+		$outward = $this->candidate(51, 'bus', 'Voyages Léonard', '37713299', '27874980', $details, '2026-11-06T11:00:00');
+		$return = $this->incoming('bus', 'Voyages Léonard', '37713300', '27874980', $details, '2026-11-11T15:00:00');
+
+		$match = $this->matcher->match($return, [$outward]);
+
+		// Stored and flagged, never suppressed: whether they are one booking is
+		// a question, and a wrong "yes" is the one mistake that cannot be undone.
+		$this->assertNotNull($match);
+		$this->assertFalse($match->decisive);
+		$this->assertSame(BookingMatch::REASON_POSSIBLE, $match->reason);
+		$this->assertStringContainsString('37713300 vs 37713299', $match->evidence);
+	}
+
+	/** The same order's ticket again, with nothing of its own, is the same booking. */
+	public function testAFollowUpRepeatingAnOrdersTicketStillMatches(): void {
+		$outward = $this->candidate(51, 'bus', 'Voyages Léonard', '37713299', '27874980', [], '2026-11-06T11:00:00');
+		$reminder = $this->incoming('bus', 'Voyages Léonard', '37713299', null, [], '2026-11-06T11:00:00');
+
+		$this->assertTrue($this->matcher->match($reminder, [$outward])?->decisive);
+	}
+
 	/* ------------------------------------------------------------- identifiers */
 
 	public function testPunctuationAndCaseDoNotMakeANewBooking(): void {

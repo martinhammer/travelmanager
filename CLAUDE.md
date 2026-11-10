@@ -305,13 +305,26 @@ code follows the overrides.
     (`supplier`/`rentalCompany`, `propertyName`, segment carriers) — and it is
     never a required term once identifiers agree.
 
+  **A booking is never matched against one written earlier in the same
+  `applyExtraction` call** (2026-11-10). The model has just said they are
+  separate bookings, and a Flibco email carrying an outward and a return had
+  the return matched against the outward created a moment before — the email
+  reported as *related to itself*. A duplicate the model returns twice is a draft to discard; a
+  suppressed booking is gone. `findCandidates` excludes the call's own ids.
+
   The rules, in order (`BookingMatcher::match`):
   1. **A shared identifier is decisive**, without consulting provider or dates —
      a rebooking keeps its reference and changes everything else. Identifiers are
      normalised (uppercase, alphanumerics only), floored at 5 characters and
-     filtered against a placeholder stoplist. A *short all-numeric* shared
-     identifier is the one exception: it must be corroborated by a provider or a
-     date, or it drops to rule 3.
+     filtered against a placeholder stoplist. Two exceptions drop it to rule 3:
+     a *short all-numeric* shared identifier must be corroborated by a provider
+     or a date; and when **each side also carries an identifier the other
+     lacks**, sharing one is not enough (2026-11-10). That second one is what
+     two bookings in one order look like — a Flibco outward and return shared
+     the order number 27874980 and had their own tickets, 37713299 and
+     37713300, and the return was suppressed as a second email about the
+     outward. A follow-up about the *same* booking repeats what it shares and
+     adds nothing of its own (the hotel case above), so it still matches.
   2. **Same operator on the same calendar day is decisive** only when at least
      one side has no usable identifier. Identifiers that *disagree* are positive
      evidence of two different bookings (two rooms, one hotel, one night) and are
@@ -832,9 +845,11 @@ code follows the overrides.
   - **UI:** notices in the expanded Messages row (one for everything read, one
     per file not read), a muted paperclip beside the subject, and a "PDF
     attachments" list in the sidebar's message panel.
-  - The prompt also gained two rules the test exposed: a ticket number belongs
-    on its passenger, never in an identifier column (it became a matching key),
-    and a fare-class letter ("Class: Q") is not a cabin.
+  - The prompt also gained two rules the test exposed. A ticket number always
+    goes on its passenger, and stays out of the identifier columns *when there
+    is also a PNR* — beside one (Amadeus) it became a matching key, while a
+    Flibco shuttle ticket has no other reference, so there it is the
+    booking_reference too. And a fare-class letter ("Class: Q") is not a cabin.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
