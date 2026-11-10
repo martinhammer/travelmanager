@@ -45,6 +45,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 	failureKind: null,
 	issueReasons: [],
 	relatedBookingIds: [],
+	attachments: [],
 	error: null,
 	lastResponse: null,
 	attempts: 1,

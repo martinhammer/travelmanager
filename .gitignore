@@ -15,3 +15,5 @@
 
 .deploy-target
 deploy.sh
+
+/samples/

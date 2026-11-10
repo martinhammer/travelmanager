@@ -34,8 +34,12 @@ use Psr\Log\LoggerInterface;
  * @psalm-suppress PossiblyInvalidCast
  */
 class HordeImapClient implements IImapClient {
-	/** Hard cap on body text handed to the LLM, in bytes (of UTF-8). */
-	private const MAX_BODY_LENGTH = 20000;
+	/**
+	 * Memory guard on the body text, in bytes (of UTF-8). Not the budget the
+	 * model sees: that depends on the attachments too, and is applied by
+	 * MessageText::assemble once they are known.
+	 */
+	private const MAX_BODY_LENGTH = 100000;
 
 	public function __construct(
 		private LoggerInterface $logger,
@@ -99,6 +103,63 @@ class HordeImapClient implements IImapClient {
 			// the contract, not a nicety. See IImapClient::fetchRecent.
 			usort($messages, static fn (ImapMessage $a, ImapMessage $b): int => $a->uid <=> $b->uid);
 			return $messages;
+		} catch (Horde_Imap_Client_Exception $e) {
+			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
+		} finally {
+			$this->logout($client);
+		}
+	}
+
+	public function fetchParts(ImapConnection $connection, int $uidValidity, int $uid, array $mimeIds): array {
+		if ($mimeIds === []) {
+			return [];
+		}
+		$client = $this->createSocket($connection);
+		$mailbox = $connection->mailbox;
+		try {
+			$client->openMailbox($mailbox, Horde_Imap_Client::OPEN_READONLY);
+			$status = $client->status($mailbox, Horde_Imap_Client::STATUS_UIDVALIDITY);
+			if ((int)($status['uidvalidity'] ?? 0) !== $uidValidity) {
+				throw new ImapException('The mailbox changed (UIDVALIDITY) since it was read, so the message cannot be found by its UID');
+			}
+
+			// The structure again, for each part's transfer encoding: the bytes
+			// come back still encoded, and the part object is what decodes them.
+			$query = new Horde_Imap_Client_Fetch_Query();
+			$query->structure();
+			foreach ($mimeIds as $mimeId) {
+				// `peek` => do NOT set the \Seen flag (read-only, V6).
+				$query->bodyPart($mimeId, ['peek' => true]);
+			}
+			$result = $client->fetch($mailbox, $query, ['ids' => new Horde_Imap_Client_Ids([$uid])]);
+
+			$data = null;
+			foreach ($result as $row) {
+				$data = $row;
+				break;
+			}
+			if ($data === null) {
+				return [];
+			}
+
+			$structure = $data->getStructure();
+			$structure->buildMimeIds();
+			$parts = [];
+			foreach ($mimeIds as $mimeId) {
+				$part = $structure->getPart($mimeId);
+				$raw = $data->getBodyPart($mimeId);
+				if (!$part instanceof Horde_Mime_Part || $raw === null) {
+					continue;
+				}
+				// One part that will not decode costs that part only.
+				try {
+					$part->setContents((string)$raw, ['encoding' => $data->getBodyPartDecode($mimeId)]);
+					$parts[$mimeId] = (string)$part->getContents();
+				} catch (\Throwable $e) {
+					$this->logger->warning('Travel Manager: could not decode MIME part ' . $mimeId . ': ' . $e->getMessage());
+				}
+			}
+			return $parts;
 		} catch (Horde_Imap_Client_Exception $e) {
 			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
 		} finally {
@@ -177,7 +238,17 @@ class HordeImapClient implements IImapClient {
 		// Only worth carrying when there is nothing else to go on.
 		$structure = $body === '' ? MimeText::describe($data->getStructure()) : null;
 
-		return new ImapMessage($messageId, $uid, $uidValidity, $subject, $date, $body, $this->firstAddress($envelope->from), $structure);
+		return new ImapMessage(
+			$messageId,
+			$uid,
+			$uidValidity,
+			$subject,
+			$date,
+			$body,
+			$this->firstAddress($envelope->from),
+			$structure,
+			MimeText::pdfAttachments($data->getStructure()),
+		);
 	}
 
 	/**
@@ -208,8 +279,8 @@ class HordeImapClient implements IImapClient {
 
 	/**
 	 * Fetch and decode the text of every inline text part (see MimeText for
-	 * which ones, and why not just the first), normalised to UTF-8 and capped
-	 * in length.
+	 * which ones, and why not just the first), normalised to UTF-8 and bounded
+	 * by the memory guard.
 	 */
 	private function extractText(Horde_Imap_Client_Socket $client, string $mailbox, mixed $data): string {
 		$structure = $data->getStructure();

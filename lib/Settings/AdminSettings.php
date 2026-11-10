@@ -28,6 +28,7 @@ class AdminSettings implements ISettings {
 			'fetchPerRun' => $this->configService->getFetchPerRun(),
 			'maxInFlight' => $this->configService->getMaxInFlight(),
 			'maxPerHour' => $this->configService->getMaxPerHour(),
+			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
 		]);
 		// Read-only diagnostics: which model extractions actually go to, and the
 		// instructions they are sent with. The admin sees the endpoint URL in
@@ -37,6 +38,7 @@ class AdminSettings implements ISettings {
 			'provider' => $provider?->toArray(true),
 			'canSeeEndpoint' => true,
 			'promptTemplate' => $this->extractionService->promptTemplate(),
+			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
 		]);
 
 		Util::addScript(Application::APP_ID, Application::APP_ID . '-adminSettings');

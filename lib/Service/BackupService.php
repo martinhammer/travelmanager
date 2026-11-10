@@ -13,6 +13,7 @@ use OCA\TravelManager\Db\TaskMapMapper;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Exception\InvalidBackupException;
+use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCA\TravelManager\Service\Dto\BackupBooking;
 use OCA\TravelManager\Service\Dto\BackupContents;
 use OCA\TravelManager\Service\Dto\BackupMessage;
@@ -273,6 +274,7 @@ class BackupService {
 			'lastResponse' => $includeEmailText ? $message->getLastResponse() : null,
 			'processedAt' => $this->dateString($message->getProcessedAt()),
 			'discarded' => $message->getDiscarded(),
+			'attachments' => AttachmentRecord::decodeList($message->getAttachments()),
 		];
 	}
 
@@ -341,6 +343,7 @@ class BackupService {
 		$message->setLastResponse($row->lastResponse);
 		$message->setProcessedAt($this->toDateTime($row->processedAt));
 		$message->setDiscarded($row->discarded);
+		$message->setAttachments($row->attachments === [] ? null : json_encode($row->attachments, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 		$this->messageMapper->insert($message);
 	}
 

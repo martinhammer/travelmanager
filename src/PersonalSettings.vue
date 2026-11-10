@@ -198,7 +198,8 @@ onMounted(refreshLogs)
 
 	<LlmInfo :provider="llm.provider"
 		:prompt-template="llm.promptTemplate"
-		:can-see-endpoint="llm.canSeeEndpoint" />
+		:can-see-endpoint="llm.canSeeEndpoint"
+		:pdf-attachments="llm.pdfAttachments" />
 
 	<BackupSection @changed="refreshLogs" />
 

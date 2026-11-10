@@ -64,6 +64,48 @@ final class MimeText {
 	}
 
 	/**
+	 * The PDF attachments, in message order, including those of an attached
+	 * message (a forward-as-attachment carries the original's PDFs).
+	 *
+	 * Disposition does not matter — an inline PDF is still a document. The type
+	 * is only a shortlist: senders label PDFs `application/octet-stream` often
+	 * enough that the filename has to count too, and the reader checks the bytes
+	 * themselves before trusting either.
+	 *
+	 * @return list<AttachmentRef>
+	 */
+	public static function pdfAttachments(Horde_Mime_Part $root): array {
+		$root->buildMimeIds();
+		$refs = [];
+		foreach (self::all($root) as $part) {
+			if (self::isPdf($part)) {
+				$refs[] = new AttachmentRef(
+					$part->getMimeId(),
+					self::filename($part),
+					$part->getBytes(),
+				);
+			}
+		}
+		return $refs;
+	}
+
+	private static function isPdf(Horde_Mime_Part $part): bool {
+		$type = $part->getType();
+		if ($type === 'application/pdf' || $type === 'application/x-pdf') {
+			return true;
+		}
+		$filename = self::filename($part);
+		return $type === 'application/octet-stream'
+			&& $filename !== null
+			&& str_ends_with(strtolower($filename), '.pdf');
+	}
+
+	private static function filename(Horde_Mime_Part $part): ?string {
+		$name = trim((string)$part->getName());
+		return $name === '' ? null : $name;
+	}
+
+	/**
 	 * A part's text as valid UTF-8, whatever charset it was labelled with.
 	 *
 	 * mbstring is tried first and iconv second: mbstring lacks several charsets

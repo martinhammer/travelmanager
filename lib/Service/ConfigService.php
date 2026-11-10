@@ -50,6 +50,10 @@ class ConfigService {
 	// Tasks we start per rolling hour, instance-wide; 0 = unlimited. A cap alone
 	// never slows anything down, and an external provider's limit is a rate.
 	public const APP_MAX_PER_HOUR = 'max_per_hour';
+	// Whether the text of PDF attachments is sent with the email. On by default:
+	// some booking emails carry the itinerary nowhere else. Namespaced, never
+	// a bare 'enabled' — see above.
+	public const APP_PDF_ATTACHMENTS = 'pdf_attachments_enabled';
 
 	public const DEFAULT_FETCH_PER_RUN = 20;
 	public const DEFAULT_MAX_IN_FLIGHT = 2;
@@ -63,6 +67,9 @@ class ConfigService {
 	public const USER_IMAP_USER = 'imap_user';
 	public const USER_MAILBOX = 'mailbox';
 	public const USER_INTERVAL = 'interval_minutes';
+	// The Message-ID whose PDF is being read right now, cleared afterwards. Still
+	// set at the start of a run means the last one died inside that PDF.
+	public const USER_PDF_READING = 'pdf_reading';
 
 	public const DEFAULT_INTERVAL_MINUTES = 15;
 
@@ -115,7 +122,34 @@ class ConfigService {
 		$this->appConfig->setValueInt(Application::APP_ID, self::APP_MAX_PER_HOUR, max(0, $value));
 	}
 
+	/** Whether PDF attachments are read and sent to the model with the email. */
+	public function isPdfAttachmentsEnabled(): bool {
+		return $this->appConfig->getValueBool(Application::APP_ID, self::APP_PDF_ATTACHMENTS, true);
+	}
+
+	public function setPdfAttachmentsEnabled(bool $enabled): void {
+		$this->appConfig->setValueBool(Application::APP_ID, self::APP_PDF_ATTACHMENTS, $enabled);
+	}
+
 	/* ----------------------------------------------------------------- user */
+
+	/**
+	 * The message whose PDF this user's ingestion was reading when it last
+	 * stopped, or null. A PHP fatal error (memory, time) is out of reach of any
+	 * catch, so this is how the next run finds out where the last one died.
+	 */
+	public function getPdfReading(string $userId): ?string {
+		$value = $this->userConfig->getValueString($userId, Application::APP_ID, self::USER_PDF_READING, '');
+		return $value === '' ? null : $value;
+	}
+
+	public function setPdfReading(string $userId, ?string $messageId): void {
+		if ($messageId === null) {
+			$this->userConfig->deleteUserConfig($userId, Application::APP_ID, self::USER_PDF_READING);
+			return;
+		}
+		$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_PDF_READING, $messageId);
+	}
 
 	public function getUserSettings(string $userId): UserSettings {
 		return new UserSettings(

@@ -36,6 +36,18 @@ interface IImapClient {
 	public function fetchRecent(ImapConnection $connection, int $limit): array;
 
 	/**
+	 * Download parts of one message, decoded (base64 and quoted-printable
+	 * undone), keyed by MIME id. Read-only like everything here (V6).
+	 *
+	 * @param list<string> $mimeIds
+	 * @return array<string, string> a part missing from the result could not be fetched
+	 * @throws ImapException on connection/auth/protocol failure, or when the
+	 *                       mailbox's UIDVALIDITY no longer matches — the UID then
+	 *                       names a different message, if any
+	 */
+	public function fetchParts(ImapConnection $connection, int $uidValidity, int $uid, array $mimeIds): array;
+
+	/**
 	 * Verify that the given connection can authenticate and open the mailbox.
 	 *
 	 * @throws ImapException when the mailbox cannot be opened

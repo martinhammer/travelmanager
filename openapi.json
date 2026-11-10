@@ -20,6 +20,44 @@
             }
         },
         "schemas": {
+            "Attachment": {
+                "type": "object",
+                "required": [
+                    "filename",
+                    "pages",
+                    "pagesRead",
+                    "chars",
+                    "outcome",
+                    "truncated"
+                ],
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pages": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "pagesRead": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "chars": {
+                        "type": "integer",
+                        "format": "int64",
+                        "nullable": true
+                    },
+                    "outcome": {
+                        "type": "string"
+                    },
+                    "truncated": {
+                        "type": "boolean"
+                    }
+                }
+            },
             "BackupCounts": {
                 "type": "object",
                 "required": [
@@ -275,6 +313,7 @@
                     "attempts",
                     "canRetry",
                     "discarded",
+                    "attachments",
                     "sentAt",
                     "processedAt"
                 ],
@@ -334,6 +373,12 @@
                     },
                     "discarded": {
                         "type": "boolean"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Attachment"
+                        }
                     },
                     "sentAt": {
                         "type": "string",

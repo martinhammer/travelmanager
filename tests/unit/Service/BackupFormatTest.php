@@ -123,6 +123,33 @@ final class BackupFormatTest extends TestCase {
 		$this->assertSame([3, 42], array_map(static fn ($b): int => $b->id, $parsed->bookings));
 	}
 
+	public function testAFileFromBefore119HasNoAttachmentRecords(): void {
+		$this->assertSame([], $this->format->parse($this->encode($this->backup()))->messages[0]->attachments);
+	}
+
+	public function testAttachmentRecordsAreReadAndNonsenseEntriesDropped(): void {
+		$backup = $this->backup();
+		$backup['messages'][0]['attachments'] = [
+			['filename' => 'ticket.pdf', 'pages' => 2, 'pagesRead' => 2, 'chars' => 3591, 'outcome' => 'read', 'truncated' => false],
+			['filename' => 'odd.pdf', 'outcome' => 'exploded'],
+		];
+
+		$parsed = $this->format->parse($this->encode($backup));
+
+		$this->assertSame(
+			[['filename' => 'ticket.pdf', 'pages' => 2, 'pagesRead' => 2, 'chars' => 3591, 'outcome' => 'read', 'truncated' => false]],
+			$parsed->messages[0]->attachments,
+		);
+	}
+
+	public function testAttachmentsThatAreNotAListAreRefused(): void {
+		$backup = $this->backup();
+		$backup['messages'][0]['attachments'] = 'ticket.pdf';
+
+		$this->expectException(InvalidBackupException::class);
+		$this->format->parse($this->encode($backup));
+	}
+
 	public function testUnknownFieldsAreIgnored(): void {
 		$backup = $this->backup();
 		$backup['somethingNew'] = true;

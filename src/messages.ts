@@ -1,4 +1,4 @@
-import type { Booking, Message } from './api'
+import type { Booking, Message, MessageAttachment } from './api'
 import type { SortColumn, SortDirection } from './grid'
 
 /**
@@ -269,6 +269,78 @@ const outcomeNotice = (message: Message): MessageNotice | null => {
 	}
 }
 
+const attachmentName = (attachment: MessageAttachment): string =>
+	attachment.filename === null ? 'An unnamed PDF' : `"${attachment.filename}"`
+
+const pageCount = (attachment: MessageAttachment): string =>
+	attachment.pages === 1 ? '1 page' : `${attachment.pages ?? 0} pages`
+
+/**
+ * Whether any attachment's text went to the model with this email.
+ * @param message the ledger row
+ */
+export const readAttachments = (message: Message): MessageAttachment[] =>
+	message.attachments.filter((attachment) => attachment.outcome === 'read')
+
+/**
+ * What became of each PDF attachment. One note for everything that was read,
+ * then one per file that was not: a skipped file that leaves no trace makes the
+ * email look as though it never had one.
+ *
+ * Warnings are kept for what the user can do something about or ought to know
+ * went wrong; the admin's switch is a decision, not a fault, so it is info.
+ * @param message the ledger row
+ */
+const attachmentNotices = (message: Message): MessageNotice[] => {
+	const notices: MessageNotice[] = []
+	const read = readAttachments(message)
+	if (read.length > 0) {
+		const files = read.map((a) => `${a.filename ?? 'unnamed PDF'} (${pageCount(a)})`).join(', ')
+		notices.push({
+			type: 'info',
+			text: read.length === 1
+				? `The text of 1 PDF attachment was sent to the model with this email: ${files}.`
+				: `The text of ${read.length} PDF attachments was sent to the model with this email: ${files}.`,
+		})
+		for (const attachment of read.filter((a) => a.truncated)) {
+			notices.push({
+				type: 'info',
+				text: attachment.pagesRead !== null && attachment.pages !== null && attachment.pagesRead < attachment.pages
+					? `Only the first ${attachment.pagesRead} of ${attachment.pages} pages of ${attachmentName(attachment)} were read.`
+					: `${attachmentName(attachment)} is long, so only the start of its text was sent.`,
+			})
+		}
+	}
+
+	for (const attachment of message.attachments) {
+		const name = attachmentName(attachment)
+		switch (attachment.outcome) {
+		case 'no_text':
+			notices.push({ type: 'warning', text: `${name} has no text, so it was not read. It is probably a scanned document; scans are not read.` })
+			break
+		case 'encrypted':
+			notices.push({ type: 'warning', text: `${name} is encrypted and could not be opened, so it was not read.` })
+			break
+		case 'failed':
+			notices.push({ type: 'warning', text: `${name} could not be read. The activity log has the details.` })
+			break
+		case 'crashed':
+			notices.push({ type: 'warning', text: `Reading ${name} stopped a mailbox read, so this email's PDF attachments were skipped to let the rest of the mail through.` })
+			break
+		case 'too_large':
+			notices.push({ type: 'warning', text: `${name} is larger than 5 MB, so it was not read.` })
+			break
+		case 'too_many':
+			notices.push({ type: 'warning', text: `${name} was not read: only the first 3 PDF attachments of an email are.` })
+			break
+		case 'disabled':
+			notices.push({ type: 'info', text: `${name} was not read, because reading PDF attachments is turned off by the administrator.` })
+			break
+		}
+	}
+	return notices
+}
+
 /**
  * Notes to show above the detail sections of an expanded row, most urgent first.
  * A row can warrant more than one: a booking can be saved *and* have come from a
@@ -280,7 +352,7 @@ export const messageNotices = (message: Message, created: Booking[] = []): Messa
 	// The discard sits directly after the outcome it answers: the failure is still
 	// described in full (that is what prompt tuning reads), and this says what the
 	// user decided about it.
-	const notices = [failureNotice(message), outcomeNotice(message), discardedNotice(message)]
+	const notices = [failureNotice(message), outcomeNotice(message), discardedNotice(message), ...attachmentNotices(message)]
 
 	// Read off the booking this run produced, not off the message: a possible
 	// duplicate is a relation between bookings, and the message is only where it

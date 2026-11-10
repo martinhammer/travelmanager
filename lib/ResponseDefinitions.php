@@ -28,6 +28,19 @@ namespace OCA\TravelManager;
  *     confirmedAt: string|null,
  * }
  *
+ * One PDF attachment of an email and what became of it at ingestion. `outcome`
+ * is read / no_text / encrypted / failed / crashed / too_large / too_many /
+ * disabled; the counts are null when the file was never opened.
+ *
+ * @psalm-type TravelManagerAttachment = array{
+ *     filename: string|null,
+ *     pages: int|null,
+ *     pagesRead: int|null,
+ *     chars: int|null,
+ *     outcome: string,
+ *     truncated: bool,
+ * }
+ *
  * @psalm-type TravelManagerMessage = array{
  *     id: int,
  *     mailbox: string,
@@ -43,6 +56,7 @@ namespace OCA\TravelManager;
  *     attempts: int,
  *     canRetry: bool,
  *     discarded: bool,
+ *     attachments: list<TravelManagerAttachment>,
  *     sentAt: string|null,
  *     processedAt: string|null,
  * }
@@ -84,6 +98,7 @@ namespace OCA\TravelManager;
  *     fetchPerRun: int,
  *     maxInFlight: int,
  *     maxPerHour: int,
+ *     pdfAttachments: bool,
  * }
  *
  * @psalm-type TravelManagerConnectionTest = array{

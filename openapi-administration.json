@@ -26,7 +26,8 @@
                     "enabled",
                     "fetchPerRun",
                     "maxInFlight",
-                    "maxPerHour"
+                    "maxPerHour",
+                    "pdfAttachments"
                 ],
                 "properties": {
                     "enabled": {
@@ -43,6 +44,9 @@
                     "maxPerHour": {
                         "type": "integer",
                         "format": "int64"
+                    },
+                    "pdfAttachments": {
+                        "type": "boolean"
                     }
                 }
             },
@@ -238,6 +242,12 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "Most extractions started per rolling hour, instance-wide (0 for no limit)"
+                                    },
+                                    "pdfAttachments": {
+                                        "type": "boolean",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Whether the text of PDF attachments is sent to the model with the email"
                                     }
                                 }
                             }

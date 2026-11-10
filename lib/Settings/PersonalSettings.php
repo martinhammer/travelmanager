@@ -42,6 +42,7 @@ class PersonalSettings implements ISettings {
 			'provider' => $provider?->toArray($isAdmin),
 			'canSeeEndpoint' => $isAdmin,
 			'promptTemplate' => $this->extractionService->promptTemplate(),
+			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
 		]);
 
 		Util::addScript(Application::APP_ID, Application::APP_ID . '-personalSettings');

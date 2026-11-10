@@ -19,6 +19,7 @@ import {
 	openTripPicker,
 } from './dialogs'
 import {
+	attachmentOutcomeLabel,
 	bookingLabel,
 	bookingStatusLabel,
 	actionLabel,
@@ -400,6 +401,23 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 			</template>
 
 			<template v-else-if="message !== null">
+				<!-- What the email contained beyond its body, before what came of
+				     it. The files themselves are not kept, so these are names, not
+				     links; the expanded Messages row says why any was not read. -->
+				<template v-if="message.attachments.length > 0">
+					<h4 :class="$style.heading">
+						{{ t('travelmanager', 'PDF attachments') }}
+					</h4>
+					<ul :class="$style.links">
+						<li v-for="(attachment, i) in message.attachments" :key="i" :class="$style.linkRow">
+							<span :class="['tm-badge', { 'tm-badge-warning': attachment.outcome !== 'read' && attachment.outcome !== 'disabled' }]">
+								{{ attachmentOutcomeLabel(attachment.outcome) }}
+							</span>
+							<span>{{ attachment.filename ?? t('travelmanager', 'Unnamed PDF') }}</span>
+						</li>
+					</ul>
+				</template>
+
 				<h4 :class="$style.heading">
 					{{ t('travelmanager', 'Bookings from this email') }}
 				</h4>

@@ -139,6 +139,20 @@ export interface Booking {
 }
 
 /** One row of the ingestion ledger: an email that was read from the mailbox. */
+/** One PDF attachment of an email, as recorded when the email was read. */
+export interface MessageAttachment {
+	filename: string | null
+	/** Null when the file was never opened. */
+	pages: number | null
+	pagesRead: number | null
+	/** Bytes of text sent to the model. */
+	chars: number | null
+	/** read / no_text / encrypted / failed / crashed / too_large / too_many / disabled */
+	outcome: string
+	/** Only part of the file was read: the page cap, or the text cap. */
+	truncated: boolean
+}
+
 export interface Message {
 	id: number
 	mailbox: string
@@ -168,6 +182,11 @@ export interface Message {
 	 * keeps saying what the pipeline observed. Cleared by a retry.
 	 */
 	discarded: boolean
+	/**
+	 * Every PDF attachment found when the email was read, and what became of it.
+	 * Empty for an email without PDFs, and for rows read before attachments were.
+	 */
+	attachments: MessageAttachment[]
 	sentAt: string | null
 	processedAt: string | null
 }
@@ -362,6 +381,8 @@ export interface LlmDiagnostics {
 	canSeeEndpoint: boolean
 	/** The rules + schema sent ahead of each email. */
 	promptTemplate: string
+	/** Whether the text of PDF attachments is sent with the email. */
+	pdfAttachments: boolean
 }
 
 export interface AdminSettings {
@@ -372,6 +393,8 @@ export interface AdminSettings {
 	maxInFlight: number
 	/** Most extractions started per rolling hour, instance-wide; 0 means no limit. */
 	maxPerHour: number
+	/** Whether the text of PDF attachments is sent to the model with the email. */
+	pdfAttachments: boolean
 }
 
 export const saveAdminSettings = async (settings: Partial<AdminSettings>): Promise<AdminSettings> => {
