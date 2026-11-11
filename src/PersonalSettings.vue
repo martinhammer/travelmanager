@@ -26,6 +26,7 @@ import {
 	testConnection,
 	wipeData,
 } from './api'
+import { refusalMessage } from './backup'
 
 const initial = loadState<UserSettings>('travelmanager', 'settings')
 const featureEnabled = loadState<boolean>('travelmanager', 'featureEnabled', true)
@@ -67,7 +68,9 @@ const onSave = async () => {
 		form.imapPassword = ''
 		showSuccess(t('travelmanager', 'Settings saved'))
 	} catch (e) {
-		showError(t('travelmanager', 'Could not save settings'))
+		// A refused mailbox address comes back as a 400 saying what is wrong
+		// with it, which is worth more than "could not save".
+		showError(refusalMessage(e) ?? t('travelmanager', 'Could not save settings'))
 	} finally {
 		saving.value = false
 	}

@@ -395,6 +395,8 @@ export interface AdminSettings {
 	maxPerHour: number
 	/** Whether the text of PDF attachments is sent to the model with the email. */
 	pdfAttachments: boolean
+	/** Whether IMAP server certificates are verified; on unless an admin opts out. */
+	verifyImapCertificates: boolean
 }
 
 export const saveAdminSettings = async (settings: Partial<AdminSettings>): Promise<AdminSettings> => {

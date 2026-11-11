@@ -13,6 +13,7 @@ use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\PasswordConfirmationRequired;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\AppFramework\OCS\OCSBadRequestException;
 use OCP\AppFramework\OCSController;
 use OCP\IRequest;
 
@@ -61,8 +62,10 @@ class SettingsController extends OCSController {
 	 * @param int|null $intervalMinutes Check interval in minutes
 	 * @param string|null $imapPassword IMAP app password (write-only; blank keeps the current one)
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerUserSettings, array{}>
+	 * @throws OCSBadRequestException when the mailbox host, port or encryption is refused
 	 *
 	 * 200: Updated settings returned
+	 * 400: Mailbox address refused; nothing was saved
 	 */
 	#[NoAdminRequired]
 	#[PasswordConfirmationRequired]
@@ -86,7 +89,13 @@ class SettingsController extends OCSController {
 			'mailbox' => $mailbox,
 			'intervalMinutes' => $intervalMinutes,
 		], static fn ($v): bool => $v !== null);
-		$this->configService->setUserSettings($uid, $values);
+		try {
+			$this->configService->setUserSettings($uid, $values);
+		} catch (\InvalidArgumentException $e) {
+			// Before the password and the switch below, so a refused save
+			// changes nothing at all.
+			throw new OCSBadRequestException($e->getMessage());
+		}
 
 		if ($imapPassword !== null && $imapPassword !== '') {
 			$this->configService->setImapPassword($uid, $imapPassword);

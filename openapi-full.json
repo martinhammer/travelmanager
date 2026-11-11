@@ -27,7 +27,8 @@
                     "fetchPerRun",
                     "maxInFlight",
                     "maxPerHour",
-                    "pdfAttachments"
+                    "pdfAttachments",
+                    "verifyImapCertificates"
                 ],
                 "properties": {
                     "enabled": {
@@ -46,6 +47,9 @@
                         "format": "int64"
                     },
                     "pdfAttachments": {
+                        "type": "boolean"
+                    },
+                    "verifyImapCertificates": {
                         "type": "boolean"
                     }
                 }
@@ -731,6 +735,12 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "Whether the text of PDF attachments is sent to the model with the email"
+                                    },
+                                    "verifyImapCertificates": {
+                                        "type": "boolean",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Whether IMAP server certificates are verified"
                                     }
                                 }
                             }
@@ -3555,6 +3565,34 @@
                             }
                         }
                     },
+                    "400": {
+                        "description": "when the mailbox host, port or encryption is refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "401": {
                         "description": "Current user is not logged in",
                         "content": {
@@ -4247,7 +4285,7 @@
     "tags": [
         {
             "name": "admin",
-            "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, and the two limits on how hard extraction leans on the model."
+            "description": "Admin-only settings: the global feature flag, how much of each mailbox a run reads, the two limits on how hard extraction leans on the model, and whether IMAP server certificates are verified."
         },
         {
             "name": "backup",

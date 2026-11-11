@@ -81,7 +81,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
   `Imap/Html` is the pure HTML→text helper for HTML-only bodies;
   `Imap/MimeText` decides which MIME parts make up the text (see §7) and lists
-  the PDF attachments.
+  the PDF attachments; `Imap/ImapEndpoint` is the pure rule for what a mailbox
+  host/port/encryption may be, and `Imap/ImapEndpointResolver` resolves the host
+  and checks every address against `IRemoteHostValidator` (see §3).
 - `Pdf/IPdfReader` → `PrinsPdfReader` (the only class importing
   `prinsfrank/pdfparser`); `Pdf/PdfLayout` is its pure column-break rule.
   `Service/AttachmentService` reads one email's PDFs under the caps and the
@@ -850,6 +852,42 @@ code follows the overrides.
     is also a PNR* — beside one (Amadeus) it became a matching key, while a
     Flibco shuttle ticket has no other reference, so there it is the
     booking_reference too. And a fare-class letter ("Class: Q") is not a cabin.
+- **A mailbox connection is verified, and goes only where it was checked**
+  (2026-11-11, from `docs/code-review-2026-11-11.md` items 1–2). The host is a
+  value any user sets and cron dials it from the server, so it is treated like
+  any other user-supplied URL. Consequences:
+  - **Certificates are verified, against Nextcloud's CA bundle.** Horde's socket
+    client merges `verify_peer => false` *under* the caller's context, so before
+    this nothing was verified and the mailbox password went to whoever answered
+    the name. `HordeImapClient::sslContext` now passes `verify_peer`,
+    `verify_peer_name` and `cafile = ICertificateManager::getAbsoluteBundlePath()`
+    — the bundle Nextcloud's own HTTP client uses, so a self-signed server works
+    once its CA is imported with `occ security:certificates:import`. The admin
+    switch **Verify mail server certificates** (`imap_verify_tls`, default on)
+    is the last-resort opt-out, as Mail's `app.mail.verify-tls-peer` is. A
+    refused certificate surfaces only as Horde's bare "Error connecting… [0]"
+    (the TLS warning is suppressed), so `describe()` adds a hint saying so.
+  - **Only a host name or an IP literal is a host** (`ImapEndpoint`). Horde
+    recognises a scheme only at offset 0 and drops a zero port, so
+    `tcp://127.0.0.1` and `unix:///path` (port 0) were dialled as written.
+    Port 1–65535; encryption one of `ssl`/`tls`/`none` — anything else used to
+    fall through to cleartext.
+  - **Local and private addresses need the admin's `allow_local_remote_servers`**,
+    via `IRemoteHostValidator`, Mail's rule for the same thing. **A mailbox on the
+    LAN or the same machine stops working until that flag is set**, and the error
+    names it. The validator only classifies the string it is given, so the
+    resolver checks the name *and* every A/AAAA address it resolves to, and one
+    local address refuses the lot.
+  - **The checked address is the one dialled.** Resolving again at connect time
+    would let a short-lived DNS answer pass as public and connect as 127.0.0.1,
+    so `hostspec` is the IP and the name rides in `peer_name` (certificate check
+    and SNI). IPv4 is preferred: without Happy Eyeballs a dead IPv6 route is a
+    timeout, not a fallback.
+  - **Checked on save and again before every connection.** Saving refuses a bad
+    address with a 400 and writes nothing, but does only the checks that need no
+    DNS — what a name resolves to can change after saving, and a DNS hiccup
+    should not stop someone saving their password. Rows saved before these rules
+    are still in the database, which is the other reason for the second check.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -989,6 +1027,10 @@ debug panel for iterating without waiting for cron:
   `prinsfrank/pdfparser` plus a column-break rule, and every PDF's outcome is
   recorded in `messages.attachments`. Admin switch, default on. Scans (OCR) are
   out of scope. See the decision in §3 and `docs/pdf-attachments-spec.md`.
+- ✅ **Mailbox connection hardened** (2026-11-11): certificates verified against
+  Nextcloud's CA bundle (admin opt-out), host/port/encryption validated, local
+  addresses refused unless `allow_local_remote_servers`, and the checked IP is
+  the one dialled. No migration, no version bump. See the decision in §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1809,6 +1851,9 @@ The patches, and one deliberate absence:
   `OPEN_READONLY` (EXAMINE) **and** fetch body parts with `['peek' => true]` so
   the `\Seen` flag is never set. Dedup key is the envelope `message_id` (with a
   synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
+  **Horde verifies no certificate unless told to** — always pass the `context`
+  built by `sslContext`, never construct `Horde_Imap_Client_Socket` without it
+  (see the connection decision in §3).
 - **Fetch the last N by sequence number, not SEARCH/SORT.** `fetchRecent` reads
   the mailbox `MESSAGES` count and fetches the trailing sequence range
   `max-N+1:max` (new mail arrives last). The earlier approach (`search()` with an empty `Search_Query` + a `SORT

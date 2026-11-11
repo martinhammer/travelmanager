@@ -67,6 +67,15 @@ const onSave = async () => {
 			{{ t('travelmanager', 'Read PDF attachments') }}
 		</NcCheckboxRadioSwitch>
 
+		<!-- On by default, and the description says how to keep it on for a
+		     self-signed server, so turning it off is the last resort rather than
+		     the first thing tried. -->
+		<NcCheckboxRadioSwitch v-model="form.verifyImapCertificates"
+			:class="$style.field"
+			:description="t('travelmanager', 'Recommended. Without it, a mailbox password can be sent to any server that answers for the mailbox host. For a server with a self-signed certificate, import its certificate authority with occ security:certificates:import instead of turning this off.')">
+			{{ t('travelmanager', 'Verify mail server certificates') }}
+		</NcCheckboxRadioSwitch>
+
 		<div :class="$style.actions">
 			<NcButton variant="primary" :disabled="saving" @click="onSave">
 				{{ t('travelmanager', 'Save') }}

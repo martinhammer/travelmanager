@@ -37,6 +37,8 @@ export const skipRoute = (skip: BackupSkip): string | null => {
 /**
  * The reason a server gave for refusing a file, which is written for the user and
  * says exactly what is wrong with it, or null if the failure came from elsewhere.
+ * Any 400 the app words for the user reads the same way, so the settings save
+ * uses it for a refused mailbox address too.
  * @param error whatever the request threw
  */
 export const refusalMessage = (error: unknown): string | null => {
