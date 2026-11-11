@@ -10,6 +10,7 @@ import { t } from '@nextcloud/l10n'
 import { assignBookingToTrip, createTrip, deleteBooking, deleteTrip, updateTrip } from './api'
 import TripPickerDialog from './TripPickerDialog.vue'
 import { decodeHtmlEntities, linkDialogBookings } from './bookings'
+import { refusalMessage } from './backup'
 import {
 	deleteBookingOpen,
 	deleteBookingTarget,
@@ -101,9 +102,10 @@ const submitTrip = async () => {
 		tripEditorTarget.value = null
 		await reload()
 	} catch (e) {
-		showError(tripEditorTarget.value !== null
+		// A 400 says what is wrong (an unknown type, a name that is too long).
+		showError(refusalMessage(e) ?? (tripEditorTarget.value !== null
 			? t('travelmanager', 'Could not update trip')
-			: t('travelmanager', 'Could not create trip'))
+			: t('travelmanager', 'Could not create trip')))
 	}
 }
 

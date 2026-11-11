@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Service;
 
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Db\IngestionLog;
 use OCA\TravelManager\Db\ProcessedMessage;
 use OCA\TravelManager\Db\ProcessedMessageMapper;
@@ -13,6 +14,7 @@ use OCA\TravelManager\Imap\ImapMessage;
 use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCA\TravelManager\Service\Dto\QueueCapacity;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\DB\Exception as DbException;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -90,50 +92,101 @@ class IngestionService {
 		);
 
 		$enqueued = 0;
-		foreach ($messages as $message) {
-			if ($this->processedMessageMapper->isProcessed($userId, $message->messageId)) {
-				$this->activityLog->info(
-					$userId,
-					IngestionLog::STEP_DEDUP,
-					'Skipping already-processed message: ' . $this->describe($message),
-				);
-				continue;
+		try {
+			foreach ($messages as $message) {
+				// One message that cannot be stored costs that message, never the
+				// rest of the read. It was not written, so it is fetched and tried
+				// again next run, but everything after it in the window still is.
+				try {
+					if ($this->processedMessageMapper->isProcessed($userId, $message->messageId)) {
+						$this->activityLog->info(
+							$userId,
+							IngestionLog::STEP_DEDUP,
+							'Skipping already-processed message: ' . $this->describe($message),
+						);
+						continue;
+					}
+					if ($this->enqueue($userId, $connection, $message)) {
+						$enqueued++;
+					}
+				} catch (DbException $e) {
+					if ($e->getReason() !== DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+						$this->skipped($userId, $message, $e);
+						continue;
+					}
+					// A concurrent read (cron and "Read mailbox now") passed the same
+					// dedup check and stored it first. That is the outcome we wanted.
+					$this->activityLog->info(
+						$userId,
+						IngestionLog::STEP_DEDUP,
+						'Skipping message another mailbox read stored first: ' . $this->describe($message),
+					);
+				} catch (\Throwable $e) {
+					$this->skipped($userId, $message, $e);
+				}
 			}
-			if ($this->enqueue($userId, $connection, $message)) {
-				$enqueued++;
-			}
-		}
 
-		$this->activityLog->info(
-			$userId,
-			IngestionLog::STEP_SCHEDULE,
-			'Queued ' . $enqueued . ' new message(s) for extraction',
-		);
-		$this->release($userId);
+			$this->activityLog->info(
+				$userId,
+				IngestionLog::STEP_SCHEDULE,
+				'Queued ' . $enqueued . ' new message(s) for extraction',
+			);
+		} finally {
+			// Whatever happened above, what *was* queued gets its chance to go.
+			$this->release($userId);
+		}
 		return $enqueued;
 	}
 
+	private function skipped(string $userId, ImapMessage $message, \Throwable $e): void {
+		$this->logger->error(
+			'Travel Manager: could not store message ' . $message->messageId . ' for ' . $userId . ': ' . $e->getMessage(),
+			['exception' => $e],
+		);
+		$this->activityLog->error(
+			$userId,
+			IngestionLog::STEP_FETCH,
+			'Could not store message, skipped for this run (it is tried again next time): ' . $this->describe($message)
+				. ' — ' . $e->getMessage(),
+		);
+	}
+
 	private function enqueue(string $userId, ImapConnection $connection, ImapMessage $message): bool {
+		try {
+			return $this->store($userId, $connection, $message);
+		} finally {
+			// Reached unless PHP itself died, which is the one case the PDF
+			// breadcrumb exists for — so it is left for the next run only then.
+			$this->attachmentService->finish($userId);
+		}
+	}
+
+	private function store(string $userId, ImapConnection $connection, ImapMessage $message): bool {
 		// The row is the dedup record *and* the queue entry: written before anything
 		// is sent, so a re-run never ingests the same message twice however long it
 		// waits. The body is retained because the queue sends from it — and so the
 		// extraction can be re-run later without going back to IMAP (a message may
 		// be gone from the mailbox, and UIDVALIDITY may have rolled).
+		//
+		// Everything that came from the email is fitted to its column: a value the
+		// database refuses is not a booking problem, and used to stop the read here.
+		// The Message-ID is the exception — it is the dedup key, so the IMAP layer
+		// makes it fit without cutting it (MessageId::key).
 		$record = new ProcessedMessage();
 		$record->setUserId($userId);
-		$record->setMailbox($connection->mailbox);
+		$record->setMailbox((string)ColumnText::fit($connection->mailbox));
 		$record->setMessageId($message->messageId);
 		$record->setUidValidity($message->uidValidity);
 		$record->setImapUid($message->uid);
-		$record->setSubject($message->subject === '' ? null : $message->subject);
-		// Truncated to the column width: a display label, not a parseable header.
-		$record->setSender($message->from === null ? null : mb_substr($message->from, 0, 255));
+		$record->setSubject($message->subject === '' ? null : ColumnText::fit($message->subject));
+		// A display label, not a parseable header, so cutting it costs nothing.
+		$record->setSender(ColumnText::fit($message->from));
 		$record->setSentAt($message->date === null ? null : \DateTime::createFromImmutable($message->date));
 		// Some booking emails say only "your ticket is attached"; the PDFs' text
 		// goes to the model under a heading each, and what was or was not read
 		// is recorded per file.
 		$attachments = $this->attachmentService->read($userId, $connection, $message);
-		$text = MessageText::assemble($message->textBody, $attachments->sections);
+		$text = ColumnText::clean(MessageText::assemble($message->textBody, $attachments->sections));
 		$record->setBodyText($text);
 		$record->setAttachments(AttachmentRecord::encodeList($attachments->records));
 		$record->setAttempts(0);

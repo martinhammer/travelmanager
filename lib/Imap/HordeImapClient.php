@@ -43,6 +43,17 @@ class HordeImapClient implements IImapClient {
 	 */
 	private const MAX_BODY_LENGTH = 100000;
 
+	/**
+	 * Most bytes downloaded of one text part, before decoding. Far above the
+	 * text cap on purpose: that is applied to *text*, and a booking email's
+	 * HTML can be ten times the size of what is left once its markup is
+	 * stripped, so cutting the download at the text cap would lose the
+	 * itinerary of exactly the heaviest emails. This only stops a multi-
+	 * megabyte part being held whole in memory. A multiple of 4, so a cut
+	 * through base64 still decodes.
+	 */
+	private const MAX_PART_FETCH = 2 * 1024 * 1024;
+
 	public function __construct(
 		private LoggerInterface $logger,
 		private ConfigService $configService,
@@ -294,11 +305,8 @@ class HordeImapClient implements IImapClient {
 		$envelope = $data->getEnvelope();
 		$uid = (int)$data->getUid();
 
-		$messageId = trim((string)$envelope->message_id);
-		if ($messageId === '') {
-			// Synthetic but stable id so dedup still works without a Message-ID.
-			$messageId = sprintf('<tm-%d-%d@travelmanager.local>', $uidValidity, $uid);
-		}
+		// Synthetic but stable when the header is missing or cannot be stored.
+		$messageId = MessageId::key((string)$envelope->message_id, $uidValidity, $uid);
 
 		$subject = (string)$envelope->subject;
 		$date = $this->toDate($envelope->date);
@@ -360,7 +368,7 @@ class HordeImapClient implements IImapClient {
 		$query = new Horde_Imap_Client_Fetch_Query();
 		foreach ($partIds as $partId) {
 			// `peek` => do NOT set the \Seen flag (read-only, V6).
-			$query->bodyPart($partId, ['peek' => true]);
+			$query->bodyPart($partId, ['peek' => true, 'length' => self::MAX_PART_FETCH]);
 		}
 		$result = $client->fetch($mailbox, $query, ['ids' => new Horde_Imap_Client_Ids([$data->getUid()])]);
 

@@ -106,6 +106,42 @@ final class BookingServiceTest extends TestCase {
 		$this->assertSame([], $applied->related);
 	}
 
+	public function testTheModelsStringsAreFittedToTheirColumnsRatherThanLost(): void {
+		// An over-long title is no reason to lose the booking, and failing the
+		// insert used to fail the email on every retry. SQLite, which the suite's
+		// CI mode uses, would not have refused it, so this is the only guard.
+		$this->candidates([]);
+		$long = new ExtractedBooking(
+			'accommodation', str_repeat('P', 300), 'ABC12345', null, 'confirmed', str_repeat('T', 400),
+			['checkIn' => ['local' => '2026-07-25T14:00:00']], '2026-07-25T14:00:00', null, 0.9,
+		);
+		$this->bookingMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (Booking $b): bool => mb_strlen((string)$b->getTitle()) === 255
+				&& mb_strlen((string)$b->getProvider()) === 255
+				&& $b->getBookingReference() === 'ABC12345'));
+
+		$this->assertSame(1, $this->service->applyExtraction('alice', '<m1@example.com>', [$long])->created);
+	}
+
+	public function testAnOverLongEditIsRefusedNotCut(): void {
+		// What the user typed is refused: cutting it would save something they
+		// did not enter.
+		$this->bookingMapper->expects($this->never())->method('update');
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->updateBookingFields('alice', 12, ['title' => str_repeat('a', 256)]);
+	}
+
+	public function testAnOverLongTripNameIsRefused(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->createTrip('alice', str_repeat('a', 256));
+	}
+
+	public function testRenamingATripToAnOverLongNameIsRefused(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->updateTrip('alice', 7, ['name' => str_repeat('a', 256)]);
+	}
+
 	public function testSecondMessageForTheSameBookingIsReportedNotApplied(): void {
 		$this->candidates([$this->existing()]);
 		// The whole point: an existing booking is never written to.

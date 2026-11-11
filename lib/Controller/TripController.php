@@ -52,10 +52,10 @@ class TripController extends OCSController {
 	 * @param string|null $type Trip type: work or leisure
 	 * @param string|null $color Trip colour as #rrggbb
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerTrip, array{}>
-	 * @throws OCSBadRequestException Unknown trip type or malformed colour
+	 * @throws OCSBadRequestException Unknown trip type, malformed colour or over-long name
 	 *
 	 * 200: Trip created
-	 * 400: Unknown trip type or malformed colour
+	 * 400: Unknown trip type, malformed colour or over-long name
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'POST', url: '/api/trips')]
@@ -78,10 +78,10 @@ class TripController extends OCSController {
 	 * @param string|null $color New colour as #rrggbb, or '' to clear
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerTrip, array{}>
 	 * @throws OCSNotFoundException Trip not found
-	 * @throws OCSBadRequestException Unknown trip type or malformed colour
+	 * @throws OCSBadRequestException Unknown trip type, malformed colour or over-long name
 	 *
 	 * 200: Trip updated
-	 * 400: Unknown trip type or malformed colour
+	 * 400: Unknown trip type, malformed colour or over-long name
 	 * 404: Trip not found
 	 */
 	#[NoAdminRequired]

@@ -62,7 +62,7 @@ class SettingsController extends OCSController {
 	 * @param int|null $intervalMinutes Check interval in minutes
 	 * @param string|null $imapPassword IMAP app password (write-only; blank keeps the current one)
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerUserSettings, array{}>
-	 * @throws OCSBadRequestException when the mailbox host, port or encryption is refused
+	 * @throws OCSBadRequestException when the mailbox host, port, encryption or name is refused
 	 *
 	 * 200: Updated settings returned
 	 * 400: Mailbox address refused; nothing was saved

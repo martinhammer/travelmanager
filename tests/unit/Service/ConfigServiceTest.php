@@ -63,6 +63,8 @@ final class ConfigServiceTest extends TestCase {
 			'unknown encryption' => [['imapHost' => 'imap.example.com', 'imapPort' => 993, 'imapSecurity' => 'plain']],
 			'local literal' => [['imapHost' => '127.0.0.1', 'imapPort' => 993, 'imapSecurity' => 'ssl']],
 			'local name' => [['imapHost' => 'localhost', 'imapPort' => 143, 'imapSecurity' => 'tls']],
+			// Every stored message records it, so every one would fail to store.
+			'over-long mailbox' => [['imapHost' => 'imap.example.com', 'imapPort' => 993, 'imapSecurity' => 'ssl', 'mailbox' => str_repeat('m', 256)]],
 		];
 	}
 

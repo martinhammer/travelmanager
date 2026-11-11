@@ -83,7 +83,9 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
   `Imap/MimeText` decides which MIME parts make up the text (see §7) and lists
   the PDF attachments; `Imap/ImapEndpoint` is the pure rule for what a mailbox
   host/port/encryption may be, and `Imap/ImapEndpointResolver` resolves the host
-  and checks every address against `IRemoteHostValidator` (see §3).
+  and checks every address against `IRemoteHostValidator` (see §3);
+  `Imap/MessageId` makes the dedup key fit its column without cutting it.
+- `Db/ColumnText` — **pure** fitting of outside text to a column (see §7).
 - `Pdf/IPdfReader` → `PrinsPdfReader` (the only class importing
   `prinsfrank/pdfparser`); `Pdf/PdfLayout` is its pure column-break rule.
   `Service/AttachmentService` reads one email's PDFs under the caps and the
@@ -833,9 +835,18 @@ code follows the overrides.
     `body_text` 32 000 in total, the body taking what is left and never more than
     its old 20 000. A cut is marked `[… truncated]`.
   - **A fatal error is guarded by a breadcrumb**, not a catch: the user config
-    `pdf_reading` holds the Message-ID while its PDFs are read. Still set on the
-    next run means that run died there, and the PDFs are skipped as `crashed` —
-    otherwise the unstored message is fetched and dies again every 15 minutes.
+    `pdf_reading` holds the Message-ID from the moment its PDFs are read until
+    the message row is written (`AttachmentService::finish`, from
+    `IngestionService::enqueue`'s `finally`). Still set on the next run means
+    that run died in between, and the PDFs are skipped as `crashed` — otherwise
+    the unstored message is fetched and dies again every 15 minutes. It used to
+    be cleared as soon as the PDFs were read, which left a fatal while
+    assembling or inserting the row unguarded. Not locked: two concurrent reads
+    of one mailbox can clear each other's, which costs at most one more crash.
+  - **The listed size is already the decoded estimate.** Horde scales a base64
+    part's BODYSTRUCTURE size by 3/4 before `setBytes()`, so `AttachmentRef::$bytes`
+    is compared with the 5 MB cap as it is — scaling it again let files of up to
+    ~6.7 MB be downloaded only to be refused afterwards.
   - **`messages.attachments` records every PDF found, read or not**, because a
     skipped file that leaves no trace makes the email look as though it had
     none. Its own column, not `issue_reasons`: those describe the last attempt
@@ -1031,6 +1042,11 @@ debug panel for iterating without waiting for cron:
   Nextcloud's CA bundle (admin opt-out), host/port/encryption validated, local
   addresses refused unless `allow_local_remote_servers`, and the checked IP is
   the one dialled. No migration, no version bump. See the decision in §3.
+- ✅ **One bad message no longer stops a mailbox read** (2026-11-11, review items
+  3, 10, 11, 21, 22): per-message storing, outside text fitted to its column,
+  Message-IDs hashed when they cannot fit, a 2 MiB cap on each part download,
+  the PDF breadcrumb held until the row is written, the PDF size check fixed,
+  and a queued job re-checks the user's own switch. No migration. See §7.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1840,6 +1856,21 @@ The patches, and one deliberate absence:
 - **`package-lock.json` is committed** because the Makefile/CI use `npm ci`
   (which requires it). Run `npm install` (not `npm ci`) when changing deps, then
   commit the updated lockfile.
+- **Text from an email or a model is fitted to its column; text a user typed is
+  refused.** MySQL in strict mode refuses an over-long `VARCHAR(255)`, PostgreSQL
+  a NUL byte, both invalid UTF-8 — and **SQLite, which CI runs PHPUnit on, refuses
+  none of them**, so the suite cannot see it. A refusal costs more than the value:
+  inside the mailbox read it stopped the run on that message every time, and in
+  `applyExtraction` it failed the email on every retry. So `Db/ColumnText::fit`
+  (scrub, strip NUL, cut by character) is applied to subject, sender, mailbox and
+  the model's provider/reference/title, and `clean` to `body_text`. Edits and
+  trip names go through `ColumnText::fits` and a 400 instead: cutting what
+  someone just typed saves something they did not enter. The mailbox name is
+  refused at save, since every stored message records it. **Each message in a
+  read is now stored on its own** (`IngestionService::ingestForUser`): one that
+  still fails is logged and retried next run, a unique-key violation from a
+  concurrent read is treated as already stored, and the queue always gets its
+  turn (`finally`).
 - **DB identifier length:** keep index names short (`tm_*`) — Nextcloud enforces a
   ~30-char limit (Oracle); table names also stay well under it.
 - **IMAP / Horde.** `bytestream/horde-imap-client` is a **runtime** dep (in
@@ -1849,8 +1880,14 @@ The patches, and one deliberate absence:
   typed (e.g. `Imap/Html`) out of that class so it stays analysable and testable.
   Read-only discipline (V6) is enforced two ways: open the mailbox
   `OPEN_READONLY` (EXAMINE) **and** fetch body parts with `['peek' => true]` so
-  the `\Seen` flag is never set. Dedup key is the envelope `message_id` (with a
-  synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
+  the `\Seen` flag is never set. Dedup key is the envelope `message_id`
+  (`Imap/MessageId::key`: a synthetic `<tm-{uidvalidity}-{uid}@…>` when absent,
+  and `<tm-sha1-…@…>` of the whole value when it is longer than its column or
+  not valid UTF-8 — **hashed, never cut**, since two ids sharing 255 characters
+  would otherwise be one email and the second would never be read). Each text
+  part is fetched with a `length` of 2 MiB: far above the text cap, because an
+  email's HTML can be ten times its text, so it bounds memory without cutting
+  an itinerary.
   **Horde verifies no certificate unless told to** — always pass the `context`
   built by `sslContext`, never construct `Horde_Imap_Client_Socket` without it
   (see the connection decision in §3).

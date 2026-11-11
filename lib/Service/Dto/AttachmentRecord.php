@@ -75,7 +75,7 @@ final class AttachmentRecord {
 		if ($records === []) {
 			return null;
 		}
-		return json_encode(array_map(static fn (self $r): array => $r->toArray(), $records), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		return json_encode(array_map(static fn (self $r): array => $r->toArray(), $records), JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 	}
 
 	/**

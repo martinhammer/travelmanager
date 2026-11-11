@@ -1335,6 +1335,34 @@
                             }
                         }
                     },
+                    "400": {
+                        "description": "A value is longer than 255 characters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "401": {
                         "description": "Current user is not logged in",
                         "content": {
@@ -3247,7 +3275,7 @@
                         }
                     },
                     "400": {
-                        "description": "when the mailbox host, port or encryption is refused",
+                        "description": "when the mailbox host, port, encryption or name is refused",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3580,7 +3608,7 @@
                         }
                     },
                     "400": {
-                        "description": "Unknown trip type or malformed colour",
+                        "description": "Unknown trip type, malformed colour or over-long name",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3771,7 +3799,7 @@
                         }
                     },
                     "400": {
-                        "description": "Unknown trip type or malformed colour",
+                        "description": "Unknown trip type, malformed colour or over-long name",
                         "content": {
                             "application/json": {
                                 "schema": {

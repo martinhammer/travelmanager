@@ -6,6 +6,7 @@ namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Service\Dto\AppliedExtraction;
@@ -176,10 +177,13 @@ class BookingService {
 		$booking->setReviewState(Booking::REVIEW_DRAFT);
 		$booking->setCreatedAt($now);
 		$booking->setUpdatedAt($now);
-		$booking->setProvider($extracted->provider);
-		$booking->setBookingReference($extracted->bookingReference);
-		$booking->setConfirmationNumber($extracted->confirmationNumber);
-		$booking->setTitle($extracted->title);
+		// The model's strings are fitted to their columns rather than refused: an
+		// over-long title is no reason to lose the booking, and failing the insert
+		// marked the email failed on every retry.
+		$booking->setProvider(ColumnText::fit($extracted->provider));
+		$booking->setBookingReference(ColumnText::fit($extracted->bookingReference));
+		$booking->setConfirmationNumber(ColumnText::fit($extracted->confirmationNumber));
+		$booking->setTitle(ColumnText::fit($extracted->title));
 		$booking->setSourceMessageId($messageId);
 		$booking->setDuplicateGroupId($duplicateGroupId);
 		$booking->setConfidence($extracted->confidence);
@@ -330,8 +334,16 @@ class BookingService {
 	 * Apply user edits to a draft booking's own fields.
 	 *
 	 * @param array{title?:string,provider?:string,bookingReference?:string,confirmationNumber?:string} $values
+	 * @throws \InvalidArgumentException when a value is longer than its column
 	 */
 	public function updateBookingFields(string $userId, int $bookingId, array $values): Booking {
+		// What the user typed is refused rather than cut: shortening it silently
+		// would save something they did not enter.
+		foreach (['title', 'provider', 'bookingReference', 'confirmationNumber'] as $field) {
+			if (array_key_exists($field, $values) && !ColumnText::fits($values[$field])) {
+				throw new \InvalidArgumentException(self::tooLong($field));
+			}
+		}
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		if (array_key_exists('title', $values)) {
 			$booking->setTitle($values['title']);
@@ -359,9 +371,13 @@ class BookingService {
 	}
 
 	/**
-	 * @throws \InvalidArgumentException when the type or colour is not one we store
+	 * @throws \InvalidArgumentException when the type or colour is not one we
+	 *                                   store, or the name is too long
 	 */
 	public function createTrip(string $userId, string $name, ?string $notes = null, ?string $type = null, ?string $color = null): Trip {
+		if (!ColumnText::fits($name)) {
+			throw new \InvalidArgumentException(self::tooLong('name'));
+		}
 		$now = $this->timeFactory->getDateTime();
 		$trip = new Trip();
 		$trip->setUserId($userId);
@@ -383,9 +399,13 @@ class BookingService {
 	 * with those, "not supplied" and "clear it" are the same value.
 	 *
 	 * @param array{name?:string,notes?:string,type?:string|null,color?:string|null} $values
-	 * @throws \InvalidArgumentException when the type or colour is not one we store
+	 * @throws \InvalidArgumentException when the type or colour is not one we
+	 *                                   store, or the name is too long
 	 */
 	public function updateTrip(string $userId, int $tripId, array $values): Trip {
+		if (array_key_exists('name', $values) && !ColumnText::fits($values['name'])) {
+			throw new \InvalidArgumentException(self::tooLong('name'));
+		}
 		$trip = $this->tripMapper->find($tripId, $userId);
 		if (array_key_exists('name', $values)) {
 			$trip->setName($values['name']);
@@ -401,6 +421,10 @@ class BookingService {
 		}
 		$trip->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->tripMapper->update($trip);
+	}
+
+	private static function tooLong(string $field): string {
+		return 'The ' . $field . ' must be at most ' . ColumnText::VARCHAR . ' characters.';
 	}
 
 	/**

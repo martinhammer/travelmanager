@@ -76,8 +76,10 @@ class BookingController extends OCSController {
 	 * @param string|null $confirmationNumber New confirmation number
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerBooking, array{}>
 	 * @throws OCSNotFoundException Booking not found
+	 * @throws OCSBadRequestException A value is longer than 255 characters
 	 *
 	 * 200: Booking updated
+	 * 400: A value is longer than 255 characters
 	 * 404: Booking not found
 	 */
 	#[NoAdminRequired]
@@ -94,6 +96,8 @@ class BookingController extends OCSController {
 			return new DataResponse($this->serialize($id));
 		} catch (DoesNotExistException) {
 			throw new OCSNotFoundException();
+		} catch (\InvalidArgumentException $e) {
+			throw new OCSBadRequestException($e->getMessage());
 		}
 	}
 

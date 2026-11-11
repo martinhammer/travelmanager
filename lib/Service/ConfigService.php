@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\AppInfo\Application;
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Imap\ImapEndpoint;
 use OCA\TravelManager\Imap\ImapEndpointResolver;
 use OCP\Config\IUserConfig;
@@ -172,7 +173,7 @@ class ConfigService {
 
 	public function getUserSettings(string $userId): UserSettings {
 		return new UserSettings(
-			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1',
+			$this->isUserEnabled($userId),
 			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, ''),
 			(int)$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, '993'),
 			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, 'ssl'),
@@ -181,6 +182,11 @@ class ConfigService {
 			(int)$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_INTERVAL, (string)self::DEFAULT_INTERVAL_MINUTES),
 			$this->hasImapPassword($userId),
 		);
+	}
+
+	/** The user's own switch alone, without reading the stored credential. */
+	public function isUserEnabled(string $userId): bool {
+		return $this->userConfig->getValueString($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1';
 	}
 
 	public function setUserEnabled(string $userId, bool $enabled): void {
@@ -196,9 +202,9 @@ class ConfigService {
 	 * in the database.
 	 *
 	 * @param array<string, mixed> $values
-	 * @throws \InvalidArgumentException when the host, port or encryption is
-	 *                                   not one the app will connect with; the
-	 *                                   message is written for the user
+	 * @throws \InvalidArgumentException when the host, port, encryption or
+	 *                                   mailbox name is not one the app will use;
+	 *                                   the message is written for the user
 	 */
 	public function setUserSettings(string $userId, array $values): void {
 		$host = isset($values['imapHost']) ? trim((string)$values['imapHost']) : null;
@@ -208,7 +214,12 @@ class ConfigService {
 		// it is refused only when something tries to connect to it.
 		$problem = ($host === null || $host === '' ? null : ImapEndpoint::hostProblem($host))
 			?? ($port === null ? null : ImapEndpoint::portProblem($port))
-			?? ($security === null ? null : ImapEndpoint::securityProblem($security));
+			?? ($security === null ? null : ImapEndpoint::securityProblem($security))
+			// Every stored message records its mailbox, so one too long for that
+			// column would make every message of every read fail to store.
+			?? (isset($values['mailbox']) && !ColumnText::fits((string)$values['mailbox'])
+				? 'The mailbox name must be at most ' . ColumnText::VARCHAR . ' characters.'
+				: null);
 		if ($problem !== null) {
 			throw new \InvalidArgumentException($problem);
 		}
