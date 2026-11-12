@@ -315,13 +315,26 @@ final class IngestionServiceTest extends TestCase {
 		$record->setDiscarded(true);
 		$this->processedMessageMapper->method('find')->willReturn($record);
 
+		// One conditional statement, from the status this request read; no
+		// second write a pump could be overwritten by.
 		$this->processedMessageMapper->expects($this->once())
-			->method('update')
-			->with($this->callback(static fn (ProcessedMessage $m) => $m->getStatus() === ProcessedMessage::STATUS_QUEUED
-				&& $m->getError() === null
-				&& $m->getDiscarded() === false));
+			->method('requeueForRetry')
+			->with(7, 'alice', ProcessedMessage::STATUS_FAILED, $this->isInstanceOf(\DateTime::class))
+			->willReturn(true);
+		$this->processedMessageMapper->expects($this->never())->method('update');
 		$this->queue->expects($this->once())->method('pump');
 
+		$this->service->retryMessage('alice', 7);
+	}
+
+	public function testASecondRetryThatLostTheRaceIsRefused(): void {
+		// Both requests read `failed`; the other one's requeue landed first.
+		$this->processedMessageMapper->method('find')->willReturn($this->storedMessage(ProcessedMessage::STATUS_FAILED));
+		$this->processedMessageMapper->method('requeueForRetry')->willReturn(false);
+		$this->queue->expects($this->never())->method('pump');
+
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('already waiting');
 		$this->service->retryMessage('alice', 7);
 	}
 
@@ -337,7 +350,7 @@ final class IngestionServiceTest extends TestCase {
 		// A second attempt while the first is out would put two tasks in flight
 		// for one email, and whichever answered last would win.
 		$this->processedMessageMapper->method('find')->willReturn($this->storedMessage($status));
-		$this->processedMessageMapper->expects($this->never())->method('update');
+		$this->processedMessageMapper->expects($this->never())->method('requeueForRetry');
 		$this->queue->expects($this->never())->method('pump');
 
 		$this->expectException(\RuntimeException::class);

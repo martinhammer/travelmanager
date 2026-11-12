@@ -28,6 +28,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class BookingServiceTest extends TestCase {
 	private BookingMapper&MockObject $bookingMapper;
+	private IDBConnection&MockObject $db;
 	private BookingService $service;
 
 	protected function setUp(): void {
@@ -43,12 +44,13 @@ final class BookingServiceTest extends TestCase {
 		});
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getDateTime')->willReturn(new \DateTime());
+		$this->db = $this->createMock(IDBConnection::class);
 
 		$this->service = new BookingService(
 			$this->bookingMapper,
 			$this->createMock(TripMapper::class),
 			new BookingMatcher(),
-			$this->createMock(IDBConnection::class),
+			$this->db,
 			$time,
 		);
 	}
@@ -300,12 +302,12 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(2);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturn([13, 14]);
 		$this->bookingMapper->expects($this->once())
 			->method('update')
 			->with($this->callback(static fn (Booking $b): bool => $b->getDuplicateGroupId() === null))
 			->willReturn($booking);
-		$this->bookingMapper->expects($this->never())->method('clearDuplicateGroup');
+		$this->bookingMapper->expects($this->never())->method('clearDuplicateGroupOf');
 
 		$this->service->leaveDuplicateGroup('alice', 12);
 	}
@@ -316,11 +318,55 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
+		// The second count, after the commit, finds the group already gone.
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13], []);
 		$this->bookingMapper->method('update')->willReturn($booking);
+		// By id, not by group: a booking that joined meanwhile keeps its flag.
 		$this->bookingMapper->expects($this->once())
-			->method('clearDuplicateGroup')
-			->with('alice', 7);
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
+
+		$this->service->leaveDuplicateGroup('alice', 12);
+	}
+
+	public function testLeavingAGroupIsOneTransaction(): void {
+		// No crash can separate the member leaving from the group of one it
+		// leaves behind being dissolved.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturn([13]);
+		$order = [];
+		$this->db->method('beginTransaction')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'begin';
+		});
+		$this->bookingMapper->method('update')->willReturnCallback(function (Booking $b) use (&$order): Booking {
+			$order[] = 'update';
+			return $b;
+		});
+		$this->bookingMapper->method('clearDuplicateGroupOf')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'clear';
+		});
+		$this->db->method('commit')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'commit';
+		});
+
+		$this->service->leaveDuplicateGroup('alice', 12);
+
+		$this->assertSame(['begin', 'update', 'clear', 'commit'], array_slice($order, 0, 4));
+	}
+
+	public function testAGroupLeftByTwoAtOnceIsStillDissolvedAfterTheCommit(): void {
+		// Inside its transaction each leaver still sees the other as a member,
+		// so the count after the commit is the one that finds the last one alone.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('update')->willReturn($booking);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13, 14], [13]);
+		$this->bookingMapper->expects($this->once())
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
 
 		$this->service->leaveDuplicateGroup('alice', 12);
 	}
@@ -387,11 +433,12 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13], []);
 		$this->bookingMapper->expects($this->once())->method('delete');
 		$this->bookingMapper->expects($this->once())
-			->method('clearDuplicateGroup')
-			->with('alice', 7);
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
+		$this->db->expects($this->once())->method('commit');
 
 		$this->service->purge('alice', 12);
 	}

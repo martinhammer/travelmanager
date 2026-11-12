@@ -503,7 +503,11 @@ code follows the overrides.
     least of all.
   - **A group of one is dissolved** (`tidyDuplicateGroup`, on leave and on
     purge). It claims nothing, and left behind it reads like a flag in the
-    database while showing as nothing in the UI.
+    database while showing as nothing in the UI. The tidy runs inside the
+    transaction that removed the member, so no crash separates them, **and
+    again after the commit**, because inside it two members leaving at once
+    each still see the other. The clear names the one booking left, never the
+    group, so one that joined meanwhile keeps its flag.
   - **Discarded and archived hide the flag rather than clear it.** You have
     already decided about that booking, so there is nothing left to check — but
     restoring it brings the flag back, which is what a soft state is for. Hiding
@@ -752,9 +756,16 @@ code follows the overrides.
     is `handleLost` → `failed`/`provider`, which is retryable. **"Could not ask"
     is never "gone"** — `findTask` throws on anything but not-found. An older
     pending attempt for a message that has since been retried is marked
-    `superseded` and never allowed to overwrite the newer one, and the handlers
-    now ignore a TaskMap that is no longer `pending`, since the listener and the
-    reconciler can arrive at the same task.
+    `superseded` and never allowed to overwrite the newer one. **A task is
+    settled before anything is written** (2026-11-12, review item 9): the
+    listener and the reconciler can arrive at one task, cron and the AI worker
+    at the same moment, so each handler claims it with
+    `TaskMapMapper::settle`, a conditional update out of `pending`, and only
+    the caller that gets the row writes. Checking the loaded status was no
+    guard, and settling *last* meant a throw after the bookings committed left
+    the task pending, to be applied again as "related" to itself. A crash
+    after settling leaves the message `processing` with no pending task, which
+    the orphan pass fails as retryable.
   - **Races are tolerated, not prevented.** `claimQueued` is a conditional
     update, so a message is never sent twice. The limits are guarded by a lock in
     the locking cache; with no locking cache configured that lock is NullCache and
@@ -768,7 +779,9 @@ code follows the overrides.
     asking explicitly has always worked with the pipeline off.
   - **Retry goes through the queue** and is refused (400) while a message is
     `queued` or `processing`: a second attempt in flight for one email means
-    whichever answer lands last wins.
+    whichever answer lands last wins. The requeue is one conditional update
+    from the status the request read (`requeueForRetry`), so two clicks that
+    both read `failed` cannot both get through.
   - **`local_concurrency` is gone.** It promised "max concurrent local-model
     extractions", was read by nothing, and could not have been honoured by any app
     — how many tasks *run* at once is the server's AI worker count. The admin
@@ -1096,6 +1109,10 @@ debug panel for iterating without waiting for cron:
   12): an extra closer is dropped rather than ending the response, unreadable or
   cut-off remainders raise `incomplete_json`, and a repeated key or a cut-off
   before any booking fails the parse. No migration. See §2.
+- ✅ **Settling happens once** (2026-11-12, review items 9, 15 server half,
+  26): a task is claimed out of `pending` before its result is written, a
+  retry is a conditional requeue, and leaving or purging a duplicate group is
+  one transaction plus a second tidy after it. No migration. See §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch

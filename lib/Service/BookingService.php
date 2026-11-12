@@ -287,7 +287,12 @@ class BookingService {
 	public function purge(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		$groupId = $booking->getDuplicateGroupId();
-		$this->bookingMapper->delete($booking);
+		$this->inTransaction(function () use ($booking, $userId, $groupId): void {
+			$this->bookingMapper->delete($booking);
+			if ($groupId !== null) {
+				$this->tidyDuplicateGroup($userId, $groupId);
+			}
+		});
 		if ($groupId !== null) {
 			$this->tidyDuplicateGroup($userId, $groupId);
 		}
@@ -315,7 +320,10 @@ class BookingService {
 		}
 		$booking->setDuplicateGroupId(null);
 		$booking->setUpdatedAt($this->timeFactory->getDateTime());
-		$this->bookingMapper->update($booking);
+		$this->inTransaction(function () use ($booking, $userId, $groupId): void {
+			$this->bookingMapper->update($booking);
+			$this->tidyDuplicateGroup($userId, $groupId);
+		});
 		$this->tidyDuplicateGroup($userId, $groupId);
 	}
 
@@ -323,10 +331,33 @@ class BookingService {
 	 * A group of one claims nothing, so clear it rather than leaving a value
 	 * behind that reads like a flag in the database and shows as nothing in the
 	 * UI. Callers pass the group a booking has just left or been deleted from.
+	 *
+	 * Callers run it twice: inside the transaction that removed the member, so
+	 * no crash can separate the two writes, and again after the commit. The
+	 * second is for concurrency, which the transaction makes worse rather than
+	 * better: two members of a three-member group leaving at once each count
+	 * the other as still present, since neither sees the other's uncommitted
+	 * write, and neither dissolves the one left. Whichever commits second then
+	 * sees both on its second count.
 	 */
 	private function tidyDuplicateGroup(string $userId, int $groupId): void {
-		if ($this->bookingMapper->countInDuplicateGroup($userId, $groupId) < 2) {
-			$this->bookingMapper->clearDuplicateGroup($userId, $groupId);
+		$members = $this->bookingMapper->duplicateGroupMemberIds($userId, $groupId, 2);
+		if (count($members) === 1) {
+			$this->bookingMapper->clearDuplicateGroupOf($userId, $members[0], $groupId);
+		}
+	}
+
+	/**
+	 * @param callable(): void $work
+	 */
+	private function inTransaction(callable $work): void {
+		$this->db->beginTransaction();
+		try {
+			$work();
+			$this->db->commit();
+		} catch (\Throwable $e) {
+			$this->db->rollBack();
+			throw $e;
 		}
 	}
 

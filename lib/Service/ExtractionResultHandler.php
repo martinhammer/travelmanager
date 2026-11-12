@@ -46,11 +46,14 @@ class ExtractionResultHandler {
 		if ($map === null) {
 			return; // Not one of our tasks.
 		}
-		if ($map->getStatus() !== TaskMap::STATUS_PENDING) {
-			// Already settled. The listener and ExtractionQueue::reconcile() can
-			// both arrive at one task — the reconciler exists for events that went
-			// missing — and applying an extraction twice would write its bookings
-			// twice.
+		// Claimed before anything is written. The listener and
+		// ExtractionQueue::reconcile() can both arrive at one task — the
+		// reconciler exists for events that went missing — and applying an
+		// extraction twice would match its own bookings and rewrite the row from
+		// "created" to "related". Settled first, a crash below leaves the message
+		// `processing` with no pending task, which the reconciler fails as
+		// retryable; settled last, it left the task pending to be applied again.
+		if ($map->getStatus() !== TaskMap::STATUS_PENDING || !$this->taskMapMapper->settle($map->getId(), TaskMap::STATUS_COMPLETED)) {
 			return;
 		}
 
@@ -166,14 +169,12 @@ class ExtractionResultHandler {
 			);
 			$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $e->getMessage(), ProcessedMessage::FAILURE_VALIDATION);
 		}
-
-		$this->setTaskStatus($map, TaskMap::STATUS_COMPLETED);
 	}
 
 	public function handleFailure(Task $task, string $error): void {
 		$taskId = (int)$task->getId();
 		$map = $this->taskMapMapper->findByTaskId($taskId);
-		if ($map === null || $map->getStatus() !== TaskMap::STATUS_PENDING) {
+		if ($map === null || $map->getStatus() !== TaskMap::STATUS_PENDING || !$this->taskMapMapper->settle($map->getId(), TaskMap::STATUS_FAILED)) {
 			return; // Not ours, or already settled — see handleSuccess.
 		}
 		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
@@ -196,7 +197,6 @@ class ExtractionResultHandler {
 		$this->setIssueReasons($message, []);
 		$this->setRelatedBookingIds($message, []);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $error, ProcessedMessage::FAILURE_PROVIDER);
-		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}
 
 	/**
@@ -209,8 +209,8 @@ class ExtractionResultHandler {
 	 * nothing on screen saying why.
 	 */
 	public function handleLost(TaskMap $map, string $reason): void {
-		if ($map->getStatus() !== TaskMap::STATUS_PENDING) {
-			return;
+		if ($map->getStatus() !== TaskMap::STATUS_PENDING || !$this->taskMapMapper->settle($map->getId(), TaskMap::STATUS_FAILED)) {
+			return; // Already settled — see handleSuccess.
 		}
 		$message = $this->processedMessageMapper->findByMessageId($map->getUserId(), $map->getMessageId());
 		$this->activityLog->error(
@@ -221,7 +221,6 @@ class ExtractionResultHandler {
 		$this->setIssueReasons($message, []);
 		$this->setRelatedBookingIds($message, []);
 		$this->setMessageStatus($message, ProcessedMessage::STATUS_FAILED, $reason, ProcessedMessage::FAILURE_PROVIDER);
-		$this->setTaskStatus($map, TaskMap::STATUS_FAILED);
 	}
 
 	/**
@@ -358,10 +357,5 @@ class ExtractionResultHandler {
 			return;
 		}
 		$message->setLastResponse($response === null ? null : mb_substr($response, 0, self::MAX_RESPONSE_CHARS));
-	}
-
-	private function setTaskStatus(TaskMap $map, string $status): void {
-		$map->setStatus($status);
-		$this->taskMapMapper->update($map);
 	}
 }

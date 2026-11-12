@@ -254,25 +254,22 @@ class IngestionService {
 			throw new \RuntimeException('This message is already waiting for the model');
 		}
 
+		// Conditional on the status read above, so two requests that both read
+		// it cannot both queue an attempt. What it resets: the previous attempt's
+		// error, issues and links describe a response we are about to replace;
+		// and re-running is how the user says they think it can work after all,
+		// so a discard cannot survive it — the outcome of this attempt is
+		// unknown, and a failure the user has not seen yet must be able to ask
+		// for attention.
+		if (!$this->processedMessageMapper->requeueForRetry($id, $userId, $record->getStatus(), $this->timeFactory->getDateTime())) {
+			throw new \RuntimeException('This message is already waiting for the model');
+		}
+
 		$this->activityLog->info(
 			$userId,
 			IngestionLog::STEP_SCHEDULE,
 			'Queued for retry (attempt ' . ($record->getAttempts() + 1) . '): ' . $this->describeRecord($record),
 		);
-
-		$record->setStatus(ProcessedMessage::STATUS_QUEUED);
-		$record->setError(null);
-		$record->setFailureKind(null);
-		// The previous attempt's issues and links describe a response we are about
-		// to replace.
-		$record->setIssueReasons(null);
-		$record->setRelatedBookingIds(null);
-		// Re-running is how the user says they think it can work after all, so a
-		// discard cannot survive it: the outcome of this attempt is unknown, and a
-		// failure the user has not seen yet must be able to ask for attention.
-		$record->setDiscarded(false);
-		$record->setProcessedAt($this->timeFactory->getDateTime());
-		$this->processedMessageMapper->update($record);
 
 		$this->release($userId);
 	}

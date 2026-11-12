@@ -94,24 +94,39 @@ class BookingMapper extends QBMapper {
 		$qb->executeStatement();
 	}
 
-	public function countInDuplicateGroup(string $userId, int $groupId): int {
+	/**
+	 * Up to $limit ids in a duplicate group — enough to tell "alone" from "still
+	 * a group" without counting the lot.
+	 *
+	 * @return list<int>
+	 */
+	public function duplicateGroupMemberIds(string $userId, int $groupId, int $limit): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select($qb->func()->count('id', 'members'))
+		$qb->select('id')
 			->from($this->getTableName())
 			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
-			->andWhere($qb->expr()->eq('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT)));
+			->andWhere($qb->expr()->eq('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT)))
+			->setMaxResults($limit);
 		$result = $qb->executeQuery();
-		$count = (int)$result->fetchOne();
+		/** @var list<array{id: string|int}> $rows */
+		$rows = $result->fetchAll();
 		$result->closeCursor();
-		return $count;
+		return array_map(static fn (array $row): int => (int)$row['id'], $rows);
 	}
 
-	/** Dissolve a group entirely — used when too few members are left to compare. */
-	public function clearDuplicateGroup(string $userId, int $groupId): void {
+	/**
+	 * Take one booking out of a group, **only if it is still in that group**.
+	 *
+	 * The clear that dissolves a group of one names the member it found rather
+	 * than the group: a booking that joined in the meantime is in the group too,
+	 * and clearing by group would take its flag away with the lone one's.
+	 */
+	public function clearDuplicateGroupOf(string $userId, int $bookingId, int $groupId): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->update($this->getTableName())
 			->set('duplicate_group_id', $qb->createNamedParameter(null))
-			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($bookingId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
 			->andWhere($qb->expr()->eq('duplicate_group_id', $qb->createNamedParameter($groupId, IQueryBuilder::PARAM_INT)));
 		$qb->executeStatement();
 	}
