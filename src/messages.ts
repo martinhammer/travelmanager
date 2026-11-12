@@ -381,5 +381,15 @@ export const messageNotices = (message: Message, created: Booking[] = []): Messa
 		})
 	}
 
+	// Also not tied to a status: what *was* read may have made a booking, so the
+	// row can be processed and still be missing the rest. Retrying is how to get
+	// it, which is why it warns rather than informs.
+	if (message.issueReasons.includes('incomplete_json')) {
+		notices.push({
+			type: 'warning',
+			text: 'Part of the model\'s response was cut off or could not be read, so bookings from this email may be missing. Retry the extraction to try again.',
+		})
+	}
+
 	return notices.filter((n): n is MessageNotice => n !== null)
 }

@@ -342,26 +342,22 @@ final class ExtractionServiceTest extends TestCase {
 		// The real failure closes the bookings array while a booking is still
 		// open, so the missing `}` belongs before the `]` — appending at the end
 		// would produce "…}]}}" and still not parse.
-		$repairNote = null;
-		$json = $this->service->extractJsonObject('{"bookings": [{"type": "flight"]}', $repairNote);
+		$repair = $this->service->repairJson('{"bookings": [{"type": "flight"]}');
 
-		$this->assertSame('{"bookings": [{"type": "flight"}]}', $json);
-		$this->assertNotNull($repairNote);
+		$this->assertSame('{"bookings": [{"type": "flight"}]}', $repair['json']);
+		$this->assertNotNull($repair['note']);
 	}
 
 	public function testClosesNestedContainersInTheRightOrder(): void {
-		$repairNote = null;
 		// Needs "}]}" — a plain depth counter would emit "}}}".
-		$json = $this->service->extractJsonObject('{"bookings": [{"type": "flight"', $repairNote);
+		$repair = $this->service->repairJson('{"bookings": [{"type": "flight"');
 
-		$this->assertSame('{"bookings": [{"type": "flight"}]}', $json);
-		$this->assertNotNull($repairNote);
+		$this->assertSame('{"bookings": [{"type": "flight"}]}', $repair['json']);
+		$this->assertNotNull($repair['note']);
 	}
 
 	public function testReportsNoRepairForWellFormedResponses(): void {
-		$repairNote = null;
-		$this->service->extractJsonObject('{"bookings": []}', $repairNote);
-		$this->assertNull($repairNote);
+		$this->assertNull($this->service->repairJson('{"bookings": []}')['note']);
 		$this->assertSame([], $this->service->parseAndValidate('{"bookings": []}')->issues);
 	}
 
@@ -376,6 +372,94 @@ final class ExtractionServiceTest extends TestCase {
 		// A dangling key: appending braces yields {"bookings": [{"type": }]}.
 		$this->expectException(ExtractionException::class);
 		$this->service->parseAndValidate('{"bookings": [{"type":');
+	}
+
+	private const FLIGHT = '{"type": "flight", "details": {"segments": [{"departureLocal": "2026-07-15T09:30:00"}]}}';
+	private const BUS = '{"type": "bus", "details": {"segments": [{"departureLocal": "2026-07-16T08:00:00"}]}}';
+
+	public function testAnExtraClosingBraceBetweenBookingsDoesNotEndTheResponse(): void {
+		// Read as "the model forgot `]`", the extra `}` closed the root and the
+		// bus after it vanished without an issue saying so.
+		$result = $this->service->parseAndValidate('{"bookings": [' . self::FLIGHT . '}, ' . self::BUS . ']}');
+
+		$this->assertSame(['flight', 'bus'], array_map(static fn ($b) => $b->type, $result->bookings));
+		$this->assertCount(1, $result->issues);
+		$this->assertSame(ExtractionIssue::REASON_REPAIRED_JSON, $result->issues[0]->reason);
+		$this->assertStringContainsString('removed 1 stray closing character', $result->issues[0]->description);
+	}
+
+	public function testAnExtraClosingBracketInsideABookingDoesNotEndTheResponse(): void {
+		$flight = '{"type": "flight", "details": {"segments": [{"departureLocal": "2026-07-15T09:30:00"}]]}}';
+		$result = $this->service->parseAndValidate('{"bookings": [' . $flight . ', ' . self::BUS . ']}');
+
+		$this->assertSame(['flight', 'bus'], array_map(static fn ($b) => $b->type, $result->bookings));
+	}
+
+	public function testTextThatCannotBeReadAfterARepairIsReportedAsLost(): void {
+		// Neither reading of the extra `}` parses, so the flight is kept — and
+		// the rest is a drop, not a clean run.
+		$result = $this->service->parseAndValidate('{"bookings": [' . self::FLIGHT . '}, {"type": bus"}]}');
+
+		$this->assertCount(1, $result->bookings);
+		$this->assertSame(
+			[ExtractionIssue::REASON_REPAIRED_JSON, ExtractionIssue::REASON_INCOMPLETE_JSON],
+			$result->reasonSlugs(),
+		);
+		$this->assertSame(1, $result->droppedCount());
+	}
+
+	public function testProseAfterARepairedResponseIsNotALoss(): void {
+		$flight = '{"type": "flight", "details": {"segments": [{"departureLocal": "2026-07-15T09:30:00"}]}';
+		$result = $this->service->parseAndValidate('{"bookings": [' . $flight . ']} I hope this helps!');
+
+		$this->assertCount(1, $result->bookings);
+		$this->assertSame([ExtractionIssue::REASON_REPAIRED_JSON], $result->reasonSlugs());
+	}
+
+	public function testAResponseCutOffBeforeAnyBookingIsAFailureNotNoBooking(): void {
+		// Closing it gives {"bookings": []}, which reads as an email with nothing
+		// in it and would never be retried.
+		$this->expectException(ExtractionException::class);
+		$this->expectExceptionMessage('incomplete');
+		$this->service->parseAndValidate('{"bookings": [');
+	}
+
+	public function testAResponseCutOffAfterABookingKeepsItAndReportsTheRest(): void {
+		foreach (['{"bookings": [' . self::FLIGHT, '{"bookings": [' . self::FLIGHT . ', '] as $cut) {
+			$result = $this->service->parseAndValidate($cut);
+
+			$this->assertCount(1, $result->bookings, $cut);
+			$this->assertContains(ExtractionIssue::REASON_INCOMPLETE_JSON, $result->reasonSlugs(), $cut);
+			$this->assertSame(1, $result->droppedCount(), $cut);
+		}
+	}
+
+	public function testAResponseOnlyMissingItsRootBraceLosesNothing(): void {
+		$result = $this->service->parseAndValidate('{"bookings": [' . self::FLIGHT . ']');
+
+		$this->assertCount(1, $result->bookings);
+		$this->assertSame([ExtractionIssue::REASON_REPAIRED_JSON], $result->reasonSlugs());
+		$this->assertSame(0, $result->droppedCount());
+	}
+
+	public function testARepeatedBookingsKeyIsRefused(): void {
+		// json_decode keeps the last value: zero bookings, zero issues.
+		$this->expectException(ExtractionException::class);
+		$this->expectExceptionMessage('"bookings"');
+		$this->service->parseAndValidate('{"bookings": [' . self::FLIGHT . '], "bookings": []}');
+	}
+
+	public function testARepeatedKeyInsideABookingIsRefused(): void {
+		$this->expectException(ExtractionException::class);
+		$this->expectExceptionMessage('"type"');
+		$this->service->parseAndValidate('{"bookings": [{"type": "flight", "type": "bus", "details": {}}]}');
+	}
+
+	public function testTheSameKeyInSiblingObjectsIsNotARepeat(): void {
+		$result = $this->service->parseAndValidate('{"bookings": [' . self::FLIGHT . ', ' . self::BUS . ']}');
+
+		$this->assertCount(2, $result->bookings);
+		$this->assertSame([], $result->issues);
 	}
 
 	public function testThrowsOnNonJson(): void {

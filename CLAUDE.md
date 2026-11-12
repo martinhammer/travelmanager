@@ -215,7 +215,7 @@ silently:
   and an entry that is not an object still counts as a lost leg. The segment
   issues quote what each rejected leg carried, as the car and hotel issues do.
 
-**Malformed JSON is repaired, never silently.** `extractJsonObject` rebuilds the
+**Malformed JSON is repaired, never silently.** `repairJson` rebuilds the
 response while scanning it, keeping a **stack of open containers** (not a depth
 counter) so it can insert a closer the model skipped *at the point it skipped
 it* — the observed provider failure closes the `bookings` array while a booking
@@ -225,6 +225,25 @@ and is **refused** when the response was cut off inside a string (closing the
 quote would turn a half-written value into a plausible whole one). Every repair
 raises a `repaired_json` issue — a rising repair rate is how a degrading model
 shows up before it starts failing outright.
+
+**A repair never passes off part of a response as the whole** (2026-11-12,
+review items 5 and 12):
+- **A closer that does not match is read two ways.** The scan assumes closers
+  were forgotten before it; when that ends the document with more JSON still to
+  come (`{flight}}, {bus}`), it was an extra one, and the scan runs again with it
+  dropped. Before, the bus vanished and the row said `processed`.
+- **What still cannot be read is a drop, not a repair.** An `incomplete_json`
+  issue (`dropped = true`) is raised when text after the object could not be
+  read or the response was cut off below the root — only a reply missing its
+  root `}` loses nothing. A trailing comma at the cut is removed, since that is
+  where a reply stopping between bookings ends. The Messages row warns that
+  bookings may be missing, whatever the status.
+- **A cut-off with no booking read fails the parse.** Closing `{"bookings": [`
+  gives an empty list that reads as an email with nothing in it, which is never
+  retried.
+- **A repeated key refuses the response**, at any depth. `json_decode` keeps the
+  last value silently, so a flight followed by a second `"bookings": []` decoded
+  as no booking at all.
 
 **Rejections are reported, never swallowed.** `parseAndValidate` returns an
 `ExtractionResult` (`bookings` + `issues`), where each `ExtractionIssue` carries a
@@ -1073,6 +1092,10 @@ debug panel for iterating without waiting for cron:
   27): numeric identifiers kept, ISO date suffixes stripped, journey span fixed,
   segment shapes tolerated, and tier 2's evidence names a one-sided reference.
   No migration. See the extraction contract in §2.
+- ✅ **JSON repair cannot lose bookings silently** (2026-11-12, review items 5,
+  12): an extra closer is dropped rather than ending the response, unreadable or
+  cut-off remainders raise `incomplete_json`, and a repeated key or a cut-off
+  before any booking fails the parse. No migration. See §2.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch

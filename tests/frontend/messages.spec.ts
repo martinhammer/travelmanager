@@ -183,6 +183,13 @@ describe('messageNotices', () => {
 		expect(notices[0].text).toContain('does not apply updates yet')
 	})
 
+	it('warns that bookings may be missing when part of a response was lost, whatever the status', () => {
+		// A saved booking does not mean the email's other bookings were read.
+		const notices = messageNotices(message({ status: 'processed', issueReasons: ['repaired_json', 'incomplete_json'] }))
+		expect(notices.map((n) => n.type)).toEqual(['warning', 'warning'])
+		expect(notices[1].text).toContain('may be missing')
+	})
+
 	it('reassures on an email that genuinely held no booking', () => {
 		expect(messageNotices(message({ status: 'no_booking' }))[0].type).toBe('info')
 	})
