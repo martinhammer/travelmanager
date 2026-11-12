@@ -261,7 +261,10 @@ JSON;
 			);
 		}
 
-		$decoded = json_decode($json, true);
+		// Big integers as strings: an unquoted 16-digit ticket number overflows
+		// PHP's int, and as a float it would come back rounded — a different
+		// number that still looks like a plausible identifier.
+		$decoded = json_decode($json, true, 512, JSON_BIGINT_AS_STRING);
 		if (!is_array($decoded)) {
 			throw new ExtractionException('LLM response is not valid JSON');
 		}
@@ -328,8 +331,8 @@ JSON;
 		return new ExtractedBooking(
 			$type,
 			$this->nullableString($raw['provider'] ?? null),
-			$this->nullableString($raw['booking_reference'] ?? null),
-			$this->nullableString($raw['confirmation_number'] ?? null),
+			$this->identifier($raw['booking_reference'] ?? null),
+			$this->identifier($raw['confirmation_number'] ?? null),
 			$status,
 			$this->nullableString($raw['title'] ?? null),
 			$details,
@@ -354,34 +357,45 @@ JSON;
 	 */
 	private function validateSegmentedDetails(array $details, string $noun, string $label, array &$issues): ?array {
 		$segments = [];
-		$dates = [];
+		$departures = [];
+		$arrivals = [];
+		/** @var list<string> $unusable what each rejected segment offered, for the issue text */
+		$unusable = [];
 		$seen = 0;
-		foreach ($this->asArray($details['segments'] ?? null) as $rawSegment) {
+		foreach ($this->segmentList($details['segments'] ?? null) as $rawSegment) {
+			// Counted whatever it is: an entry that is not an object is still a
+			// leg the model meant, and "no segments" would misdescribe it.
+			$seen++;
 			if (!is_array($rawSegment)) {
+				$unusable[] = 'an entry that was not an object';
 				continue;
 			}
-			$seen++;
 			$departure = $this->normalizeDate($rawSegment['departureLocal'] ?? null);
 			if ($departure === null) {
 				// A leg without a valid departure time is not usable.
+				$unusable[] = $this->rawValue($rawSegment['departureLocal'] ?? null);
 				continue;
 			}
 			$rawSegment['departureLocal'] = $departure;
 			$arrival = $this->normalizeDate($rawSegment['arrivalLocal'] ?? null);
 			$rawSegment['arrivalLocal'] = $arrival;
+			$rawSegment = $this->numbersAsStrings($rawSegment, ['flightNumber', 'serviceNumber']);
 			$segments[] = $rawSegment;
-			$dates[] = $departure;
+			$departures[] = $departure;
 			if ($arrival !== null) {
-				$dates[] = $arrival;
+				$arrivals[] = $arrival;
 			}
 		}
 
+		// What the rejected legs carried is what the prompt gets tuned against,
+		// as the car and hotel issues already quote theirs.
+		$got = $unusable === [] ? '' : ' (got ' . implode(', ', $unusable) . ')';
 		if ($segments === []) {
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_MISSING_DEPARTURE,
 				$label . ': ' . $noun . ' dropped — ' . ($seen === 0
 					? 'details contained no segments'
-					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal'),
+					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal' . $got),
 				true,
 			);
 			return null;
@@ -393,13 +407,47 @@ JSON;
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_PARTIAL_SEGMENTS,
 				$label . ': kept ' . count($segments) . ' of ' . $seen
-					. ' ' . $noun . ' segment(s); the rest had no parseable departureLocal',
+					. ' ' . $noun . ' segment(s); the rest had no parseable departureLocal' . $got,
 				false,
 			);
 		}
 
 		$details['segments'] = $segments;
-		return [$details, $this->minDate($dates), $this->maxDate($dates)];
+		if (isset($details['passengers']) && is_array($details['passengers'])) {
+			$details['passengers'] = array_map(
+				fn (mixed $passenger): mixed => is_array($passenger) ? $this->numbersAsStrings($passenger, ['ticketNumber']) : $passenger,
+				$details['passengers'],
+			);
+		}
+		// The journey starts at its first departure. An arrival can only end it:
+		// a date-only arrival reads as midnight, so letting arrivals into the
+		// start made a 22:00 departure begin at 00:00 the same day.
+		return [$details, $this->minDate($departures), $this->maxDate([...$departures, ...$arrivals])];
+	}
+
+	/**
+	 * The segments as a list, whatever shape they came in.
+	 *
+	 * A one-leg journey sometimes arrives as `"segments": { "departureLocal": … }`
+	 * — one object rather than a list of one. PHP decodes that to an array as
+	 * well, so iterating it walked the leg's *fields* and reported "no segments".
+	 * An object whose values are all objects is read as a keyed list of legs.
+	 *
+	 * @return list<mixed>
+	 */
+	private function segmentList(mixed $value): array {
+		if (!is_array($value) || $value === []) {
+			return [];
+		}
+		if (array_is_list($value)) {
+			return $value;
+		}
+		foreach ($value as $entry) {
+			if (!is_array($entry)) {
+				return [$value];
+			}
+		}
+		return array_values($value);
 	}
 
 	/**
@@ -588,6 +636,13 @@ JSON;
 		if ($value === '') {
 			return null;
 		}
+		// Models often append ISO decoration they were not asked for: fractional
+		// seconds, `Z`, a numeric offset. Each is dropped and the wall-clock part
+		// kept exactly as written — no conversion (V8) — because rejecting it
+		// cost the leg, and a one-leg flight its booking.
+		if (preg_match('/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/i', $value, $m) === 1) {
+			$value = $m[1];
+		}
 		foreach (self::ACCEPTED_DATE_FORMATS as $format) {
 			$dt = \DateTimeImmutable::createFromFormat('!' . $format, $value);
 			$errors = \DateTimeImmutable::getLastErrors();
@@ -644,6 +699,45 @@ JSON;
 			return '';
 		}
 		return ' (got "' . trim($value) . '")';
+	}
+
+	/**
+	 * An identifier the model may have written as a JSON number. An all-digit
+	 * reference without its quotes decodes to an int (or, past PHP_INT_MAX, a
+	 * string, given JSON_BIGINT_AS_STRING), and it is the same reference either
+	 * way. It used to come back null with no issue raised, and with both
+	 * identifiers gone BookingMatcher could no longer see that two bookings'
+	 * references differed. A float is not an identifier: it has lost digits
+	 * or never was one.
+	 */
+	private function identifier(mixed $value): ?string {
+		return is_int($value) ? (string)$value : $this->nullableString($value);
+	}
+
+	/**
+	 * As identifier(), for identifier fields inside `details`, which passes
+	 * unknown values through: a numeric one becomes its string, anything else
+	 * — including a missing field — is left exactly as it was.
+	 *
+	 * @param array<array-key, mixed> $item
+	 * @param list<string> $fields
+	 * @return array<array-key, mixed>
+	 */
+	private function numbersAsStrings(array $item, array $fields): array {
+		foreach ($fields as $field) {
+			if (isset($item[$field]) && is_int($item[$field])) {
+				$item[$field] = (string)$item[$field];
+			}
+		}
+		return $item;
+	}
+
+	/** A raw value for an issue's text: quoted when there was one. */
+	private function rawValue(mixed $value): string {
+		if (is_string($value) && trim($value) !== '') {
+			return '"' . trim($value) . '"';
+		}
+		return $value === null ? 'no departureLocal' : 'a ' . get_debug_type($value) . ' departureLocal';
 	}
 
 	private function nullableString(mixed $value): ?string {

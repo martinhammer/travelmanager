@@ -193,6 +193,28 @@ car_rental ⇒ valid `pickup.local`; accommodation ⇒ valid `checkIn.local`. Th
 three segmented types share one validator (`validateSegmentedDetails`, gated on
 `SEGMENTED_TYPES`), which is the only place that rule lives.
 
+**What the model writes loosely is normalised, never refused for its form**
+(2026-11-12, review items 4, 13, 25, 27). Each of these used to cost data
+silently:
+- **An all-digit identifier written as a JSON number is the same identifier.**
+  `identifier()` stringifies an int for both header columns, and
+  `json_decode(…, JSON_BIGINT_AS_STRING)` keeps one too long for an int from
+  coming back as a rounded float. A decimal is not an identifier. Inside
+  `details`, `flightNumber`/`serviceNumber`/`ticketNumber` get the same
+  treatment (`numbersAsStrings`), because the matcher reads them as strings.
+  Losing the number mattered beyond the card: with both identifiers gone,
+  `BookingMatcher`'s tier 2 could no longer see that two rooms' references
+  differed, and suppressed the second.
+- **ISO decoration on a date is dropped, not converted** (V8): fractional
+  seconds, `Z` and a numeric offset are stripped and the wall clock kept as
+  written. Rejecting them cost the leg, and a one-leg flight its booking.
+- **A journey starts at its first departure and ends at the latest departure or
+  arrival.** Arrivals in the start made a 22:00 departure with a date-only
+  arrival begin at midnight.
+- **Segments as one object are one leg**, an object of objects is a keyed list,
+  and an entry that is not an object still counts as a lost leg. The segment
+  issues quote what each rejected leg carried, as the car and hotel issues do.
+
 **Malformed JSON is repaired, never silently.** `extractJsonObject` rebuilds the
 response while scanning it, keeping a **stack of open containers** (not a depth
 counter) so it can insert a closer the model skipped *at the point it skipped
@@ -1047,6 +1069,10 @@ debug panel for iterating without waiting for cron:
   Message-IDs hashed when they cannot fit, a 2 MiB cap on each part download,
   the PDF breadcrumb held until the row is written, the PDF size check fixed,
   and a queued job re-checks the user's own switch. No migration. See §7.
+- ✅ **Extraction normalises loose values** (2026-11-12, review items 4, 13, 25,
+  27): numeric identifiers kept, ISO date suffixes stripped, journey span fixed,
+  segment shapes tolerated, and tier 2's evidence names a one-sided reference.
+  No migration. See the extraction contract in §2.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch

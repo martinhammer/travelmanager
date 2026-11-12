@@ -8,6 +8,7 @@ use OCA\TravelManager\Service\BookingMatcher;
 use OCA\TravelManager\Service\Dto\BookingMatch;
 use OCA\TravelManager\Service\Dto\ExtractedBooking;
 use OCA\TravelManager\Service\Dto\MatchCandidate;
+use OCA\TravelManager\Service\ExtractionService;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -195,6 +196,40 @@ final class BookingMatcherTest extends TestCase {
 		$this->assertNotNull($match);
 		$this->assertFalse($match->decisive);
 		$this->assertStringContainsString('AAA111', $match->evidence);
+	}
+
+	public function testTheEvidenceNamesAReferenceOnlyOneSideCarries(): void {
+		// It used to say neither email carried one, which sends whoever checks
+		// the call looking for a reference that is right there.
+		$existing = $this->candidate(3, 'accommodation', 'Bo18 Superior', null, null, [], '2026-09-15T14:00:00');
+		$second = $this->incoming('accommodation', 'Bo18 Superior', 'ABC12345', null, [], '2026-09-15T14:00:00');
+
+		$evidence = (string)$this->matcher->match($second, [$existing])?->evidence;
+
+		$this->assertStringContainsString('this email carries reference ABC12345', $evidence);
+		$this->assertStringNotContainsString('neither', $evidence);
+
+		$reversed = (string)$this->matcher->match(
+			$this->incoming('accommodation', 'Bo18 Superior', null, null, [], '2026-09-15T14:00:00'),
+			[$this->candidate(3, 'accommodation', 'Bo18 Superior', 'ABC12345', null, [], '2026-09-15T14:00:00')],
+		)?->evidence;
+		$this->assertStringContainsString('the existing booking has reference ABC12345', $reversed);
+	}
+
+	public function testAnUnquotedReferenceStillTellsTwoRoomsApart(): void {
+		// End to end: the second room's reference arrives as a JSON number. It
+		// used to be dropped during parsing, which left tier 2 nothing to
+		// compare, so "same hotel, same night" suppressed a real booking.
+		$existing = $this->candidate(3, 'accommodation', 'Hotel Sol', '37713299', null, [], '2026-09-15T14:00:00');
+		$parsed = (new ExtractionService())->parseAndValidate(
+			'{"bookings":[{"type":"accommodation","provider":"Hotel Sol","booking_reference":37713300,'
+			. '"details":{"checkIn":{"local":"2026-09-15T14:00:00"}}}]}',
+		)->bookings[0];
+
+		$match = $this->matcher->match($parsed, [$existing]);
+
+		$this->assertNotNull($match);
+		$this->assertFalse($match->decisive, 'stored and flagged, never suppressed');
 	}
 
 	public function testTwoOneWaysOnOneAirlineOnOneDayAreNotOneBooking(): void {

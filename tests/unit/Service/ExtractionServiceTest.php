@@ -397,6 +397,153 @@ final class ExtractionServiceTest extends TestCase {
 		$this->assertNull($this->service->normalizeDate(null));
 	}
 
+	/* ------------------------------------------------- field normalisation */
+
+	public function testAnUnquotedNumericReferenceIsKeptAsAString(): void {
+		// The model leaving the quotes off an all-digit reference is ordinary,
+		// and json_decode makes it an int. It used to be discarded silently.
+		$json = '{"bookings":[{"type":"bus","provider":"Flibco","booking_reference":37713299,'
+			. '"confirmation_number":27874980,"details":{"segments":[{"departureLocal":"2026-07-25T08:35:00"}]}}]}';
+
+		$booking = $this->service->parseAndValidate($json)->bookings[0];
+
+		$this->assertSame('37713299', $booking->bookingReference);
+		$this->assertSame('27874980', $booking->confirmationNumber);
+	}
+
+	public function testAnUnquotedNumberTooBigForAnIntKeepsEveryDigit(): void {
+		// As a float it would come back rounded: a different, plausible number.
+		$json = '{"bookings":[{"type":"flight","confirmation_number":12345678901234567890,'
+			. '"details":{"segments":[{"departureLocal":"2026-07-25T08:35:00"}]}}]}';
+
+		$this->assertSame('12345678901234567890', $this->service->parseAndValidate($json)->bookings[0]->confirmationNumber);
+	}
+
+	public function testADecimalIsNotAnIdentifier(): void {
+		$json = '{"bookings":[{"type":"flight","booking_reference":1234.5,'
+			. '"details":{"segments":[{"departureLocal":"2026-07-25T08:35:00"}]}}]}';
+
+		$this->assertNull($this->service->parseAndValidate($json)->bookings[0]->bookingReference);
+	}
+
+	public function testNumericIdentifiersInsideDetailsBecomeStrings(): void {
+		// BookingMatcher reads service and flight numbers as strings; a numeric
+		// one used to switch its same-service guard off.
+		$json = '{"bookings":[{"type":"bus","details":{'
+			. '"passengers":[{"name":"Jane Doe","ticketNumber":37713299}],'
+			. '"segments":[{"departureLocal":"2026-07-25T08:35:00","serviceNumber":506}]}}]}';
+
+		$details = $this->service->parseAndValidate($json)->bookings[0]->details;
+
+		$this->assertSame('506', $details['segments'][0]['serviceNumber']);
+		$this->assertSame('37713299', $details['passengers'][0]['ticketNumber']);
+		$this->assertArrayNotHasKey('flightNumber', $details['segments'][0], 'no field is invented');
+	}
+
+	public function testNormalizeDateKeepsTheWallClockOfAnIsoTimestamp(): void {
+		// Dropped, never converted (V8): the clock is the one the email printed.
+		$this->assertSame('2026-07-15T09:30:00', $this->service->normalizeDate('2026-07-15T09:30:00Z'));
+		$this->assertSame('2026-07-15T09:30:00', $this->service->normalizeDate('2026-07-15T09:30:00+02:00'));
+		$this->assertSame('2026-07-15T09:30:00', $this->service->normalizeDate('2026-07-15T09:30:00-0500'));
+		$this->assertSame('2026-07-15T09:30:00', $this->service->normalizeDate('2026-07-15T09:30:00.000Z'));
+		$this->assertSame('2026-07-15T09:30:00', $this->service->normalizeDate('2026-07-15 09:30+01'));
+		$this->assertNull($this->service->normalizeDate('2026-07-15T09:30:00 CET'));
+		$this->assertNull($this->service->normalizeDate('2026-02-30T09:30:00Z'), 'still rejects impossible dates');
+	}
+
+	public function testAReturnLegWithAUtcSuffixIsNotLost(): void {
+		$json = json_encode(['bookings' => [[
+			'type' => 'flight',
+			'details' => ['segments' => [
+				['departureLocal' => '2026-07-15T09:30:00'],
+				['departureLocal' => '2026-07-22T18:05:00Z'],
+			]],
+		]]]);
+
+		$result = $this->service->parseAndValidate($json);
+
+		$this->assertCount(2, $result->bookings[0]->details['segments']);
+		$this->assertSame('2026-07-22T18:05:00', $result->bookings[0]->details['segments'][1]['departureLocal']);
+		$this->assertSame([], $result->issues);
+	}
+
+	public function testASegmentIssueQuotesWhatTheModelWrote(): void {
+		// The raw value is what the prompt is tuned against, as car and hotel
+		// issues already show theirs.
+		$json = json_encode(['bookings' => [[
+			'type' => 'flight',
+			'details' => ['segments' => [
+				['departureLocal' => '2026-07-15T09:30:00'],
+				['departureLocal' => '22 July, evening'],
+				['origin' => 'LHR'],
+			]],
+		]]]);
+
+		$issue = $this->service->parseAndValidate($json)->issues[0];
+
+		$this->assertSame(ExtractionIssue::REASON_PARTIAL_SEGMENTS, $issue->reason);
+		$this->assertStringContainsString('(got "22 July, evening", no departureLocal)', $issue->description);
+	}
+
+	public function testADateOnlyArrivalDoesNotMoveTheStartToMidnight(): void {
+		$json = json_encode(['bookings' => [[
+			'type' => 'flight',
+			'details' => ['segments' => [
+				['departureLocal' => '2026-07-15T22:00:00', 'arrivalLocal' => '2026-07-15'],
+			]],
+		]]]);
+
+		$booking = $this->service->parseAndValidate($json)->bookings[0];
+
+		$this->assertSame('2026-07-15T22:00:00', $booking->startDate);
+		$this->assertSame('2026-07-15T22:00:00', $booking->endDate);
+	}
+
+	public function testAnOvernightArrivalStillEndsTheJourney(): void {
+		$json = json_encode(['bookings' => [[
+			'type' => 'flight',
+			'details' => ['segments' => [
+				['departureLocal' => '2026-07-15T22:00:00', 'arrivalLocal' => '2026-07-16T06:10:00'],
+			]],
+		]]]);
+
+		$booking = $this->service->parseAndValidate($json)->bookings[0];
+
+		$this->assertSame('2026-07-15T22:00:00', $booking->startDate);
+		$this->assertSame('2026-07-16T06:10:00', $booking->endDate);
+	}
+
+	public function testOneSegmentWrittenAsAnObjectIsOneLeg(): void {
+		// PHP decodes the object to an array too, so it used to be walked as the
+		// leg's fields and reported as "no segments".
+		$json = '{"bookings":[{"type":"flight","details":{"segments":'
+			. '{"flightNumber":"KL1069","departureLocal":"2026-07-25T08:35:00"}}}]}';
+
+		$booking = $this->service->parseAndValidate($json)->bookings[0];
+
+		$this->assertCount(1, $booking->details['segments']);
+		$this->assertSame('KL1069', $booking->details['segments'][0]['flightNumber']);
+	}
+
+	public function testSegmentsKeyedByNameAreReadAsAList(): void {
+		$json = '{"bookings":[{"type":"train","details":{"segments":{'
+			. '"outbound":{"departureLocal":"2026-07-25T08:35:00"},'
+			. '"return":{"departureLocal":"2026-07-28T17:00:00"}}}}]}';
+
+		$this->assertCount(2, $this->service->parseAndValidate($json)->bookings[0]->details['segments']);
+	}
+
+	public function testASegmentThatIsNotAnObjectIsCountedNotIgnored(): void {
+		$json = '{"bookings":[{"type":"flight","details":{"segments":["AMS-LHR 08:35"]}}]}';
+
+		$issue = $this->service->parseAndValidate($json)->issues[0];
+
+		$this->assertSame(ExtractionIssue::REASON_MISSING_DEPARTURE, $issue->reason);
+		$this->assertStringNotContainsString('no segments', $issue->description);
+		$this->assertStringContainsString('none of its 1 segment(s)', $issue->description);
+		$this->assertStringContainsString('not an object', $issue->description);
+	}
+
 	public function testAllowedTypesContractCoversMvpTypes(): void {
 		$this->assertSame(
 			['flight', 'accommodation', 'car_rental', 'train', 'bus'],
