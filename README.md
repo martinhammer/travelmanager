@@ -15,6 +15,7 @@ Know limitations and issues:
 * The app is under heavy iterative development. Whilst migration scripts are being used to move "seamlessly" between versions, caution is advised in production scenarios.
 * Currently there is 1:N relationship between email message and bookings. In other words, a later email will not update an existing booking (in most cases a "duplicate" should be detected and highlighted).
 * Limited testing on a relatively small sample (~100) of bookings till date.
+* Please be aware that the email content with potentially sensitive personal data is being submitted to the AI model configured by the Nextcloud instance administrator in Assistant settings.
 
 ### Motivation
 
