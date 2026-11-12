@@ -23,6 +23,7 @@ import {
 	sortMessages,
 } from './messages'
 import { isOpen, openDetail, route } from './navigation'
+import { refusalMessage } from './backup'
 import { bookingsFromMessage } from './detail'
 import { bookings, loading, messages, reload } from './store'
 
@@ -135,7 +136,28 @@ const onRawMessageToggle = async (id: number, event: Event) => {
 	}
 }
 
-const onRetry = async (id: number) => {
+// Rows with a request in flight. `retryable` reads the status as loaded, which
+// stays `failed` until the reload after the retry lands, so without this a
+// second click sent a second retry. The server refuses that one now, but the
+// button should not offer it. Discard shares the set: one change at a time per
+// row, and a retry clears the discard anyway.
+const inFlight = ref<Set<number>>(new Set())
+
+const whileInFlight = async (id: number, work: () => Promise<void>): Promise<void> => {
+	if (inFlight.value.has(id)) {
+		return
+	}
+	inFlight.value = new Set(inFlight.value).add(id)
+	try {
+		await work()
+	} finally {
+		const rest = new Set(inFlight.value)
+		rest.delete(id)
+		inFlight.value = rest
+	}
+}
+
+const onRetry = (id: number) => whileInFlight(id, async () => {
 	try {
 		await retryMessage(id)
 		// The model answers asynchronously, so the row will not settle until a
@@ -143,11 +165,17 @@ const onRetry = async (id: number) => {
 		showSuccess(t('travelmanager', 'Extraction re-scheduled — refresh in a moment to see the result'))
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not re-run the extraction'))
+		// A refusal says why (another tab already retried it, say), and means
+		// the row on screen is out of date.
+		const refusal = refusalMessage(e)
+		showError(refusal ?? t('travelmanager', 'Could not re-run the extraction'))
+		if (refusal !== null) {
+			await reload()
+		}
 	}
-}
+})
 
-const onDiscard = async (id: number, discarded: boolean) => {
+const onDiscard = (id: number, discarded: boolean) => whileInFlight(id, async () => {
 	try {
 		await discardMessage(id, discarded)
 		// Names where it went, because the row does not move: with the default
@@ -160,7 +188,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update this message'))
 	}
-}
+})
 </script>
 
 <template>
@@ -308,7 +336,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 							     than one that greys out with a reason. -->
 							<NcButton v-if="item.canRetry"
 								variant="secondary"
-								:disabled="!retryable(item)"
+								:disabled="!retryable(item) || inFlight.has(item.id)"
 								@click="onRetry(item.id)">
 								{{ t('travelmanager', 'Retry extraction') }}
 							</NcButton>
@@ -324,6 +352,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 							     `unresolved`, which is about the status alone. -->
 							<NcButton v-if="unresolved(item)"
 								variant="secondary"
+								:disabled="inFlight.has(item.id)"
 								@click="onDiscard(item.id, !item.discarded)">
 								{{ item.discarded
 									? t('travelmanager', 'Restore')

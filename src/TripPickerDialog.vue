@@ -27,6 +27,13 @@ const choice = ref('')
 const search = ref('')
 const busy = ref(false)
 
+// What a failed submit already did, so pressing it again does not do it twice.
+// Each write commits on its own: a confirm that went through stays confirmed,
+// and a trip that was created exists, whatever failed after them. Without this
+// a retry created the trip a second time (`canCreateTrip` only knows the trips
+// already loaded) and confirmed a booking that already was. Reset on opening.
+const confirmedHere = ref(false)
+
 // Whether the dialog is also confirming, or only re-filing an already-confirmed
 // booking. Drives its wording and whether "No trip" is worth offering.
 const isDraft = computed(() => props.booking?.reviewState === 'draft')
@@ -42,6 +49,7 @@ watch(() => props.open, (open) => {
 	// through on a single click.
 	choice.value = props.booking?.tripId == null ? '' : String(props.booking.tripId)
 	search.value = ''
+	confirmedHere.value = false
 })
 
 // Trips whose dates line up with the booking's own — almost always the one you
@@ -97,10 +105,15 @@ const submit = async () => {
 	}
 	const confirming = isDraft.value
 	busy.value = true
+	let wrote = false
 	try {
 		let tripId: number | null = null
 		if (choice.value === 'new') {
 			tripId = (await createTrip(search.value.trim())).id
+			wrote = true
+			// The new trip is now the choice: a retry links to it rather than
+			// creating another, and the reload below lists it, selected.
+			choice.value = String(tripId)
 		} else if (choice.value !== 'none') {
 			tripId = Number(choice.value)
 		}
@@ -108,8 +121,10 @@ const submit = async () => {
 		// is the trip the booking is already on, which is the ordinary outcome of
 		// opening the dialog just to look.
 		const changed = tripId !== item.tripId
-		if (confirming) {
+		if (confirming && !confirmedHere.value) {
 			await setBookingReviewState(item.id, 'confirmed')
+			confirmedHere.value = true
+			wrote = true
 		}
 		if (changed) {
 			await assignBookingToTrip(item.id, tripId)
@@ -124,7 +139,19 @@ const submit = async () => {
 		emit('update:open', false)
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not update the booking'))
+		// Said as it is: a confirm that went through is not undone by the link
+		// failing, and "could not update" would let the user believe it is
+		// still a draft.
+		showError(confirmedHere.value
+			? t('travelmanager', 'The booking was confirmed, but could not be filed under the trip')
+			: t('travelmanager', 'Could not update the booking'))
+		// The screen still shows the booking as it was before the submit — a
+		// draft offering Confirm — while the server already holds what did
+		// succeed. Reloading makes the panel match it, and a confirmed booking
+		// with no trip then carries the primary Trip button.
+		if (wrote) {
+			await reload()
+		}
 	} finally {
 		busy.value = false
 	}

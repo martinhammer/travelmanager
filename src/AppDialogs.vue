@@ -38,13 +38,21 @@ import { bookings, reload } from './store'
  * buttons do.
  */
 
+// Each confirm button is disabled from the click until its request returns.
+// Without that a second click sent a second request: two deletes ended in
+// "Could not delete" (the row was already gone) right after the success toast,
+// and two creates — Enter and the button, or a double click — made two trips.
+
 // --- booking: permanent deletion ------------------------------------------
+
+const deletingBooking = ref(false)
 
 const confirmDeleteBooking = async () => {
 	const target = deleteBookingTarget.value
-	if (target === null) {
+	if (target === null || deletingBooking.value) {
 		return
 	}
+	deletingBooking.value = true
 	try {
 		await deleteBooking(target.id)
 		showSuccess(t('travelmanager', 'Booking deleted'))
@@ -57,6 +65,8 @@ const confirmDeleteBooking = async () => {
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not delete the booking'))
+	} finally {
+		deletingBooking.value = false
 	}
 }
 
@@ -84,11 +94,14 @@ watch(tripEditorOpen, (open) => {
 
 const typeOptions = TRIP_TYPES.map((type) => ({ type, label: tripTypeLabel(type) }))
 
+const savingTrip = ref(false)
+
 const submitTrip = async () => {
 	const name = editName.value.trim()
-	if (!name) {
+	if (!name || savingTrip.value) {
 		return
 	}
+	savingTrip.value = true
 	try {
 		// Sent on every save, including empty, so clearing a type or colour is a
 		// change like any other rather than something the form cannot express.
@@ -106,6 +119,8 @@ const submitTrip = async () => {
 		showError(refusalMessage(e) ?? (tripEditorTarget.value !== null
 			? t('travelmanager', 'Could not update trip')
 			: t('travelmanager', 'Could not create trip')))
+	} finally {
+		savingTrip.value = false
 	}
 }
 
@@ -137,11 +152,14 @@ const onUnlink = async (bookingId: number) => {
 
 // --- trip: deletion --------------------------------------------------------
 
+const deletingTrip = ref(false)
+
 const confirmDeleteTrip = async () => {
 	const target = deleteTripTarget.value
-	if (target === null) {
+	if (target === null || deletingTrip.value) {
 		return
 	}
+	deletingTrip.value = true
 	try {
 		await deleteTrip(target.id)
 		showSuccess(t('travelmanager', 'Trip deleted'))
@@ -153,6 +171,8 @@ const confirmDeleteTrip = async () => {
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not delete the trip'))
+	} finally {
+		deletingTrip.value = false
 	}
 }
 </script>
@@ -169,7 +189,7 @@ const confirmDeleteTrip = async () => {
 				<NcButton variant="secondary" @click="deleteBookingOpen = false">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
-				<NcButton variant="error" @click="confirmDeleteBooking">
+				<NcButton variant="error" :disabled="deletingBooking" @click="confirmDeleteBooking">
 					{{ t('travelmanager', 'Delete permanently') }}
 				</NcButton>
 			</template>
@@ -243,7 +263,7 @@ const confirmDeleteTrip = async () => {
 				<NcButton variant="secondary" @click="tripEditorOpen = false; tripEditorTarget = null">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
-				<NcButton variant="primary" :disabled="!editName.trim()" @click="submitTrip">
+				<NcButton variant="primary" :disabled="!editName.trim() || savingTrip" @click="submitTrip">
 					{{ tripEditorTarget ? t('travelmanager', 'Save') : t('travelmanager', 'Create') }}
 				</NcButton>
 			</template>
@@ -287,7 +307,7 @@ const confirmDeleteTrip = async () => {
 				<NcButton variant="secondary" @click="deleteTripOpen = false">
 					{{ t('travelmanager', 'Cancel') }}
 				</NcButton>
-				<NcButton variant="error" @click="confirmDeleteTrip">
+				<NcButton variant="error" :disabled="deletingTrip" @click="confirmDeleteTrip">
 					{{ t('travelmanager', 'Delete') }}
 				</NcButton>
 			</template>

@@ -4,6 +4,7 @@ import { t } from '@nextcloud/l10n'
 import type { Booking, Message, Trip } from './api'
 import { listBookings, listMessages, listTrips } from './api'
 import { bookingTypes, decodeHtmlEntities, draftCount } from './bookings'
+import { latestOnly } from './latest'
 import { needsAttention } from './messages'
 import { tripRows } from './trips'
 
@@ -25,19 +26,36 @@ export const trips = ref<Trip[]>([])
 export const messages = ref<Message[]>([])
 export const loading = ref(true)
 
+/**
+ * Two actions in a row start two reloads, and the responses can settle in
+ * either order; written as they arrived, an older list could replace a newer
+ * one, and a trip just created vanished until something else reloaded. Only
+ * the latest call writes, and only it ends `loading`.
+ */
+const reloadTurn = latestOnly()
+
 /** Everything, in one round trip. Views re-read the refs; nothing else to do. */
 export const reload = async (): Promise<void> => {
+	const isLatest = reloadTurn()
 	loading.value = true
 	try {
-		[bookings.value, trips.value, messages.value] = await Promise.all([
+		const loaded = await Promise.all([
 			listBookings(),
 			listTrips(),
 			listMessages(),
 		])
+		if (isLatest()) {
+			[bookings.value, trips.value, messages.value] = loaded
+		}
 	} catch (e) {
-		showError(t('travelmanager', 'Could not load travel data'))
+		// A newer reload owns the screen now, and says so itself if it fails.
+		if (isLatest()) {
+			showError(t('travelmanager', 'Could not load travel data'))
+		}
 	} finally {
-		loading.value = false
+		if (isLatest()) {
+			loading.value = false
+		}
 	}
 }
 

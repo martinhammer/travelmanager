@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import NcAppSidebar from '@nextcloud/vue/components/NcAppSidebar'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
@@ -178,6 +178,11 @@ const messageDuplicates = computed(() => {
 
 // --- acting on it ----------------------------------------------------------
 
+// A request from this panel is in flight. The buttons only change once the
+// reload after it lands, so until then a second click repeated the same
+// transition: a second toast, a second write.
+const acting = ref(false)
+
 /**
  * Say the booking in this row is not the same as the rest of the group. Acts on
  * the row, not on the card: with three bookings grouped, "not a duplicate" has
@@ -186,12 +191,18 @@ const messageDuplicates = computed(() => {
  * @param item the booking listed in the row the button was pressed in
  */
 const onNotADuplicate = async (item: Booking) => {
+	if (acting.value) {
+		return
+	}
+	acting.value = true
 	try {
 		await leaveDuplicateGroup(item.id)
 		showSuccess(t('travelmanager', 'Marked as a different booking'))
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update the booking'))
+	} finally {
+		acting.value = false
 	}
 }
 
@@ -204,6 +215,10 @@ const onReview = async (item: Booking, target: ReviewState) => {
 	// back. Say so at the moment it happens rather than letting the user find the
 	// trip empty later.
 	const unfiled = target === 'discarded' && item.tripId !== null
+	if (acting.value) {
+		return
+	}
+	acting.value = true
 	try {
 		await setBookingReviewState(item.id, target)
 		showSuccess(unfiled
@@ -212,6 +227,8 @@ const onReview = async (item: Booking, target: ReviewState) => {
 		await reload()
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update the booking'))
+	} finally {
+		acting.value = false
 	}
 }
 
@@ -335,7 +352,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 							<!-- Removes *this row's* booking from the group, leaving
 							     any others grouped: one of three being different
 							     settles nothing about the other two. -->
-							<NcButton variant="tertiary" @click="onNotADuplicate(item)">
+							<NcButton variant="tertiary" :disabled="acting" @click="onNotADuplicate(item)">
 								{{ t('travelmanager', 'Not a duplicate') }}
 							</NcButton>
 						</li>
@@ -357,6 +374,7 @@ const reviewVariant = (target: ReviewState): 'primary' | 'secondary' | 'error' =
 					<NcButton v-for="target in reviewActions(booking)"
 						:key="target"
 						:variant="reviewVariant(target)"
+						:disabled="acting"
 						@click="onReviewAction(booking, target)">
 						{{ actionLabel(booking, target) }}
 					</NcButton>

@@ -139,7 +139,9 @@ export const ensureSourceMessage = async (): Promise<void> => {
 	}
 	try {
 		const found = await findMessageBySourceId(sourceId)
-		if (found !== null) {
+		// Checked again: a reload during the await may have brought it in, and
+		// appending it then would list one message twice.
+		if (found !== null && !messages.value.some((m) => m.id === found.id)) {
 			messages.value = [...messages.value, found]
 		}
 	} catch (e) {

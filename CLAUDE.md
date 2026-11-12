@@ -659,7 +659,12 @@ code follows the overrides.
     left a draft rather than a confirmed booking with no trip; that outcome is
     now handled by the **Trip** button, which every confirmed booking carries and
     which renders *primary* while it has none, so an orphan announces itself and
-    is one click from being filed.
+    is one click from being filed. **That only works if the screen knows** (2026-11-12,
+    review item 6): a failed submit reloads whenever something before the
+    failure was written, says when the confirm itself went through, and
+    remembers what it did — a created trip becomes the choice and a done
+    confirm is skipped — so pressing it again neither creates the trip twice
+    nor re-confirms.
     Only `draft → confirmed` opens the dialog: *restoring an archived booking*
     also targets `confirmed`, but it is an undo rather than a first decision and
     it still has the trip it was archived with — hence the `reviewState` check in
@@ -1113,6 +1118,10 @@ debug panel for iterating without waiting for cron:
   26): a task is claimed out of `pending` before its result is written, a
   retry is a conditional requeue, and leaving or purging a duplicate group is
   one transaction plus a second tidy after it. No migration. See §3.
+- ✅ **Writes and reloads cannot overtake each other on screen** (2026-11-12,
+  review items 6, 15 buttons, 19): only the latest reload writes, write buttons
+  are disabled while in flight, and a failed confirm-and-file reloads and
+  remembers what it already did. No backend change. See "Frontend layout".
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1426,7 +1435,7 @@ store.ts        bookings / trips / messages / loading / reload + derived counts
 navigation.ts   the route, open/close/back, hash + history plumbing
 dialogs.ts      which dialog is open, on what, and the openX() calls
 labels.ts       how the domain is worded
-grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts backup.ts   pure, unit-tested
+grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts backup.ts latest.ts   pure, unit-tested
 ```
 
 Adding the fourth view (the calendar) cost exactly what that promised: one nav
@@ -1441,6 +1450,15 @@ module and its stylesheet). Hold a fifth to the same bar.
 - **`store.ts` holds module-level refs**, not provide/inject or prop threading.
   Every view, the sidebar and most dialogs need the same three collections and
   the same `reload()`. Safe because the app mounts once; revisit if that changes.
+  **Only the latest `reload()` writes** (`latestOnly` in `latest.ts`): two
+  actions in a row start two, and the older response settling last used to
+  replace the newer list.
+- **A button that writes is disabled from the click until its request returns**
+  (2026-11-12, review item 15): the delete and trip dialogs, the sidebar's
+  Actions and "Not a duplicate", and Retry/Discard per Messages row. Set the flag
+  before the first `await`. The visible state only changes once the reload
+  lands, so until then a second click repeated the request: a second delete
+  404'd after the success toast, and a second create made a second trip.
 - **`dialogs.ts` is the same pattern for *what is open*, and `AppDialogs.vue`
   renders the lot.** Most dialogs are now raised from the detail panel and one
   ("New trip") from the Trips toolbar, so no view owns them; threading them
