@@ -3157,7 +3157,6 @@
             "put": {
                 "operationId": "settings-update",
                 "summary": "Update the current user's Travel Manager settings",
-                "description": "This endpoint requires password confirmation",
                 "tags": [
                     "settings"
                 ],

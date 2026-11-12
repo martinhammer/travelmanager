@@ -461,7 +461,7 @@ export const previewBackup = async (file: File, replace: boolean): Promise<Backu
 }
 
 /**
- * Restore a file. Requires a recent password confirmation.
+ * Restore a file. Asks for no password: the preview is the confirmation.
  * @param file the backup
  * @param replace whether to delete the existing data first
  */

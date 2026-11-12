@@ -807,7 +807,8 @@ code follows the overrides.
   Personal settings → *Backup & restore*, `GET /api/backup/export`, `POST
   /api/backup/preview` (writes nothing) and `POST /api/backup/import`. Importing
   deliberately asks for **no password**, even with "replace": the preview dialog with
-  its counts is the confirmation. Consequences:
+  its counts is the confirmation (see "No password confirmation" in §7).
+  Consequences:
   - **JSON, not SQLite.** SQLite would need `pdo_sqlite` on a MySQL or Postgres
     server, and would mean opening a user-uploaded database file. `BackupFormat::VERSION`
     guards the shape: a newer file is refused with a request to update the app.
@@ -857,6 +858,19 @@ code follows the overrides.
     it; **Download import report** saves the same list as text (`importReportText`).
     `messages.status` is left alone
     when its booking is skipped: `source_message_id` already links the two.
+  - **A file can make us store no more than the app would have written**
+    (2026-11-12, review items 8 and 24). It is text anyone can edit, and a `queued`
+    row goes to the shared model on the next tick. So `BackupFormat` cuts a waiting
+    email's text to `MessageText::TOTAL` bytes exactly as ingestion would, a
+    finished one to TOTAL *characters* (bodies before 1.19.0 were capped at 20 000
+    characters, more bytes than TOTAL in a non-Latin script), and `error`,
+    `lastResponse` and trip notes to 20 000 characters. What cannot be cut refuses
+    the file: `details` over 100 kB, more than 50 000 rows in a list, an
+    `attempts` beyond INTEGER, and a list whose **comma-joined form** outgrows its
+    `VARCHAR(255)`. Every string loses NUL bytes (valid JSON, refused by
+    PostgreSQL). Each of these previewed cleanly and then failed the import.
+    `related_booking_ids` is fitted once more on insert, because this server's ids
+    can be longer than the file's.
   - **The file is memory-bound and upload-bound.** `json_decode` reads it whole, and
     PHP's `post_max_size` drops an oversized body without an error, which is why "no
     file received" names the upload limit as a likely cause.
@@ -1122,6 +1136,9 @@ debug panel for iterating without waiting for cron:
   review items 6, 15 buttons, 19): only the latest reload writes, write buttons
   are disabled while in flight, and a failed confirm-and-file reloads and
   remembers what it already did. No backend change. See "Frontend layout".
+- ✅ **Backups are bounded** (2026-11-12, review items 8 and 24): a file's text
+  is cut to what ingestion would store, and what cannot be cut refuses the file
+  at preview. No migration. See the backup decision in §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1898,8 +1915,7 @@ The patches, and one deliberate absence:
   re-add an explicit import (the build fails on it). Before v8 we needed one:
   the toast CSS only reached the bundle transitively, and when it stopped doing
   so the toast container lost `position: fixed` and every toast rendered
-  invisibly at the end of `<body>`. If toasts vanish again, check that first. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5
-  pins Vue 2 / `@nextcloud/vue ^8`; v6 dropped the peers and is Vue-3 clean).
+  invisibly at the end of `<body>`. If toasts vanish again, check that first.
 - **OCS URL helper must not encode path slashes.** `generateOcsUrl(url, params)`
   runs `encodeURIComponent` on every `{param}` (option `escape` defaults to
   `true`), so passing a multi-segment path as one param —
@@ -1909,14 +1925,17 @@ The patches, and one deliberate absence:
   `generateOcsUrl(\`apps/travelmanager/api/${path}\`)` (all our paths are
   app-controlled with numeric ids, so no escaping is needed). See `base()` in
   `src/api.ts`.
-- **`#[PasswordConfirmationRequired]` needs a frontend confirm step.** A method
-  marked `PasswordConfirmationRequired` (we use it on `SettingsController::update`,
-  which writes the IMAP app password) returns **403** unless the user re-confirmed
-  their password within the sudo window (~30 min; login counts, so it passes right
-  after sign-in then starts failing). Call **`await confirmPassword()`** from
-  `@nextcloud/password-confirmation` before the request (it only prompts when
-  needed; treat a rejection as the user cancelling). See `onSave()` in
-  `src/PersonalSettings.vue`.
+- **No password confirmation, anywhere — by decision** (2026-11-12). Saving the
+  IMAP password, importing a backup (even with "replace") and the data wipe all
+  rely on their own confirm dialog and on the OCS CSRF header
+  (`OCS-APIREQUEST`, which a cross-site request cannot set without a preflight).
+  `docs/code-review-2026-11-11.md` item 20 recommended adding
+  `#[PasswordConfirmationRequired]` to import and wipe; it was briefly done and
+  then removed, along with the one on the settings save and the
+  `@nextcloud/password-confirmation` dependency. Do not reintroduce it. If it
+  ever comes back: a marked method returns **403** outside the ~30-minute sudo
+  window, so the frontend must `await confirmPassword()` first, and the package
+  must be ^6 (v5 pins Vue 2 / `@nextcloud/vue ^8`).
 - **Native UI, not browser dialogs.** `@nextcloud/dialogs` is for **toasts only**
   (`showError`/`showSuccess`). For prompts/confirms use the **`NcDialog`**
   component (with `NcTextField`/`NcButton` in the `#actions` slot) controlled by a

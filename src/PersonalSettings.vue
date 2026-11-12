@@ -10,8 +10,6 @@ import NcSettingsSection from '@nextcloud/vue/components/NcSettingsSection'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { loadState } from '@nextcloud/initial-state'
 import { showError, showSuccess } from '@nextcloud/dialogs'
-import { confirmPassword } from '@nextcloud/password-confirmation'
-import '@nextcloud/password-confirmation/style.css'
 import { t } from '@nextcloud/l10n'
 import BackupSection from './BackupSection.vue'
 import LlmInfo from './LlmInfo.vue'
@@ -47,16 +45,6 @@ const securityOptions = ['ssl', 'tls', 'none']
 const saving = ref(false)
 
 const onSave = async () => {
-	// The update endpoint is PasswordConfirmationRequired (it writes the IMAP
-	// app password), so re-confirm the account password first — Nextcloud only
-	// prompts if the sudo window has lapsed. A rejection means the user
-	// dismissed the dialog, so just abort silently.
-	try {
-		await confirmPassword()
-	} catch (e) {
-		return
-	}
-
 	saving.value = true
 	try {
 		const payload = { ...form }
@@ -131,6 +119,9 @@ const onClearLogs = async () => {
 }
 
 const confirmWipe = async () => {
+	if (wiping.value) {
+		return
+	}
 	wiping.value = true
 	try {
 		await wipeData()

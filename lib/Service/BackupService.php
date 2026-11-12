@@ -6,6 +6,7 @@ namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Db\IngestionLog;
 use OCA\TravelManager\Db\ProcessedMessage;
 use OCA\TravelManager\Db\ProcessedMessageMapper;
@@ -317,10 +318,16 @@ class BackupService {
 
 	/** @param array<int, int> $bookingIds backup booking id => id on this server */
 	private function insertMessage(string $userId, BackupMessage $row, array $bookingIds): void {
-		$related = [];
+		// The file's list fits the column, but this server's ids can be longer
+		// than the exporting server's: keep what fits rather than fail the import.
+		$related = '';
 		foreach ($row->relatedBookingIds as $id) {
 			if (isset($bookingIds[$id])) {
-				$related[] = $bookingIds[$id];
+				$joined = $related === '' ? (string)$bookingIds[$id] : $related . ',' . $bookingIds[$id];
+				if (strlen($joined) > ColumnText::VARCHAR) {
+					break;
+				}
+				$related = $joined;
 			}
 		}
 
@@ -338,7 +345,7 @@ class BackupService {
 		$message->setAttempts($row->attempts);
 		$message->setFailureKind($row->failureKind);
 		$message->setIssueReasons($row->issueReasons === [] ? null : implode(',', $row->issueReasons));
-		$message->setRelatedBookingIds($related === [] ? null : implode(',', $related));
+		$message->setRelatedBookingIds($related === '' ? null : $related);
 		$message->setError($row->error);
 		$message->setLastResponse($row->lastResponse);
 		$message->setProcessedAt($this->toDateTime($row->processedAt));

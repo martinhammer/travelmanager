@@ -11,7 +11,6 @@ use OCA\TravelManager\Service\ConfigService;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
-use OCP\AppFramework\Http\Attribute\PasswordConfirmationRequired;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\AppFramework\OCS\OCSBadRequestException;
 use OCP\AppFramework\OCSController;
@@ -68,7 +67,6 @@ class SettingsController extends OCSController {
 	 * 400: Mailbox address refused; nothing was saved
 	 */
 	#[NoAdminRequired]
-	#[PasswordConfirmationRequired]
 	#[ApiRoute(verb: 'PUT', url: '/api/settings')]
 	public function update(
 		?bool $enabled = null,

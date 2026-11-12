@@ -246,6 +246,34 @@ final class BackupServiceTest extends TestCase {
 		$this->assertSame(['trips' => 1, 'bookings' => 1, 'messages' => 1], $report['imported']);
 	}
 
+	public function testRelatedIdsThatOutgrowTheColumnAreCutNotFatal(): void {
+		// 85 one- and two-digit ids fit the column; rewritten to this server's
+		// four-digit ids they would not, and the whole import would roll back.
+		$ids = range(1, 85);
+		$json = json_encode([
+			'format' => 'travelmanager-backup',
+			'formatVersion' => 1,
+			'appVersion' => '1.19.0',
+			'exportedAt' => '2026-11-05T10:00:00',
+			'includesEmailText' => true,
+			'trips' => [],
+			'bookings' => array_map(static fn (int $id): array => ['id' => $id, 'type' => 'flight', 'status' => 'active', 'reviewState' => 'draft'], $ids),
+			'messages' => [['mailbox' => 'INBOX', 'messageId' => '<a@x>', 'status' => 'related', 'attempts' => 1, 'discarded' => false, 'relatedBookingIds' => $ids]],
+		], JSON_THROW_ON_ERROR);
+		$this->assignIdsOnInsert();
+		$stored = null;
+		$this->messages->method('insert')->willReturnCallback(static function (ProcessedMessage $message) use (&$stored) {
+			$stored = $message;
+			return $message;
+		});
+
+		$this->service->import('bob', $json, false);
+
+		$related = (string)$stored?->getRelatedBookingIds();
+		$this->assertLessThanOrEqual(255, strlen($related));
+		$this->assertStringStartsWith('1000,1001,', $related);
+	}
+
 	public function testAWaitingEmailReturnsToTheQueue(): void {
 		$stored = $this->storedMessage();
 		$stored->setStatus(ProcessedMessage::STATUS_PROCESSING);

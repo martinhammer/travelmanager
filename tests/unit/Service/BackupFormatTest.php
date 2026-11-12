@@ -6,6 +6,7 @@ namespace Service;
 
 use OCA\TravelManager\Exception\InvalidBackupException;
 use OCA\TravelManager\Service\BackupFormat;
+use OCA\TravelManager\Service\MessageText;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -148,6 +149,59 @@ final class BackupFormatTest extends TestCase {
 
 		$this->expectException(InvalidBackupException::class);
 		$this->format->parse($this->encode($backup));
+	}
+
+	public function testAWaitingEmailIsCutToWhatIngestionWouldSend(): void {
+		// It goes to the model on the next tick, so it may be no longer than a
+		// freshly read email: MessageText::TOTAL bytes, marked as cut.
+		$backup = $this->backup();
+		$backup['messages'][0]['status'] = 'queued';
+		$backup['messages'][0]['bodyText'] = str_repeat('é', 40000);
+
+		$body = $this->format->parse($this->encode($backup))->messages[0]->bodyText;
+
+		$this->assertLessThanOrEqual(MessageText::TOTAL, strlen((string)$body));
+		$this->assertStringEndsWith(MessageText::TRUNCATED, (string)$body);
+	}
+
+	public function testAFinishedEmailFromBefore119KeepsItsText(): void {
+		// Bodies were cut at 20 000 characters then, which in a non-Latin script
+		// is more than TOTAL bytes; an honest export must restore unchanged.
+		$backup = $this->backup();
+		$backup['messages'][0]['bodyText'] = str_repeat('é', 20000);
+
+		$this->assertSame(str_repeat('é', 20000), $this->format->parse($this->encode($backup))->messages[0]->bodyText);
+	}
+
+	public function testAFinishedEmailIsCutToTotalCharacters(): void {
+		$backup = $this->backup();
+		$backup['messages'][0]['bodyText'] = str_repeat('x', MessageText::TOTAL + 1);
+
+		$body = (string)$this->format->parse($this->encode($backup))->messages[0]->bodyText;
+
+		$this->assertStringEndsWith(MessageText::TRUNCATED, $body);
+		$this->assertLessThan(MessageText::TOTAL + 20, mb_strlen($body));
+	}
+
+	public function testLongFreeTextIsCutRatherThanRefused(): void {
+		$backup = $this->backup();
+		$backup['messages'][0]['error'] = str_repeat('x', 30000);
+		$backup['messages'][0]['lastResponse'] = str_repeat('x', 30000);
+		$backup['trips'][0]['notes'] = str_repeat('x', 30000);
+
+		$parsed = $this->format->parse($this->encode($backup));
+
+		$this->assertSame(20000, mb_strlen((string)$parsed->messages[0]->error));
+		$this->assertSame(20000, mb_strlen((string)$parsed->messages[0]->lastResponse));
+		$this->assertSame(20000, mb_strlen((string)$parsed->trips[0]->notes));
+	}
+
+	public function testANulByteIsDroppedBeforeItReachesTheDatabase(): void {
+		// Valid JSON, and refused by PostgreSQL in the middle of the import.
+		$backup = $this->backup();
+		$backup['messages'][0]['subject'] = "Your\u{0}flight";
+
+		$this->assertSame('Yourflight', $this->format->parse($this->encode($backup))->messages[0]->subject);
 	}
 
 	public function testUnknownFieldsAreIgnored(): void {
@@ -299,6 +353,26 @@ final class BackupFormatTest extends TestCase {
 				$b['messages'][0]['discarded'] = 1;
 				return $b;
 			}, 'messages[0].discarded'],
+			'too many rows' => [static function (array $b) {
+				$b['messages'] = array_fill(0, 50001, []);
+				return $b;
+			}, 'messages: more than 50000 rows'],
+			'issue reasons too long to store' => [static function (array $b) {
+				$b['messages'][0]['issueReasons'] = array_fill(0, 20, 'repaired_json');
+				return $b;
+			}, 'messages[0].issueReasons: longer than 255 characters once joined'],
+			'related ids too long to store' => [static function (array $b) {
+				$b['messages'][0]['relatedBookingIds'] = range(1000000, 1000040);
+				return $b;
+			}, 'messages[0].relatedBookingIds'],
+			'details larger than an extraction could make' => [static function (array $b) {
+				$b['bookings'][0]['details'] = ['notes' => str_repeat('x', 100001)];
+				return $b;
+			}, 'bookings[0].details: larger than'],
+			'attempts beyond the column' => [static function (array $b) {
+				$b['messages'][0]['attempts'] = 2147483648;
+				return $b;
+			}, 'messages[0].attempts'],
 			'related ids are text' => [static function (array $b) {
 				$b['messages'][0]['relatedBookingIds'] = ['42'];
 				return $b;
