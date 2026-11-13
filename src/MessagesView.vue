@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
@@ -8,7 +8,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import { discardMessage, fetchMessageBody, retryMessage } from './api'
 import GridSortMenu from './GridSortMenu.vue'
-import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
+import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import {
 	type MessageSort,
 	MESSAGE_COLUMNS,
@@ -22,10 +22,27 @@ import {
 	unresolved,
 	sortMessages,
 } from './messages'
-import { isOpen, openDetail, route } from './navigation'
+import { isOpen, messagesList, openDetail, route } from './navigation'
 import { refusalMessage } from './backup'
 import { bookingsFromMessage } from './detail'
 import { bookings, loading, messages, reload } from './store'
+
+// Kept in navigation.ts, so the filter and the order survive a visit to
+// another view.
+const { filter, sort, direction } = messagesList
+
+// The filter is remembered across views, so it can hide the email just
+// opened, and its row is the only place its prompt and response are shown.
+// Opening it clears the filter; only on opening, as in BookingsView. Before
+// revealRoutedMessage, which needs the row to be there.
+watch(() => route.value.detail, (detail) => {
+	if (detail?.type === 'message'
+		&& filter.value !== 'all'
+		&& messages.value.some((m) => m.id === detail.id)
+		&& !filterMessagesByStatus(messages.value, filter.value).some((m) => m.id === detail.id)) {
+		filter.value = 'all'
+	}
+}, { immediate: true })
 
 /**
  * Open the row the route points at, and bring it into view.
@@ -52,8 +69,8 @@ const revealRoutedMessage = async (): Promise<void> => {
 	if (detail?.type !== 'message') {
 		return
 	}
-	// The row may not exist yet on a fresh mount, or may not exist at all if a
-	// filter excludes it — in which case there is nothing to reveal.
+	// The row may not exist yet on a fresh mount, or at all when the email is
+	// older than the list's page — in which case there is nothing to reveal.
 	await nextTick()
 	const row = rows.value?.querySelector<HTMLDetailsElement>(`details[data-message="${detail.id}"]`)
 	if (row === null || row === undefined) {
@@ -65,10 +82,6 @@ const revealRoutedMessage = async (): Promise<void> => {
 }
 
 onMounted(revealRoutedMessage)
-
-const filter = ref('all')
-const sort = ref<MessageSort>('received')
-const direction = ref<SortDirection>('desc')
 
 const visible = computed(() => sortMessages(
 	filterMessagesByStatus(messages.value, filter.value),

@@ -142,3 +142,20 @@ export const tripSummary = (tripId: number): string => {
 		t('travelmanager', '{n} booking(s)', { n: row.bookings.length }),
 	].filter(Boolean).join(' · ')
 }
+
+/**
+ * The Travel dates heading's tooltip, and the sort menu's description of it,
+ * on the Bookings and Trips grids alike: the ◆/▼/▲ marker is aria-hidden, and
+ * 'smart' is not something an arrow can say.
+ * @param direction the mode the column is sorted in
+ */
+export const travelSortLabel = (direction: 'smart' | 'asc' | 'desc'): string => {
+	switch (direction) {
+	case 'smart':
+		return t('travelmanager', 'Sorted from today: upcoming first, then past, most recent first')
+	case 'desc':
+		return t('travelmanager', 'Sorted by travel date, latest first')
+	case 'asc':
+		return t('travelmanager', 'Sorted by travel date, earliest first')
+	}
+}

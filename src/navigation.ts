@@ -1,7 +1,11 @@
 import { computed, ref, watch } from 'vue'
 import type { Booking, Message, Trip } from './api'
 import { findMessageBySourceId } from './api'
+import type { BookingSort, BookingSortDirection } from './bookings'
 import { monthOf } from './calendar'
+import type { SortDirection } from './grid'
+import type { MessageSort } from './messages'
+import type { TripSort, TripSortDirection } from './trips'
 import type { DetailType, Route } from './detail'
 import { byId, detailLabel, detailRoute, formatRoute, keepsView, matchRoute, parseRoute } from './detail'
 import { bookings, messages, trips } from './store'
@@ -26,6 +30,30 @@ export const route = ref<Route>(parseRoute(window.location.hash))
  * every visit to another view. Not in the hash: a reload still opens on today.
  */
 export const calendarMonth = ref(monthOf())
+
+/**
+ * Each list's filters and sort order, here for the same reason as
+ * calendarMonth: refs in the view went back to their defaults on every visit to
+ * another view.
+ */
+export const bookingsList = {
+	filter: ref('all'),
+	type: ref('all'),
+	// 'travel' in 'smart' mode: what is under way or coming up next, first.
+	sort: ref<BookingSort>('travel'),
+	direction: ref<BookingSortDirection>('smart'),
+}
+export const tripsList = {
+	filter: ref('all'),
+	// As on Bookings: under way or coming up first, then the past.
+	sort: ref<TripSort>('travel'),
+	direction: ref<TripSortDirection>('smart'),
+}
+export const messagesList = {
+	filter: ref('all'),
+	sort: ref<MessageSort>('received'),
+	direction: ref<SortDirection>('desc'),
+}
 
 /** Caption for the panel's back button, or null when there is nowhere to go back to. */
 export const backLabel = ref<string | null>(null)

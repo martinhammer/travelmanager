@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import ContentDuplicateIcon from 'vue-material-design-icons/ContentDuplicate.vue'
 import { t } from '@nextcloud/l10n'
 import {
 	type BookingSort,
-	type BookingSortDirection,
 	BOOKING_COLUMNS,
 	bookingSpan,
 	decodeHtmlEntities,
@@ -16,16 +15,45 @@ import {
 } from './bookings'
 import GridSortMenu from './GridSortMenu.vue'
 import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
-import { bookingStatusLabel, reviewStateLabel, typeName } from './labels'
-import { isOpen, openDetail } from './navigation'
+import { bookingStatusLabel, reviewStateLabel, travelSortLabel, typeName } from './labels'
+import { bookingsList, isOpen, openDetail, route } from './navigation'
 import { availableTypes, bookings, loading, tripColors, tripNames } from './store'
 
-// This view's own filter/sort state. 'travel' in 'smart' mode is the default:
-// what is under way or coming up next, first.
-const filter = ref('all')
-const type = ref('all')
-const sort = ref<BookingSort>('travel')
-const direction = ref<BookingSortDirection>('smart')
+// Kept in navigation.ts, so the filters and the order survive a visit to
+// another view.
+const { filter, type, sort, direction } = bookingsList
+
+// A remembered type whose last booking has gone would filter the list to
+// nothing, and with fewer than two types the chip row that could clear it is
+// hidden. Immediate, because that can happen while this view is not mounted.
+watch(availableTypes, (types) => {
+	if (type.value !== 'all' && !types.includes(type.value)) {
+		type.value = 'all'
+	}
+}, { immediate: true })
+
+// The filters are remembered across views, so they can hide the booking just
+// opened — from another view, or a link in the panel. Opening something
+// outranks a filter set earlier, so whichever filter hides it goes back to
+// all. Only on opening, never on a data change: confirming a draft while
+// filtered to drafts must not throw the queue back to "All" every time.
+watch(() => route.value.detail, (detail) => {
+	if (detail?.type !== 'booking') {
+		return
+	}
+	const shows = (reviewState: string, bookingType: string): boolean =>
+		filterBookings(bookings.value, reviewState, bookingType).some((b) => b.id === detail.id)
+	// Unknown (not loaded, or gone): nothing to judge, so nothing to undo.
+	if (!shows('all', 'all')) {
+		return
+	}
+	if (!shows(filter.value, 'all')) {
+		filter.value = 'all'
+	}
+	if (!shows('all', type.value)) {
+		type.value = 'all'
+	}
+}, { immediate: true })
 
 const filtered = computed(() => sortBookings(
 	filterBookings(bookings.value, filter.value, type.value),
@@ -58,14 +86,8 @@ const columns = BOOKING_COLUMNS.map((column) => ({ key: column.key, label: colum
 
 // The Travel dates heading cycles three modes, and the ▲/▼/◆ marker is
 // aria-hidden, so the heading says in words which one is applied.
-const travelModeLabels: Record<BookingSortDirection, string> = {
-	smart: t('travelmanager', 'Sorted from today: upcoming first, then past, most recent first'),
-	desc: t('travelmanager', 'Sorted by travel date, latest first'),
-	asc: t('travelmanager', 'Sorted by travel date, earliest first'),
-}
-
 const headingTitle = (column: BookingSort): string | undefined =>
-	column === 'travel' && sort.value === 'travel' ? travelModeLabels[direction.value] : undefined
+	column === 'travel' && sort.value === 'travel' ? travelSortLabel(direction.value) : undefined
 
 const onSortColumn = (column: BookingSort): void => {
 	direction.value = nextSortDirection(BOOKING_COLUMNS, column, sort.value, direction.value)

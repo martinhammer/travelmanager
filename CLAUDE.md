@@ -1163,7 +1163,9 @@ debug panel for iterating without waiting for cron:
   than its cell wraps to a second line instead of squeezing each lozenge's text
   onto two (a trip with five booking types on the Trips grid), and that grid's
   lozenge column shares the spare width with the name from a 340px floor, in
-  `fr` because each row is its own grid. No backend change.
+  `fr` because each row is its own grid. The three lists keep their filters and
+  sort order across view switches, as the calendar keeps its month, and Trips
+  sorts from today by default, as Bookings does. No backend change.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1513,9 +1515,22 @@ module and its stylesheet). Hold a fifth to the same bar.
   *not* unit-testable (§7). That is the trade for every view wording things
   identically. Keep decisions out of it — anything with a branch belongs in a
   pure module where it gets tested.
-- **Each view owns its own filter/sort refs.** Do not conflate view and filter
+- **Each view has its own filter and sort state.** Do not conflate view and filter
   again — the original single `filter` ref made "All bookings" a status and
-  "Trips" a view. All filtering/sorting is client-side and pure
+  "Trips" a view. **That state is not held in the view** (`bookingsList`/
+  `tripsList`/`messagesList` in `navigation.ts`, beside `calendarMonth`):
+  `App.vue` mounts one view at a time, so refs in the view went back to their
+  defaults on every visit to another (2026-11-13). Like the month, it survives
+  a view switch but not a reload. Two things that rely on a fresh "All" had to
+  be handled once it stopped being fresh: a remembered booking type whose last
+  booking is gone is reset (the chip that would clear it is hidden below two
+  types), and **opening a record a remembered filter hides clears that filter**,
+  in all three lists (a `watch` on `route.detail`). It fires on *opening* — from
+  a row, a link in the panel or another view — and never on a data change:
+  confirming a draft while filtered to Drafts must not throw the queue back to
+  All after every confirm. For Messages it also has to run before
+  `revealRoutedMessage`, since the row is the only place an email's prompt and
+  response are shown. All filtering/sorting is client-side and pure
   (`sortBookings`/`filterBookings`, `sortMessages`/`filterMessagesByStatus`,
   `sortTrips`/`filterTripsByPeriod`/`tripRows`, shared helpers in `src/grid.ts`).
 
@@ -1570,11 +1585,16 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
   not an arrow, because smart mode runs forward from today and then backward
   through the past, so any arrow misdescribes most of the list. The heading
   carries a `title` naming the mode, because the marker is `aria-hidden`. The
-  mode type is `BookingSortDirection`; `SortColumn` is generic over it so
-  Messages and Trips never see `'smart'`.
-- **`sortTrips('travel')` is the opposite call, on purpose**: a plain chronology,
-  because the Current/Future/Past chips already answer "what is coming up" and
-  re-ranking the column around today as well would fight them.
+  mode types are `BookingSortDirection` and `TripSortDirection`; `SortColumn`
+  is generic over them so Messages never sees `'smart'`. The tooltip wording is
+  shared, `travelSortLabel` in `labels.ts`.
+- **The Trips grid sorts the same way, and opens on it** (2026-11-13).
+  `sortTrips('travel', 'smart')` ranks by each row's own `period`, so the order
+  and the Current/Future/Past chips cannot disagree about what is past; undated
+  trips go last by name. It was a plain chronology before, on the argument that
+  the chips already answer "what is coming up" — but All is the view people
+  open on, and there the plain order put two years of past trips above the next
+  one.
 - **Trip dates and type lozenges are derived, never read from `trips.start_date`/
   `end_date`** (`tripRows`/`tripSpan` in `src/trips.ts`): the stored columns are
   user-entered and go stale the moment a booking is linked or unlinked, so the
@@ -1592,7 +1612,8 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
   because filing them under a period would make the period filters lie.
 - Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
   + `aria-sort`: grid ARIA would promise a table structure the markup does not
-  have. Sort state is a `sort` + `direction` ref per view; the `*_COLUMNS` array
+  have. Sort state is a `sort` + `direction` pair per view (held in
+  `navigation.ts`, see above); the `*_COLUMNS` array
   holds order and each column's default direction, and `nextSortDirection`
   implements "default on a new column, flip on the same one".
 - Column **labels live in the view SFC** as literal `t()` calls (extractable),
