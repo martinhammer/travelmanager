@@ -240,6 +240,43 @@ final class BookingServiceTest extends TestCase {
 		$this->assertSame([], $applied->related);
 	}
 
+	/**
+	 * Review item 14: the identifier lookup compared the stored column with
+	 * `IN`, so a rebooking whose dates left the ±14-day window was found only
+	 * if the model wrote its reference exactly as before.
+	 */
+	public function testARebookingOutsideTheWindowIsFoundThoughItsReferenceIsWrittenDifferently(): void {
+		$stored = $this->existing();
+		$stored->setBookingReference('ES867-772 590');
+		$stored->setConfirmationNumber(null);
+		$this->bookingMapper->method('findIdentifiers')->with('alice', 'flight')
+			->willReturn([12 => ['ES867-772 590', null], 13 => ['ZZZZZZZ', null]]);
+		// The window around 2026-10-01 does not reach the July booking, so only
+		// the identifier hit can bring it in.
+		$this->bookingMapper->expects($this->once())->method('findMatchCandidates')
+			->with('alice', 'flight', $this->anything(), $this->anything(), [12])
+			->willReturn([$stored]);
+		$this->bookingMapper->expects($this->never())->method('insert');
+
+		$rebooked = new ExtractedBooking('flight', 'KLM', 'es867772590', null, 'confirmed', 'AMS → SOU',
+			['segments' => [['departureLocal' => '2026-10-01T08:35:00']]], '2026-10-01T08:35:00', null, 0.9);
+		$applied = $this->service->applyExtraction('alice', '<m9@example.com>', [$rebooked]);
+
+		$this->assertSame(0, $applied->created);
+		$this->assertSame(12, $applied->related[0]->bookingId);
+	}
+
+	public function testWithoutAUsableIdentifierOnlyTheDateWindowIsAsked(): void {
+		// "N/A" normalises to nothing, so no stored identifier can be evidence.
+		$this->bookingMapper->expects($this->never())->method('findIdentifiers');
+		$this->bookingMapper->expects($this->once())->method('findMatchCandidates')
+			->with('alice', 'flight', $this->anything(), $this->anything(), [])
+			->willReturn([]);
+
+		$this->service->applyExtraction('alice', '<m10@example.com>', [new ExtractedBooking('flight', 'KLM', 'N/A', null, 'confirmed', 'AMS → SOU',
+			['segments' => [['departureLocal' => '2026-07-25T08:35:00']]], '2026-07-25T08:35:00', null, 0.9)]);
+	}
+
 	public function testAPossibleDuplicateIsStoredAndFlaggedRatherThanDropped(): void {
 		// Same airline, same day, but the two references disagree — evidence
 		// both ways. Suppressing would be the one irreversible mistake here.

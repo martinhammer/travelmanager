@@ -132,6 +132,37 @@ class BookingMapper extends QBMapper {
 	}
 
 	/**
+	 * Both identifiers of every booking this user has of one type, as stored.
+	 *
+	 * Only the two columns: comparing them is the matcher's job, after it has
+	 * normalised them (`ES867-772 590` is `es867772590`), and one person's
+	 * bookings of one type are a few hundred rows at most. The user/type prefix
+	 * of tm_book_user_type_start serves the lookup.
+	 *
+	 * @return array<int, array{0: ?string, 1: ?string}> id => [reference, confirmation number]
+	 */
+	public function findIdentifiers(string $userId, string $type): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'booking_reference', 'confirmation_number')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('type', $qb->createNamedParameter($type)))
+			->andWhere($qb->expr()->orX(
+				$qb->expr()->isNotNull('booking_reference'),
+				$qb->expr()->isNotNull('confirmation_number'),
+			));
+		$result = $qb->executeQuery();
+		/** @var list<array{id: string|int, booking_reference: ?string, confirmation_number: ?string}> $rows */
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		$identifiers = [];
+		foreach ($rows as $row) {
+			$identifiers[(int)$row['id']] = [$row['booking_reference'], $row['confirmation_number']];
+		}
+		return $identifiers;
+	}
+
+	/**
 	 * Existing bookings worth comparing an incoming extraction against.
 	 *
 	 * Deliberately a *candidate* query, not the decision: whether two bookings
@@ -143,11 +174,12 @@ class BookingMapper extends QBMapper {
 	 * Two ways in, because either alone would miss real duplicates:
 	 * - **the date window**, which catches a second email that labels the
 	 *   identifiers differently (or carries none at all);
-	 * - **a literal identifier hit**, which catches a change or rebooking email
-	 *   that moved the dates clean out of the window.
+	 * - **an identifier hit**, which catches a change or rebooking email that
+	 *   moved the dates clean out of the window. Those ids come from
+	 *   findIdentifiers, compared in PHP, because the columns hold identifiers
+	 *   as the model wrote them and SQL cannot strip punctuation portably.
 	 *
-	 * @param list<string> $identifiers reference/confirmation values to look for,
-	 *                                  raw as the model produced them
+	 * @param list<int> $ids bookings whose identifiers matched, whatever their dates
 	 * @return Booking[]
 	 */
 	public function findMatchCandidates(
@@ -155,7 +187,7 @@ class BookingMapper extends QBMapper {
 		string $type,
 		?\DateTime $startDate,
 		int $windowDays,
-		array $identifiers,
+		array $ids,
 	): array {
 		$qb = $this->db->getQueryBuilder();
 		$alternatives = [];
@@ -169,10 +201,8 @@ class BookingMapper extends QBMapper {
 			);
 		}
 
-		if ($identifiers !== []) {
-			$list = $qb->createNamedParameter($identifiers, IQueryBuilder::PARAM_STR_ARRAY);
-			$alternatives[] = $qb->expr()->in('booking_reference', $list);
-			$alternatives[] = $qb->expr()->in('confirmation_number', $list);
+		if ($ids !== []) {
+			$alternatives[] = $qb->expr()->in('id', $qb->createNamedParameter($ids, IQueryBuilder::PARAM_INT_ARRAY));
 		}
 
 		if ($alternatives === []) {

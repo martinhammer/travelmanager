@@ -101,14 +101,18 @@ class BookingService {
 	 * @return list<MatchCandidate>
 	 */
 	private function findCandidates(string $userId, ExtractedBooking $extracted, array $exclude = []): array {
-		$identifiers = [];
-		foreach ([$extracted->bookingReference, $extracted->confirmationNumber] as $value) {
-			if ($value !== null && $value !== '') {
-				$identifiers[] = $value;
-			}
-			$normalized = $this->matcher->normalizeIdentifier($value);
-			if ($normalized !== null) {
-				$identifiers[] = $normalized;
+		// Compared normalised, as the matcher compares them: the columns hold
+		// what the model wrote, so `ES867-772 590` stored would never equal an
+		// incoming `es867772590` in SQL, and a rebooking that moved the dates
+		// out of the window became a second draft. An identifier too short or
+		// generic to normalise is no evidence the matcher would use either.
+		$incoming = $this->matcher->identifierSet($extracted->bookingReference, $extracted->confirmationNumber);
+		$ids = [];
+		if ($incoming !== []) {
+			foreach ($this->bookingMapper->findIdentifiers($userId, $extracted->type) as $id => [$reference, $confirmation]) {
+				if (array_intersect($incoming, $this->matcher->identifierSet($reference, $confirmation)) !== []) {
+					$ids[] = $id;
+				}
 			}
 		}
 
@@ -117,7 +121,7 @@ class BookingService {
 			$extracted->type,
 			$this->toDateTime($extracted->startDate),
 			self::MATCH_WINDOW_DAYS,
-			array_values(array_unique($identifiers)),
+			$ids,
 		);
 
 		$rows = array_filter($rows, static fn (Booking $booking): bool => !in_array($booking->getId(), $exclude, true));

@@ -391,9 +391,17 @@ code follows the overrides.
   day** — a confirmation gives a 14:00 check-in and the reminder a bare date,
   which `normalizeDate` renders as 00:00. Local wall-clock throughout (V8), by
   comparing the stored strings, never timestamps. `BookingMapper::findMatchCandidates`
-  only fetches a **superset** (same type, within ±14 days, or a literal
-  identifier hit so a rebooking outside the window is still seen); it must never
-  encode the decision. The prompt was tightened in the same change — `provider`
+  only fetches a **superset** (same type, within ±14 days, or an identifier hit
+  so a rebooking outside the window is still seen); it must never encode the
+  decision. **Identifier hits are found in PHP, not SQL** (2026-11-12, review
+  item 14): the columns hold identifiers as the model wrote them, so an `IN`
+  never matched a stored `ES867-772 590` against an incoming `es867772590`, and
+  outside the window that rebooking became a second draft. `findIdentifiers`
+  returns both identifier columns of the user's bookings of that type,
+  `BookingService::findCandidates` normalises them with the matcher's own
+  `identifierSet`, and the hits go to `findMatchCandidates` as ids. Storing a
+  normalised column was rejected: a migration and backfill, and the matcher's
+  rule copied into the schema, to save scanning a few hundred rows. The prompt was tightened in the same change — `provider`
   is defined as the operator that delivers the service, the agency belongs in the
   per-type detail field, and a lone identifier goes in `booking_reference` — but
   the matcher must keep tolerating both readings regardless: the wording only
@@ -1139,6 +1147,9 @@ debug panel for iterating without waiting for cron:
 - ✅ **Backups are bounded** (2026-11-12, review items 8 and 24): a file's text
   is cut to what ingestion would store, and what cannot be cut refuses the file
   at preview. No migration. See the backup decision in §3.
+- ✅ **A rebooking is found whatever its punctuation** (2026-11-12, review item
+  14): identifier hits outside the date window are compared normalised, in
+  PHP. No migration. See the matcher decision in §3.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
