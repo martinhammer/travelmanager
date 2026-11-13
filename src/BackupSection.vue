@@ -182,7 +182,7 @@ const onDownloadReport = () => {
 			{{ t('travelmanager', 'The backup file is not encrypted, and holds your travel details in plain text. Store it somewhere safe.') }}
 		</NcNoteCard>
 		<NcCheckboxRadioSwitch v-model="includeEmailText">
-			{{ t('travelmanager', 'Include email text and model responses') }}
+			{{ t('travelmanager', 'Include email text, processed attachments, and model responses') }}
 		</NcCheckboxRadioSwitch>
 		<p v-if="!includeEmailText" :class="$style.hint">
 			{{ t('travelmanager', 'The file will be smaller and less sensitive, but messages restored from it cannot be retried. Subjects and senders are still included.') }}
