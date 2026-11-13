@@ -33,7 +33,9 @@ const decodeOnce = (value: string): string => {
 	return value.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (match, ref: string): string => {
 		if (ref[0] === '#') {
 			const codePoint = ref[1]?.toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10)
-			return Number.isNaN(codePoint) ? match : String.fromCodePoint(codePoint)
+			// fromCodePoint throws above U+10FFFF, and this runs inside every
+			// label, so one bad reference would take down the view reading it.
+			return Number.isNaN(codePoint) || codePoint > 0x10FFFF ? match : String.fromCodePoint(codePoint)
 		}
 		const decoded = NAMED_ENTITIES[ref.toLowerCase()]
 		return decoded ?? match
@@ -321,7 +323,9 @@ const byDateDesc = (a: string | null, b: string | null): number => {
 const sortValue = (item: Booking, sort: BookingSort, tripNames: TripNames): string | null => {
 	switch (sort) {
 	case 'title':
-		return item.title?.toLowerCase() || null
+		// The decoded title, which is what the row shows: "&#39;" must sort as
+		// the apostrophe it is displayed as.
+		return item.title ? decodeHtmlEntities(item.title).toLowerCase() : null
 	case 'trip':
 		// Sorts on the name shown, not the id: an unlinked booking has no value
 		// at all and sinks, rather than sorting as "trip zero".

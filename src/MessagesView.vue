@@ -291,7 +291,7 @@ const onDiscard = (id: number, discarded: boolean) => whileInFlight(id, async ()
 						<!-- No metadata repeated here: the grid row above already carries
 						     From/dates/attempts. What the body adds is what does not fit a
 						     column — why it failed, and the retry. -->
-						<NcNoteCard v-for="(notice, i) in messageNotices(item, bookingsFromMessage(bookings, item))"
+						<NcNoteCard v-for="(notice, i) in messageNotices(item, bookingsFromMessage(bookings, item), bookings)"
 							:key="i"
 							class="tm-notice"
 							:type="notice.type"

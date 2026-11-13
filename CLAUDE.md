@@ -571,8 +571,13 @@ code follows the overrides.
     - **No navigation counter.** The month summary and the filter chip cover it;
       the nav is the one place a number costs attention on every screen.
   - **The Messages row banner shows on every email of a group**, derived from
-    that run's booking carrying a group id (`messageNotices(message, created)`),
-    not from the message's own columns. It was briefly on the last email only —
+    that run's booking having a partner left to compare with
+    (`messageNotices(message, created, allBookings)` → `hasPossibleDuplicate`,
+    the Bookings grid's rule), not from the message's own columns. It used to
+    test the group id alone, so it outlived the comparison: once the other
+    booking was discarded or archived the id stayed, the sidebar listed nobody,
+    and the banner asked for a task that could no longer be done (2026-11-13,
+    review item 18). It was briefly on the last email only —
     under the edge model that was the one booking carrying the edge — but group
     membership is symmetric, and which email arrived second is an accident of
     order the reader cannot see. The wording says a booking *may be the same as*
@@ -1150,6 +1155,15 @@ debug panel for iterating without waiting for cron:
 - ✅ **A rebooking is found whatever its punctuation** (2026-11-12, review item
   14): identifier hits outside the date window are compared normalised, in
   PHP. No migration. See the matcher decision in §3.
+- ✅ **Small display fixes** (2026-11-13, review items 16, 17, 18, 23, 28):
+  grid headings no longer sit at the 34px button floor and their margin applies,
+  booking titles are decoded on the grid, in the sort and on the back button, the
+  duplicate banner follows the grid's rule, the calendar keeps its month across
+  views, and an out-of-range entity no longer throws. Also: a badge strip wider
+  than its cell wraps to a second line instead of squeezing each lozenge's text
+  onto two (a trip with five booking types on the Trips grid), and that grid's
+  lozenge column shares the spare width with the name from a 340px floor, in
+  `fr` because each row is its own grid. No backend change.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1401,9 +1415,12 @@ and the wording lives in `labels.ts`.
 - Week start and day/month names come from `@nextcloud/l10n` (`getFirstDay`,
   `getDayNamesMin`, `getMonthNames`), so a Sunday-first locale is right for free;
   `calendar.ts` takes `firstDay` as a **parameter** so it stays pure and tested.
-- The displayed month is a component ref, **not** in the hash. It survives view
-  switches (the module stays mounted) but not a reload — deliberate for now; put
-  it in the route if month links ever need sharing.
+- The displayed month is **`calendarMonth` in `navigation.ts`**, not a
+  component ref and **not** in the hash. `App.vue` mounts one view at a time
+  (`v-if`), so a ref inside `CalendarView` went back to today on every visit to
+  another view; a module-level ref survives the switch but not a reload —
+  deliberate for now; put it in the route if month links ever need sharing
+  (2026-11-13, review item 23).
 - **On a phone the toolbar still fits on one line** (`@container tm-cal
   (max-width: 420px)`): the month heading steps down to 1.25rem and **Today**
   shows only its `CalendarToday` icon. The button always carries the icon and an
@@ -1902,7 +1919,11 @@ The patches, and one deliberate absence:
   widest step had too many cells, wrapped onto extra lines and sat over the
   wrong columns. The hide rules are now **`.columns.columns > …`** (0,3,0). It is
   the same chunk-order trap as `.tm-notice.tm-notice`: win on specificity,
-  never on order.
+  never on order. **So never double `.tm-column-heading`'s main rule**: at
+  (0,3,0) it ties the hide rules and wins on order again. The heading's
+  `min-height: 0` and negative margin, which have to beat the server's (0,2,1)
+  button rules, sit in a doubled rule of their own that sets no `display`
+  (2026-11-13, review item 16).
 - **Verify CSS against the server's own stylesheets, not just its variables.**
   A harness that defines `--color-*` and `--default-clickable-area` but omits
   `core/css/inputs.css` will happily measure a design that the real page does not

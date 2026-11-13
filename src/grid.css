@@ -56,10 +56,16 @@
 	padding: 2px 8px;
 	border-radius: var(--border-radius-pill);
 	background-color: var(--color-background-dark);
+	/* A lozenge is one word or phrase; broken over two lines it reads as two. */
+	white-space: nowrap;
 }
 
+/* Wraps, so a strip wider than its cell — a trip with five booking types in
+   the Trips grid's fixed column — moves its last lozenges to a second line.
+   Without it they shrank instead and each broke its own text ("Car / rental"). */
 .tm-badges {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 4px;
 	flex-shrink: 0;
 }
@@ -132,10 +138,6 @@
 	min-width: 0;
 	overflow: hidden;
 	height: auto;
-	/* Padded so the hover highlight reads as a target rather than a bare strip,
-	   pulled back by the same amount so the label still sits on its column's
-	   left edge, over the values below it. */
-	margin: 0 -8px;
 	padding: 6px 8px;
 	border: none;
 	border-radius: var(--border-radius);
@@ -147,6 +149,20 @@
 	color: var(--color-text-maxcontrast);
 	text-align: start;
 	cursor: pointer;
+}
+
+/* Only these two, in a rule of their own with the class doubled: the server
+   floors every button at the clickable area (34px, taller than the row beneath)
+   and sets its margin with a (0,2,1) rule, which outranked the (0,2,0) above, so
+   the negative margin never applied. Kept apart because the view modules hide
+   columns with (0,3,0) rules: a doubled `display` here would tie them and, as
+   grid.css lands later, win, and the headings would stop hiding. */
+.tm-grid-header .tm-column-heading.tm-column-heading {
+	min-height: 0;
+	/* Padded so the hover highlight reads as a target rather than a bare strip,
+	   pulled back by the same amount so the label still sits on its column's
+	   left edge, over the values below it. */
+	margin: 0 -8px;
 }
 
 /* :focus and :active are included to defeat the server's own blue button
@@ -596,9 +612,8 @@
 		row-gap: 2px;
 	}
 
-	/* Badges wrap rather than widening their column, and hug the card's end. */
+	/* Badges hug the card's end (they wrap at every width; see .tm-badges). */
 	.tm-row-summary .tm-badges {
-		flex-wrap: wrap;
 		justify-content: flex-end;
 	}
 

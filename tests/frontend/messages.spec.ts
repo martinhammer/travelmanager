@@ -14,11 +14,13 @@ import {
 } from '../../src/messages'
 
 // Only the fields messageNotices reads; the rest of a Booking is irrelevant here.
-const asBooking = (id: number, duplicateGroupId: number | null): Booking =>
-	({ id, duplicateGroupId }) as Booking
+const asBooking = (id: number, duplicateGroupId: number | null, reviewState: Booking['reviewState'] = 'draft'): Booking =>
+	({ id, duplicateGroupId, reviewState }) as Booking
 
 const groupedBooking = asBooking(2, 1)
 const ungroupedBooking = asBooking(1, null)
+// The other member of groupedBooking's group, from another email.
+const partner = asBooking(1, 1)
 
 const message = (overrides: Partial<Message> = {}): Message => ({
 	id: 1,
@@ -161,7 +163,7 @@ describe('messageNotices', () => {
 		// Read off the booking, not the message: the matcher kept the booking
 		// rather than suppress it on ambiguous evidence, and the group is what the
 		// user has to settle.
-		const notices = messageNotices(message(), [groupedBooking])
+		const notices = messageNotices(message(), [groupedBooking], [partner, groupedBooking])
 		expect(notices).toHaveLength(1)
 		expect(notices[0].type).toBe('warning')
 		expect(notices[0].text).toContain('may be the same')
@@ -170,7 +172,14 @@ describe('messageNotices', () => {
 	it('warns on every email of a group, not only the one that arrived last', () => {
 		// Group membership is symmetric, and which email came second is an
 		// accident of arrival order the reader cannot see.
-		expect(messageNotices(message(), [asBooking(1, 1)])).toHaveLength(1)
+		expect(messageNotices(message(), [partner], [partner, groupedBooking])).toHaveLength(1)
+	})
+
+	it('stops asking for a comparison once the other booking is put away', () => {
+		// The group id stays on both rows, but the sidebar lists no partner, so
+		// the warning would be a task the user can no longer finish.
+		const archived = asBooking(1, 1, 'archived')
+		expect(messageNotices(message(), [groupedBooking], [archived, groupedBooking])).toEqual([])
 	})
 
 	it('says nothing for an email whose booking is in no group', () => {

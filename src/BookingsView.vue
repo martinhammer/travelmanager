@@ -9,6 +9,7 @@ import {
 	type BookingSortDirection,
 	BOOKING_COLUMNS,
 	bookingSpan,
+	decodeHtmlEntities,
 	filterBookings,
 	hasPossibleDuplicate,
 	sortBookings,
@@ -163,7 +164,7 @@ const filters: { key: string, label: string }[] = [
 						<button type="button"
 							class="tm-cell-text tm-open-link"
 							@click.stop.prevent="openDetail('booking', item.id)">
-							{{ item.title || typeName(item.type) }}
+							{{ item.title ? decodeHtmlEntities(item.title) : typeName(item.type) }}
 						</button>
 						<ContentDuplicateIcon v-if="hasPossibleDuplicate(bookings, item)"
 							:class="$style.duplicate"

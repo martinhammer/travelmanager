@@ -1,4 +1,5 @@
 import type { Booking, Message, Trip } from './api'
+import { decodeHtmlEntities } from './bookings'
 
 /**
  * Addressing and cross-entity lookups for the detail sidebar.
@@ -202,9 +203,9 @@ export const byId = <T extends { id: number }>(items: T[], id: number): T | null
 export const detailLabel = (type: DetailType, item: Booking | Trip | Message): string => {
 	switch (type) {
 	case 'booking':
-		return (item as Booking).title || (item as Booking).type
+		return decodeHtmlEntities((item as Booking).title || (item as Booking).type)
 	case 'trip':
-		return (item as Trip).name
+		return decodeHtmlEntities((item as Trip).name)
 	case 'message':
 		return (item as Message).subject || (item as Message).messageId
 	}

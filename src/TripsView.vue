@@ -138,11 +138,16 @@ const onNewTrip = () => openTripEditor(null)
 </template>
 
 <style module>
-/* Name | Type | Travel dates | booking lozenges. The name takes the stretch;
-   Type needs only its one word, and the lozenge strip a generous fixed width
-   since its count varies with the trip's booking types. */
+/* Name | Type | Travel dates | booking lozenges. Type needs only its one word.
+   The name and the lozenge strip share what is left equally: trip names are
+   short, while a trip with four or five booking types needs more than the
+   340px floor, and a fixed strip wrapped it onto a second line beside a name
+   column that was mostly empty. Shares in fr, never max-content: every row is
+   its own grid, so a content-sized column would differ per row and the columns
+   would stop lining up. Below ~1100px the strip sits at its floor and the
+   name gets the rest, as before. */
 .columns {
-	grid-template-columns: minmax(0, 1fr) 110px 190px 340px;
+	grid-template-columns: minmax(0, 1fr) 110px 190px minmax(340px, 1fr);
 }
 
 /* Steps follow the space the grid has, not the window — see the note in

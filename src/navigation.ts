@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import type { Booking, Message, Trip } from './api'
 import { findMessageBySourceId } from './api'
+import { monthOf } from './calendar'
 import type { DetailType, Route } from './detail'
 import { byId, detailLabel, detailRoute, formatRoute, keepsView, matchRoute, parseRoute } from './detail'
 import { bookings, messages, trips } from './store'
@@ -18,6 +19,13 @@ import { bookings, messages, trips } from './store'
  */
 
 export const route = ref<Route>(parseRoute(window.location.hash))
+
+/**
+ * The month the calendar shows. Here rather than in CalendarView, because App.vue
+ * mounts one view at a time (`v-if`) and a component ref went back to today on
+ * every visit to another view. Not in the hash: a reload still opens on today.
+ */
+export const calendarMonth = ref(monthOf())
 
 /** Caption for the panel's back button, or null when there is nowhere to go back to. */
 export const backLabel = ref<string | null>(null)
