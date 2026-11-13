@@ -17,6 +17,7 @@ use OCA\TravelManager\Service\IngestionLogger;
 use OCA\TravelManager\Service\IngestionService;
 use OCA\TravelManager\Service\UserSettings;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\DB\Exception as DbException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -235,18 +236,105 @@ final class IngestionServiceTest extends TestCase {
 		$this->assertSame(['<older@example.com>', '<newer@example.com>'], $inserted);
 	}
 
+	public function testOneMessageThatCannotBeStoredDoesNotStopTheRest(): void {
+		// It is not written, so it is tried again next run; everything after it
+		// in the window is stored now, and the queue still gets its turn.
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			$this->message('<broken@example.com>'),
+			$this->message('<fine@example.com>'),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+		$inserted = [];
+		$this->processedMessageMapper->method('insert')
+			->willReturnCallback(static function (ProcessedMessage $m) use (&$inserted): ProcessedMessage {
+				if ($m->getMessageId() === '<broken@example.com>') {
+					throw new \RuntimeException('Data too long for column');
+				}
+				$inserted[] = $m->getMessageId();
+				return $m;
+			});
+		$this->queue->expects($this->once())->method('pump');
+
+		$this->assertSame(1, $this->service->ingestForUser('alice'));
+		$this->assertSame(['<fine@example.com>'], $inserted);
+	}
+
+	public function testAMessageAnotherReadStoredFirstIsSkippedQuietly(): void {
+		// Cron and "Read mailbox now" can both pass the dedup check; the second
+		// insert then hits the unique key, which means the message *is* stored.
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([$this->message('<raced@example.com>')]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+		$duplicate = $this->createMock(DbException::class);
+		$duplicate->method('getReason')->willReturn(DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION);
+		$this->processedMessageMapper->method('insert')->willThrowException($duplicate);
+		$this->queue->expects($this->once())->method('pump');
+
+		$this->assertSame(0, $this->service->ingestForUser('alice'));
+	}
+
+	public function testThePdfBreadcrumbIsClearedOnceTheMessageIsStoredOrHasFailed(): void {
+		$this->configureUser();
+		$this->imapClient->method('fetchRecent')->willReturn([
+			$this->message('<stored@example.com>'),
+			$this->message('<failed@example.com>'),
+		]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+		$this->processedMessageMapper->method('insert')
+			->willReturnCallback(static function (ProcessedMessage $m): ProcessedMessage {
+				if ($m->getMessageId() === '<failed@example.com>') {
+					throw new \RuntimeException('connection lost');
+				}
+				return $m;
+			});
+		// A failure PHP survived is not the crash the breadcrumb guards against.
+		$this->attachments->expects($this->exactly(2))->method('finish')->with('alice');
+
+		$this->service->ingestForUser('alice');
+	}
+
+	public function testEmailTextIsFittedToItsColumns(): void {
+		$this->configureUser();
+		$message = new ImapMessage(
+			'<long@example.com>', 1, 1, str_repeat('Itinerary ', 40), new \DateTimeImmutable(), "Body\0 text",
+		);
+		$this->imapClient->method('fetchRecent')->willReturn([$message]);
+		$this->processedMessageMapper->method('isProcessed')->willReturn(false);
+
+		$this->processedMessageMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (ProcessedMessage $m) => mb_strlen((string)$m->getSubject()) === 255
+				&& $m->getBodyText() === 'Body text'));
+
+		$this->service->ingestForUser('alice');
+	}
+
 	public function testRetryQueuesTheMessageAndGivesTheQueueAChance(): void {
 		$record = $this->storedMessage(ProcessedMessage::STATUS_FAILED);
 		$record->setDiscarded(true);
 		$this->processedMessageMapper->method('find')->willReturn($record);
 
+		// One conditional statement, from the status this request read; no
+		// second write a pump could be overwritten by.
 		$this->processedMessageMapper->expects($this->once())
-			->method('update')
-			->with($this->callback(static fn (ProcessedMessage $m) => $m->getStatus() === ProcessedMessage::STATUS_QUEUED
-				&& $m->getError() === null
-				&& $m->getDiscarded() === false));
+			->method('requeueForRetry')
+			->with(7, 'alice', ProcessedMessage::STATUS_FAILED, $this->isInstanceOf(\DateTime::class))
+			->willReturn(true);
+		$this->processedMessageMapper->expects($this->never())->method('update');
 		$this->queue->expects($this->once())->method('pump');
 
+		$this->service->retryMessage('alice', 7);
+	}
+
+	public function testASecondRetryThatLostTheRaceIsRefused(): void {
+		// Both requests read `failed`; the other one's requeue landed first.
+		$this->processedMessageMapper->method('find')->willReturn($this->storedMessage(ProcessedMessage::STATUS_FAILED));
+		$this->processedMessageMapper->method('requeueForRetry')->willReturn(false);
+		$this->queue->expects($this->never())->method('pump');
+
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('already waiting');
 		$this->service->retryMessage('alice', 7);
 	}
 
@@ -262,7 +350,7 @@ final class IngestionServiceTest extends TestCase {
 		// A second attempt while the first is out would put two tasks in flight
 		// for one email, and whichever answered last would win.
 		$this->processedMessageMapper->method('find')->willReturn($this->storedMessage($status));
-		$this->processedMessageMapper->expects($this->never())->method('update');
+		$this->processedMessageMapper->expects($this->never())->method('requeueForRetry');
 		$this->queue->expects($this->never())->method('pump');
 
 		$this->expectException(\RuntimeException::class);

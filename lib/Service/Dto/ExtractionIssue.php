@@ -21,6 +21,12 @@ class ExtractionIssue {
 	public const REASON_MISSING_DEPARTURE = 'missing_departure';
 	public const REASON_MISSING_PICKUP = 'missing_pickup';
 	public const REASON_MISSING_CHECKIN = 'missing_checkin';
+	/**
+	 * Part of the response was cut off or could not be read, so bookings may be
+	 * missing that the model did return. Counted as a drop: which ones, and how
+	 * many, is unknown, and a retry is the way to get them.
+	 */
+	public const REASON_INCOMPLETE_JSON = 'incomplete_json';
 	// Partial loss: the booking survived, but part of it did not.
 	public const REASON_PARTIAL_SEGMENTS = 'partial_segments';
 	/**

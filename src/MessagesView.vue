@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
@@ -8,7 +8,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { t } from '@nextcloud/l10n'
 import { discardMessage, fetchMessageBody, retryMessage } from './api'
 import GridSortMenu from './GridSortMenu.vue'
-import { type SortDirection, formatTimestamp, nextSortDirection, sortMarker } from './grid'
+import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import {
 	type MessageSort,
 	MESSAGE_COLUMNS,
@@ -22,9 +22,27 @@ import {
 	unresolved,
 	sortMessages,
 } from './messages'
-import { isOpen, openDetail, route } from './navigation'
+import { isOpen, messagesList, openDetail, route } from './navigation'
+import { refusalMessage } from './backup'
 import { bookingsFromMessage } from './detail'
 import { bookings, loading, messages, reload } from './store'
+
+// Kept in navigation.ts, so the filter and the order survive a visit to
+// another view.
+const { filter, sort, direction } = messagesList
+
+// The filter is remembered across views, so it can hide the email just
+// opened, and its row is the only place its prompt and response are shown.
+// Opening it clears the filter; only on opening, as in BookingsView. Before
+// revealRoutedMessage, which needs the row to be there.
+watch(() => route.value.detail, (detail) => {
+	if (detail?.type === 'message'
+		&& filter.value !== 'all'
+		&& messages.value.some((m) => m.id === detail.id)
+		&& !filterMessagesByStatus(messages.value, filter.value).some((m) => m.id === detail.id)) {
+		filter.value = 'all'
+	}
+}, { immediate: true })
 
 /**
  * Open the row the route points at, and bring it into view.
@@ -51,8 +69,8 @@ const revealRoutedMessage = async (): Promise<void> => {
 	if (detail?.type !== 'message') {
 		return
 	}
-	// The row may not exist yet on a fresh mount, or may not exist at all if a
-	// filter excludes it — in which case there is nothing to reveal.
+	// The row may not exist yet on a fresh mount, or at all when the email is
+	// older than the list's page — in which case there is nothing to reveal.
 	await nextTick()
 	const row = rows.value?.querySelector<HTMLDetailsElement>(`details[data-message="${detail.id}"]`)
 	if (row === null || row === undefined) {
@@ -64,10 +82,6 @@ const revealRoutedMessage = async (): Promise<void> => {
 }
 
 onMounted(revealRoutedMessage)
-
-const filter = ref('all')
-const sort = ref<MessageSort>('received')
-const direction = ref<SortDirection>('desc')
 
 const visible = computed(() => sortMessages(
 	filterMessagesByStatus(messages.value, filter.value),
@@ -135,7 +149,28 @@ const onRawMessageToggle = async (id: number, event: Event) => {
 	}
 }
 
-const onRetry = async (id: number) => {
+// Rows with a request in flight. `retryable` reads the status as loaded, which
+// stays `failed` until the reload after the retry lands, so without this a
+// second click sent a second retry. The server refuses that one now, but the
+// button should not offer it. Discard shares the set: one change at a time per
+// row, and a retry clears the discard anyway.
+const inFlight = ref<Set<number>>(new Set())
+
+const whileInFlight = async (id: number, work: () => Promise<void>): Promise<void> => {
+	if (inFlight.value.has(id)) {
+		return
+	}
+	inFlight.value = new Set(inFlight.value).add(id)
+	try {
+		await work()
+	} finally {
+		const rest = new Set(inFlight.value)
+		rest.delete(id)
+		inFlight.value = rest
+	}
+}
+
+const onRetry = (id: number) => whileInFlight(id, async () => {
 	try {
 		await retryMessage(id)
 		// The model answers asynchronously, so the row will not settle until a
@@ -143,11 +178,17 @@ const onRetry = async (id: number) => {
 		showSuccess(t('travelmanager', 'Extraction re-scheduled — refresh in a moment to see the result'))
 		await reload()
 	} catch (e) {
-		showError(t('travelmanager', 'Could not re-run the extraction'))
+		// A refusal says why (another tab already retried it, say), and means
+		// the row on screen is out of date.
+		const refusal = refusalMessage(e)
+		showError(refusal ?? t('travelmanager', 'Could not re-run the extraction'))
+		if (refusal !== null) {
+			await reload()
+		}
 	}
-}
+})
 
-const onDiscard = async (id: number, discarded: boolean) => {
+const onDiscard = (id: number, discarded: boolean) => whileInFlight(id, async () => {
 	try {
 		await discardMessage(id, discarded)
 		// Names where it went, because the row does not move: with the default
@@ -160,7 +201,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 	} catch (e) {
 		showError(t('travelmanager', 'Could not update this message'))
 	}
-}
+})
 </script>
 
 <template>
@@ -263,7 +304,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 						<!-- No metadata repeated here: the grid row above already carries
 						     From/dates/attempts. What the body adds is what does not fit a
 						     column — why it failed, and the retry. -->
-						<NcNoteCard v-for="(notice, i) in messageNotices(item, bookingsFromMessage(bookings, item))"
+						<NcNoteCard v-for="(notice, i) in messageNotices(item, bookingsFromMessage(bookings, item), bookings)"
 							:key="i"
 							class="tm-notice"
 							:type="notice.type"
@@ -308,7 +349,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 							     than one that greys out with a reason. -->
 							<NcButton v-if="item.canRetry"
 								variant="secondary"
-								:disabled="!retryable(item)"
+								:disabled="!retryable(item) || inFlight.has(item.id)"
 								@click="onRetry(item.id)">
 								{{ t('travelmanager', 'Retry extraction') }}
 							</NcButton>
@@ -324,6 +365,7 @@ const onDiscard = async (id: number, discarded: boolean) => {
 							     `unresolved`, which is about the status alone. -->
 							<NcButton v-if="unresolved(item)"
 								variant="secondary"
+								:disabled="inFlight.has(item.id)"
 								@click="onDiscard(item.id, !item.discarded)">
 								{{ item.discarded
 									? t('travelmanager', 'Restore')

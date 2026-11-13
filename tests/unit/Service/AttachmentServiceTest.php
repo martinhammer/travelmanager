@@ -114,7 +114,10 @@ final class AttachmentServiceTest extends TestCase {
 		$config = $this->createMock(ConfigService::class);
 		$config->method('isPdfAttachmentsEnabled')->willReturn(true);
 		$config->method('getPdfReading')->with('alice')->willReturn('<ticket@example.com>');
-		$config->expects($this->once())->method('setPdfReading')->with('alice', null);
+		$cleared = [];
+		$config->method('setPdfReading')->willReturnCallback(static function (string $userId, ?string $messageId) use (&$cleared): void {
+			$cleared[] = $messageId;
+		});
 		$service = new AttachmentService($this->imapClient, $this->reader, $config, $this->createMock(IngestionLogger::class));
 		$this->imapClient->expects($this->never())->method('fetchParts');
 		$this->reader->expects($this->never())->method('read');
@@ -122,6 +125,11 @@ final class AttachmentServiceTest extends TestCase {
 		$text = $service->read('alice', self::connection(), self::message([self::ref('2')]));
 
 		$this->assertSame([AttachmentRecord::OUTCOME_CRASHED], self::outcomes($text));
+		// Still set until the message is stored: if storing dies too, the next
+		// run must skip these files again rather than read them.
+		$this->assertSame([], $cleared);
+		$service->finish('alice');
+		$this->assertSame([null], $cleared);
 	}
 
 	public function testABreadcrumbForAnotherMessageIsNotThisOnesConcern(): void {
@@ -132,7 +140,7 @@ final class AttachmentServiceTest extends TestCase {
 		$this->assertSame([AttachmentRecord::OUTCOME_READ], self::outcomes($this->read([self::ref('2')])));
 	}
 
-	public function testTheBreadcrumbIsSetWhileReadingAndClearedAfter(): void {
+	public function testTheBreadcrumbIsSetWhileReadingAndClearedOnlyByFinish(): void {
 		$this->imapClient->method('fetchParts')->willReturn(['2' => '%PDF']);
 		$this->reader->method('read')->willReturnCallback(function (): PdfText {
 			$this->assertSame(['<ticket@example.com>'], $this->breadcrumbs, 'set before reading');
@@ -141,21 +149,42 @@ final class AttachmentServiceTest extends TestCase {
 
 		$this->read([self::ref('2')]);
 
+		// A fatal error between reading and storing the row must still leave it.
+		$this->assertSame(['<ticket@example.com>'], $this->breadcrumbs);
+		$this->service->finish('alice');
 		$this->assertSame(['<ticket@example.com>', null], $this->breadcrumbs);
 	}
 
-	public function testTheBreadcrumbIsClearedWhenAReadThrows(): void {
+	public function testAReadThatThrowsIsAFailureAndFinishStillClears(): void {
 		$this->imapClient->method('fetchParts')->willReturn(['2' => '%PDF']);
 		$this->reader->method('read')->willThrowException(new \Error('deep in a decoder'));
 
 		$text = $this->read([self::ref('2')]);
+		$this->service->finish('alice');
 
 		$this->assertSame([AttachmentRecord::OUTCOME_FAILED], self::outcomes($text));
 		$this->assertSame(['<ticket@example.com>', null], $this->breadcrumbs);
 	}
 
+	public function testFinishWritesNothingWhenNoPdfWasRead(): void {
+		$this->read([]);
+		$this->service->finish('alice');
+
+		$this->assertSame([], $this->breadcrumbs);
+	}
+
+	public function testTheListedSizeIsAlreadyTheDecodedEstimate(): void {
+		// Horde scales a base64 part's size by 3/4 before we see it. Scaling it
+		// again let this 6 MB file through, to be downloaded and then refused.
+		$this->imapClient->expects($this->never())->method('fetchParts');
+
+		$text = $this->read([self::ref('2', null, 6 * 1024 * 1024)]);
+
+		$this->assertSame([AttachmentRecord::OUTCOME_TOO_LARGE], self::outcomes($text));
+	}
+
 	public function testOnlyTheFirstPdfsWithinTheCapsAreDownloaded(): void {
-		$tooLarge = (int)ceil(AttachmentService::MAX_BYTES * 4 / 3) + 4;
+		$tooLarge = AttachmentService::MAX_BYTES + 1;
 		$refs = [self::ref('2'), self::ref('3', null, $tooLarge), self::ref('4'), self::ref('5'), self::ref('6')];
 		$this->imapClient->expects($this->once())
 			->method('fetchParts')

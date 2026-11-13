@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\TravelManager\Service;
 
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Exception\InvalidBackupException;
 use OCA\TravelManager\Service\Dto\AttachmentRecord;
 use OCA\TravelManager\Service\Dto\BackupBooking;
@@ -34,6 +35,21 @@ class BackupFormat {
 	private const MESSAGE_STATUSES = ['queued', 'processing', 'processed', 'failed', 'no_booking', 'dropped', 'related'];
 	private const FAILURE_KINDS = ['schedule', 'provider', 'validation', 'no_text'];
 	private const TRIP_TYPES = ['work', 'leisure'];
+
+	// Limits on what a file can make us store, or send to the model. A file is
+	// text anyone can edit, and every row lands under the importing user's id,
+	// so nothing in it may be larger than what the app would have written
+	// itself. An export never reaches them; past them, a long text is cut as
+	// live writes cut it, and anything else refuses the file.
+
+	/** Rows in one list. Far beyond one person's travel mail, and it bounds the queue. */
+	private const MAX_ROWS = 50000;
+	/** `error`, `lastResponse` and trip notes, as the model's response is stored. */
+	private const LONG_TEXT = 20000;
+	/** A booking's details are read from a response of at most LONG_TEXT characters. */
+	private const DETAILS_BYTES = 100000;
+	/** `attempts` is an INTEGER column. */
+	private const INT_MAX = 2147483647;
 
 	/** @throws InvalidBackupException */
 	public function parse(string $json): BackupContents {
@@ -112,6 +128,9 @@ class BackupFormat {
 		if (!is_array($rows) || !array_is_list($rows)) {
 			throw new InvalidBackupException($key . ': expected a list.');
 		}
+		if (count($rows) > self::MAX_ROWS) {
+			throw new InvalidBackupException($key . ': more than ' . self::MAX_ROWS . ' rows.');
+		}
 		$checked = [];
 		foreach ($rows as $index => $row) {
 			if (!is_array($row)) {
@@ -139,7 +158,7 @@ class BackupFormat {
 			$color,
 			$this->date($row, 'startDate', $at),
 			$this->date($row, 'endDate', $at),
-			$this->optionalString($row, 'notes', $at),
+			$this->longText($row, 'notes', $at),
 			$this->date($row, 'createdAt', $at),
 			$this->date($row, 'updatedAt', $at),
 		);
@@ -150,6 +169,9 @@ class BackupFormat {
 		$details = $row['details'] ?? null;
 		if ($details !== null && !is_array($details)) {
 			throw new InvalidBackupException($at . '.details: expected an object.');
+		}
+		if ($details !== null && strlen(json_encode($details, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) > self::DETAILS_BYTES) {
+			throw new InvalidBackupException($at . '.details: larger than ' . self::DETAILS_BYTES . ' bytes.');
 		}
 		$confidence = $row['confidence'] ?? null;
 		if ($confidence !== null && !is_int($confidence) && !is_float($confidence)) {
@@ -184,29 +206,62 @@ class BackupFormat {
 			throw new InvalidBackupException($at . '.messageId: must not be empty.');
 		}
 		$attempts = $this->int($row, 'attempts', $at);
-		if ($attempts < 0) {
-			throw new InvalidBackupException($at . '.attempts: must not be negative.');
+		if ($attempts < 0 || $attempts > self::INT_MAX) {
+			throw new InvalidBackupException($at . '.attempts: must be between 0 and ' . self::INT_MAX . '.');
 		}
+		$status = $this->choice($row, 'status', $at, self::MESSAGE_STATUSES);
+		$body = $this->optionalString($row, 'bodyText', $at);
 		return new BackupMessage(
 			$this->string($row, 'mailbox', $at, 255),
 			$messageId,
 			$this->optionalInt($row, 'uidValidity', $at),
 			$this->optionalInt($row, 'imapUid', $at),
-			$this->choice($row, 'status', $at, self::MESSAGE_STATUSES),
+			$status,
 			$this->optionalString($row, 'subject', $at, 255),
 			$this->optionalString($row, 'sender', $at, 255),
 			$this->date($row, 'sentAt', $at),
-			$this->optionalString($row, 'bodyText', $at),
+			$body === null ? null : $this->bodyText($body, in_array($status, ['queued', 'processing'], true)),
 			$attempts,
 			$this->optionalChoice($row, 'failureKind', $at, self::FAILURE_KINDS),
 			$this->stringList($row, 'issueReasons', $at),
 			$this->intList($row, 'relatedBookingIds', $at),
-			$this->optionalString($row, 'error', $at),
-			$this->optionalString($row, 'lastResponse', $at),
+			$this->longText($row, 'error', $at),
+			$this->longText($row, 'lastResponse', $at),
 			$this->date($row, 'processedAt', $at),
 			$this->bool($row, 'discarded', $at),
 			$this->attachments($row, $at),
 		);
+	}
+
+	/**
+	 * An email's text, no longer than ingestion would have made it.
+	 *
+	 * A row waiting for the model is sent on the next tick, so it gets exactly
+	 * the cap a freshly read email gets (MessageText::TOTAL bytes). A finished
+	 * one is only sent if someone retries it, and may predate that cap: until
+	 * 1.19.0 the body was cut at 20 000 *characters*, which in a non-Latin script
+	 * is more bytes than TOTAL. So it is held to TOTAL characters, which no export
+	 * exceeds.
+	 */
+	private function bodyText(string $body, bool $unfinished): string {
+		if ($unfinished) {
+			return MessageText::truncate($body, MessageText::TOTAL)[0];
+		}
+		if (mb_strlen($body) <= MessageText::TOTAL) {
+			return $body;
+		}
+		return rtrim(mb_substr($body, 0, MessageText::TOTAL)) . "\n" . MessageText::TRUNCATED;
+	}
+
+	/**
+	 * Free text cut to LONG_TEXT characters rather than refused: a long note or
+	 * error is no reason to lose the rest of someone's backup.
+	 *
+	 * @param array<array-key, mixed> $row
+	 */
+	private function longText(array $row, string $key, string $at): ?string {
+		$value = $this->optionalString($row, $key, $at);
+		return $value === null || mb_strlen($value) <= self::LONG_TEXT ? $value : mb_substr($value, 0, self::LONG_TEXT);
 	}
 
 	/**
@@ -243,6 +298,8 @@ class BackupFormat {
 		if (!is_string($value)) {
 			throw new InvalidBackupException($this->field($key, $at) . ': expected text.');
 		}
+		// `\u0000` is valid JSON and a NUL that PostgreSQL refuses mid-import.
+		$value = ColumnText::clean($value);
 		if ($maxLength !== null && mb_strlen($value) > $maxLength) {
 			throw new InvalidBackupException($this->field($key, $at) . ': longer than ' . $maxLength . ' characters.');
 		}
@@ -324,6 +381,7 @@ class BackupFormat {
 			}
 			$strings[] = $value;
 		}
+		$this->fitsJoined($strings, $key, $at);
 		return $strings;
 	}
 
@@ -339,6 +397,7 @@ class BackupFormat {
 			}
 			$ints[] = $value;
 		}
+		$this->fitsJoined($ints, $key, $at);
 		return $ints;
 	}
 
@@ -352,6 +411,18 @@ class BackupFormat {
 			throw new InvalidBackupException($this->field($key, $at) . ': expected a list.');
 		}
 		return $value;
+	}
+
+	/**
+	 * Lists are stored comma-joined in a VARCHAR, so it is the joined form that
+	 * has to fit. An export always does, since that is where it was read from.
+	 *
+	 * @param list<string|int> $values
+	 */
+	private function fitsJoined(array $values, string $key, string $at): void {
+		if (mb_strlen(implode(',', $values)) > ColumnText::VARCHAR) {
+			throw new InvalidBackupException($this->field($key, $at) . ': longer than ' . ColumnText::VARCHAR . ' characters once joined.');
+		}
 	}
 
 	/** A root-level field is its own position; a row's field hangs off the row. */

@@ -28,6 +28,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class BookingServiceTest extends TestCase {
 	private BookingMapper&MockObject $bookingMapper;
+	private IDBConnection&MockObject $db;
 	private BookingService $service;
 
 	protected function setUp(): void {
@@ -43,12 +44,13 @@ final class BookingServiceTest extends TestCase {
 		});
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getDateTime')->willReturn(new \DateTime());
+		$this->db = $this->createMock(IDBConnection::class);
 
 		$this->service = new BookingService(
 			$this->bookingMapper,
 			$this->createMock(TripMapper::class),
 			new BookingMatcher(),
-			$this->createMock(IDBConnection::class),
+			$this->db,
 			$time,
 		);
 	}
@@ -104,6 +106,42 @@ final class BookingServiceTest extends TestCase {
 
 		$this->assertSame(1, $applied->created);
 		$this->assertSame([], $applied->related);
+	}
+
+	public function testTheModelsStringsAreFittedToTheirColumnsRatherThanLost(): void {
+		// An over-long title is no reason to lose the booking, and failing the
+		// insert used to fail the email on every retry. SQLite, which the suite's
+		// CI mode uses, would not have refused it, so this is the only guard.
+		$this->candidates([]);
+		$long = new ExtractedBooking(
+			'accommodation', str_repeat('P', 300), 'ABC12345', null, 'confirmed', str_repeat('T', 400),
+			['checkIn' => ['local' => '2026-07-25T14:00:00']], '2026-07-25T14:00:00', null, 0.9,
+		);
+		$this->bookingMapper->expects($this->once())
+			->method('insert')
+			->with($this->callback(static fn (Booking $b): bool => mb_strlen((string)$b->getTitle()) === 255
+				&& mb_strlen((string)$b->getProvider()) === 255
+				&& $b->getBookingReference() === 'ABC12345'));
+
+		$this->assertSame(1, $this->service->applyExtraction('alice', '<m1@example.com>', [$long])->created);
+	}
+
+	public function testAnOverLongEditIsRefusedNotCut(): void {
+		// What the user typed is refused: cutting it would save something they
+		// did not enter.
+		$this->bookingMapper->expects($this->never())->method('update');
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->updateBookingFields('alice', 12, ['title' => str_repeat('a', 256)]);
+	}
+
+	public function testAnOverLongTripNameIsRefused(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->createTrip('alice', str_repeat('a', 256));
+	}
+
+	public function testRenamingATripToAnOverLongNameIsRefused(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->updateTrip('alice', 7, ['name' => str_repeat('a', 256)]);
 	}
 
 	public function testSecondMessageForTheSameBookingIsReportedNotApplied(): void {
@@ -202,6 +240,43 @@ final class BookingServiceTest extends TestCase {
 		$this->assertSame([], $applied->related);
 	}
 
+	/**
+	 * Review item 14: the identifier lookup compared the stored column with
+	 * `IN`, so a rebooking whose dates left the ±14-day window was found only
+	 * if the model wrote its reference exactly as before.
+	 */
+	public function testARebookingOutsideTheWindowIsFoundThoughItsReferenceIsWrittenDifferently(): void {
+		$stored = $this->existing();
+		$stored->setBookingReference('ES867-772 590');
+		$stored->setConfirmationNumber(null);
+		$this->bookingMapper->method('findIdentifiers')->with('alice', 'flight')
+			->willReturn([12 => ['ES867-772 590', null], 13 => ['ZZZZZZZ', null]]);
+		// The window around 2026-10-01 does not reach the July booking, so only
+		// the identifier hit can bring it in.
+		$this->bookingMapper->expects($this->once())->method('findMatchCandidates')
+			->with('alice', 'flight', $this->anything(), $this->anything(), [12])
+			->willReturn([$stored]);
+		$this->bookingMapper->expects($this->never())->method('insert');
+
+		$rebooked = new ExtractedBooking('flight', 'KLM', 'es867772590', null, 'confirmed', 'AMS → SOU',
+			['segments' => [['departureLocal' => '2026-10-01T08:35:00']]], '2026-10-01T08:35:00', null, 0.9);
+		$applied = $this->service->applyExtraction('alice', '<m9@example.com>', [$rebooked]);
+
+		$this->assertSame(0, $applied->created);
+		$this->assertSame(12, $applied->related[0]->bookingId);
+	}
+
+	public function testWithoutAUsableIdentifierOnlyTheDateWindowIsAsked(): void {
+		// "N/A" normalises to nothing, so no stored identifier can be evidence.
+		$this->bookingMapper->expects($this->never())->method('findIdentifiers');
+		$this->bookingMapper->expects($this->once())->method('findMatchCandidates')
+			->with('alice', 'flight', $this->anything(), $this->anything(), [])
+			->willReturn([]);
+
+		$this->service->applyExtraction('alice', '<m10@example.com>', [new ExtractedBooking('flight', 'KLM', 'N/A', null, 'confirmed', 'AMS → SOU',
+			['segments' => [['departureLocal' => '2026-07-25T08:35:00']]], '2026-07-25T08:35:00', null, 0.9)]);
+	}
+
 	public function testAPossibleDuplicateIsStoredAndFlaggedRatherThanDropped(): void {
 		// Same airline, same day, but the two references disagree — evidence
 		// both ways. Suppressing would be the one irreversible mistake here.
@@ -264,12 +339,12 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(2);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturn([13, 14]);
 		$this->bookingMapper->expects($this->once())
 			->method('update')
 			->with($this->callback(static fn (Booking $b): bool => $b->getDuplicateGroupId() === null))
 			->willReturn($booking);
-		$this->bookingMapper->expects($this->never())->method('clearDuplicateGroup');
+		$this->bookingMapper->expects($this->never())->method('clearDuplicateGroupOf');
 
 		$this->service->leaveDuplicateGroup('alice', 12);
 	}
@@ -280,11 +355,55 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
+		// The second count, after the commit, finds the group already gone.
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13], []);
 		$this->bookingMapper->method('update')->willReturn($booking);
+		// By id, not by group: a booking that joined meanwhile keeps its flag.
 		$this->bookingMapper->expects($this->once())
-			->method('clearDuplicateGroup')
-			->with('alice', 7);
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
+
+		$this->service->leaveDuplicateGroup('alice', 12);
+	}
+
+	public function testLeavingAGroupIsOneTransaction(): void {
+		// No crash can separate the member leaving from the group of one it
+		// leaves behind being dissolved.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturn([13]);
+		$order = [];
+		$this->db->method('beginTransaction')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'begin';
+		});
+		$this->bookingMapper->method('update')->willReturnCallback(function (Booking $b) use (&$order): Booking {
+			$order[] = 'update';
+			return $b;
+		});
+		$this->bookingMapper->method('clearDuplicateGroupOf')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'clear';
+		});
+		$this->db->method('commit')->willReturnCallback(function () use (&$order): void {
+			$order[] = 'commit';
+		});
+
+		$this->service->leaveDuplicateGroup('alice', 12);
+
+		$this->assertSame(['begin', 'update', 'clear', 'commit'], array_slice($order, 0, 4));
+	}
+
+	public function testAGroupLeftByTwoAtOnceIsStillDissolvedAfterTheCommit(): void {
+		// Inside its transaction each leaver still sees the other as a member,
+		// so the count after the commit is the one that finds the last one alone.
+		$booking = $this->existing();
+		$booking->setDuplicateGroupId(7);
+		$this->bookingMapper->method('find')->willReturn($booking);
+		$this->bookingMapper->method('update')->willReturn($booking);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13, 14], [13]);
+		$this->bookingMapper->expects($this->once())
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
 
 		$this->service->leaveDuplicateGroup('alice', 12);
 	}
@@ -351,11 +470,12 @@ final class BookingServiceTest extends TestCase {
 		$booking = $this->existing();
 		$booking->setDuplicateGroupId(7);
 		$this->bookingMapper->method('find')->willReturn($booking);
-		$this->bookingMapper->method('countInDuplicateGroup')->willReturn(1);
+		$this->bookingMapper->method('duplicateGroupMemberIds')->willReturnOnConsecutiveCalls([13], []);
 		$this->bookingMapper->expects($this->once())->method('delete');
 		$this->bookingMapper->expects($this->once())
-			->method('clearDuplicateGroup')
-			->with('alice', 7);
+			->method('clearDuplicateGroupOf')
+			->with('alice', 13, 7);
+		$this->db->expects($this->once())->method('commit');
 
 		$this->service->purge('alice', 12);
 	}

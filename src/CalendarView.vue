@@ -27,7 +27,7 @@ import {
 import { hasPossibleDuplicate } from './bookings'
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
-import { detailHref, isOpen, openDetail } from './navigation'
+import { calendarMonth, detailHref, isOpen, openDetail } from './navigation'
 import { allTripRows, bookings, tripColors } from './store'
 
 /**
@@ -51,7 +51,7 @@ const firstDay = getFirstDay()
 const weekdays = weekdayLabels(getDayNamesMin(), firstDay)
 const monthNames = getMonthNames()
 
-const month = ref(monthOf())
+const month = calendarMonth
 
 /**
  * Discarded and archived are soft states whose rows survive, but they are not

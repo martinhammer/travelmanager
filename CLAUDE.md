@@ -81,7 +81,11 @@ Key classes (all under `OCA\TravelManager`, `lib/`):
 - `Imap/IImapClient` → `HordeImapClient` (read-only, `Horde_Imap_Client`);
   `Imap/Html` is the pure HTML→text helper for HTML-only bodies;
   `Imap/MimeText` decides which MIME parts make up the text (see §7) and lists
-  the PDF attachments.
+  the PDF attachments; `Imap/ImapEndpoint` is the pure rule for what a mailbox
+  host/port/encryption may be, and `Imap/ImapEndpointResolver` resolves the host
+  and checks every address against `IRemoteHostValidator` (see §3);
+  `Imap/MessageId` makes the dedup key fit its column without cutting it.
+- `Db/ColumnText` — **pure** fitting of outside text to a column (see §7).
 - `Pdf/IPdfReader` → `PrinsPdfReader` (the only class importing
   `prinsfrank/pdfparser`); `Pdf/PdfLayout` is its pure column-break rule.
   `Service/AttachmentService` reads one email's PDFs under the caps and the
@@ -189,7 +193,29 @@ car_rental ⇒ valid `pickup.local`; accommodation ⇒ valid `checkIn.local`. Th
 three segmented types share one validator (`validateSegmentedDetails`, gated on
 `SEGMENTED_TYPES`), which is the only place that rule lives.
 
-**Malformed JSON is repaired, never silently.** `extractJsonObject` rebuilds the
+**What the model writes loosely is normalised, never refused for its form**
+(2026-11-12, review items 4, 13, 25, 27). Each of these used to cost data
+silently:
+- **An all-digit identifier written as a JSON number is the same identifier.**
+  `identifier()` stringifies an int for both header columns, and
+  `json_decode(…, JSON_BIGINT_AS_STRING)` keeps one too long for an int from
+  coming back as a rounded float. A decimal is not an identifier. Inside
+  `details`, `flightNumber`/`serviceNumber`/`ticketNumber` get the same
+  treatment (`numbersAsStrings`), because the matcher reads them as strings.
+  Losing the number mattered beyond the card: with both identifiers gone,
+  `BookingMatcher`'s tier 2 could no longer see that two rooms' references
+  differed, and suppressed the second.
+- **ISO decoration on a date is dropped, not converted** (V8): fractional
+  seconds, `Z` and a numeric offset are stripped and the wall clock kept as
+  written. Rejecting them cost the leg, and a one-leg flight its booking.
+- **A journey starts at its first departure and ends at the latest departure or
+  arrival.** Arrivals in the start made a 22:00 departure with a date-only
+  arrival begin at midnight.
+- **Segments as one object are one leg**, an object of objects is a keyed list,
+  and an entry that is not an object still counts as a lost leg. The segment
+  issues quote what each rejected leg carried, as the car and hotel issues do.
+
+**Malformed JSON is repaired, never silently.** `repairJson` rebuilds the
 response while scanning it, keeping a **stack of open containers** (not a depth
 counter) so it can insert a closer the model skipped *at the point it skipped
 it* — the observed provider failure closes the `bookings` array while a booking
@@ -199,6 +225,25 @@ and is **refused** when the response was cut off inside a string (closing the
 quote would turn a half-written value into a plausible whole one). Every repair
 raises a `repaired_json` issue — a rising repair rate is how a degrading model
 shows up before it starts failing outright.
+
+**A repair never passes off part of a response as the whole** (2026-11-12,
+review items 5 and 12):
+- **A closer that does not match is read two ways.** The scan assumes closers
+  were forgotten before it; when that ends the document with more JSON still to
+  come (`{flight}}, {bus}`), it was an extra one, and the scan runs again with it
+  dropped. Before, the bus vanished and the row said `processed`.
+- **What still cannot be read is a drop, not a repair.** An `incomplete_json`
+  issue (`dropped = true`) is raised when text after the object could not be
+  read or the response was cut off below the root — only a reply missing its
+  root `}` loses nothing. A trailing comma at the cut is removed, since that is
+  where a reply stopping between bookings ends. The Messages row warns that
+  bookings may be missing, whatever the status.
+- **A cut-off with no booking read fails the parse.** Closing `{"bookings": [`
+  gives an empty list that reads as an email with nothing in it, which is never
+  retried.
+- **A repeated key refuses the response**, at any depth. `json_decode` keeps the
+  last value silently, so a flight followed by a second `"bookings": []` decoded
+  as no booking at all.
 
 **Rejections are reported, never swallowed.** `parseAndValidate` returns an
 `ExtractionResult` (`bookings` + `issues`), where each `ExtractionIssue` carries a
@@ -346,9 +391,17 @@ code follows the overrides.
   day** — a confirmation gives a 14:00 check-in and the reminder a bare date,
   which `normalizeDate` renders as 00:00. Local wall-clock throughout (V8), by
   comparing the stored strings, never timestamps. `BookingMapper::findMatchCandidates`
-  only fetches a **superset** (same type, within ±14 days, or a literal
-  identifier hit so a rebooking outside the window is still seen); it must never
-  encode the decision. The prompt was tightened in the same change — `provider`
+  only fetches a **superset** (same type, within ±14 days, or an identifier hit
+  so a rebooking outside the window is still seen); it must never encode the
+  decision. **Identifier hits are found in PHP, not SQL** (2026-11-12, review
+  item 14): the columns hold identifiers as the model wrote them, so an `IN`
+  never matched a stored `ES867-772 590` against an incoming `es867772590`, and
+  outside the window that rebooking became a second draft. `findIdentifiers`
+  returns both identifier columns of the user's bookings of that type,
+  `BookingService::findCandidates` normalises them with the matcher's own
+  `identifierSet`, and the hits go to `findMatchCandidates` as ids. Storing a
+  normalised column was rejected: a migration and backfill, and the matcher's
+  rule copied into the schema, to save scanning a few hundred rows. The prompt was tightened in the same change — `provider`
   is defined as the operator that delivers the service, the agency belongs in the
   per-type detail field, and a lone identifier goes in `booking_reference` — but
   the matcher must keep tolerating both readings regardless: the wording only
@@ -458,7 +511,11 @@ code follows the overrides.
     least of all.
   - **A group of one is dissolved** (`tidyDuplicateGroup`, on leave and on
     purge). It claims nothing, and left behind it reads like a flag in the
-    database while showing as nothing in the UI.
+    database while showing as nothing in the UI. The tidy runs inside the
+    transaction that removed the member, so no crash separates them, **and
+    again after the commit**, because inside it two members leaving at once
+    each still see the other. The clear names the one booking left, never the
+    group, so one that joined meanwhile keeps its flag.
   - **Discarded and archived hide the flag rather than clear it.** You have
     already decided about that booking, so there is nothing left to check — but
     restoring it brings the flag back, which is what a soft state is for. Hiding
@@ -514,8 +571,13 @@ code follows the overrides.
     - **No navigation counter.** The month summary and the filter chip cover it;
       the nav is the one place a number costs attention on every screen.
   - **The Messages row banner shows on every email of a group**, derived from
-    that run's booking carrying a group id (`messageNotices(message, created)`),
-    not from the message's own columns. It was briefly on the last email only —
+    that run's booking having a partner left to compare with
+    (`messageNotices(message, created, allBookings)` → `hasPossibleDuplicate`,
+    the Bookings grid's rule), not from the message's own columns. It used to
+    test the group id alone, so it outlived the comparison: once the other
+    booking was discarded or archived the id stayed, the sidebar listed nobody,
+    and the banner asked for a task that could no longer be done (2026-11-13,
+    review item 18). It was briefly on the last email only —
     under the edge model that was the one booking carrying the edge — but group
     membership is symmetric, and which email arrived second is an accident of
     order the reader cannot see. The wording says a booking *may be the same as*
@@ -610,7 +672,12 @@ code follows the overrides.
     left a draft rather than a confirmed booking with no trip; that outcome is
     now handled by the **Trip** button, which every confirmed booking carries and
     which renders *primary* while it has none, so an orphan announces itself and
-    is one click from being filed.
+    is one click from being filed. **That only works if the screen knows** (2026-11-12,
+    review item 6): a failed submit reloads whenever something before the
+    failure was written, says when the confirm itself went through, and
+    remembers what it did — a created trip becomes the choice and a done
+    confirm is skipped — so pressing it again neither creates the trip twice
+    nor re-confirms.
     Only `draft → confirmed` opens the dialog: *restoring an archived booking*
     also targets `confirmed`, but it is an undo rather than a first decision and
     it still has the trip it was archived with — hence the `reviewState` check in
@@ -707,9 +774,16 @@ code follows the overrides.
     is `handleLost` → `failed`/`provider`, which is retryable. **"Could not ask"
     is never "gone"** — `findTask` throws on anything but not-found. An older
     pending attempt for a message that has since been retried is marked
-    `superseded` and never allowed to overwrite the newer one, and the handlers
-    now ignore a TaskMap that is no longer `pending`, since the listener and the
-    reconciler can arrive at the same task.
+    `superseded` and never allowed to overwrite the newer one. **A task is
+    settled before anything is written** (2026-11-12, review item 9): the
+    listener and the reconciler can arrive at one task, cron and the AI worker
+    at the same moment, so each handler claims it with
+    `TaskMapMapper::settle`, a conditional update out of `pending`, and only
+    the caller that gets the row writes. Checking the loaded status was no
+    guard, and settling *last* meant a throw after the bookings committed left
+    the task pending, to be applied again as "related" to itself. A crash
+    after settling leaves the message `processing` with no pending task, which
+    the orphan pass fails as retryable.
   - **Races are tolerated, not prevented.** `claimQueued` is a conditional
     update, so a message is never sent twice. The limits are guarded by a lock in
     the locking cache; with no locking cache configured that lock is NullCache and
@@ -723,7 +797,9 @@ code follows the overrides.
     asking explicitly has always worked with the pipeline off.
   - **Retry goes through the queue** and is refused (400) while a message is
     `queued` or `processing`: a second attempt in flight for one email means
-    whichever answer lands last wins.
+    whichever answer lands last wins. The requeue is one conditional update
+    from the status the request read (`requeueForRetry`), so two clicks that
+    both read `failed` cannot both get through.
   - **`local_concurrency` is gone.** It promised "max concurrent local-model
     extractions", was read by nothing, and could not have been honoured by any app
     — how many tasks *run* at once is the server's AI worker count. The admin
@@ -744,7 +820,8 @@ code follows the overrides.
   Personal settings → *Backup & restore*, `GET /api/backup/export`, `POST
   /api/backup/preview` (writes nothing) and `POST /api/backup/import`. Importing
   deliberately asks for **no password**, even with "replace": the preview dialog with
-  its counts is the confirmation. Consequences:
+  its counts is the confirmation (see "No password confirmation" in §7).
+  Consequences:
   - **JSON, not SQLite.** SQLite would need `pdo_sqlite` on a MySQL or Postgres
     server, and would mean opening a user-uploaded database file. `BackupFormat::VERSION`
     guards the shape: a newer file is refused with a request to update the app.
@@ -794,6 +871,19 @@ code follows the overrides.
     it; **Download import report** saves the same list as text (`importReportText`).
     `messages.status` is left alone
     when its booking is skipped: `source_message_id` already links the two.
+  - **A file can make us store no more than the app would have written**
+    (2026-11-12, review items 8 and 24). It is text anyone can edit, and a `queued`
+    row goes to the shared model on the next tick. So `BackupFormat` cuts a waiting
+    email's text to `MessageText::TOTAL` bytes exactly as ingestion would, a
+    finished one to TOTAL *characters* (bodies before 1.19.0 were capped at 20 000
+    characters, more bytes than TOTAL in a non-Latin script), and `error`,
+    `lastResponse` and trip notes to 20 000 characters. What cannot be cut refuses
+    the file: `details` over 100 kB, more than 50 000 rows in a list, an
+    `attempts` beyond INTEGER, and a list whose **comma-joined form** outgrows its
+    `VARCHAR(255)`. Every string loses NUL bytes (valid JSON, refused by
+    PostgreSQL). Each of these previewed cleanly and then failed the import.
+    `related_booking_ids` is fitted once more on insert, because this server's ids
+    can be longer than the file's.
   - **The file is memory-bound and upload-bound.** `json_decode` reads it whole, and
     PHP's `post_max_size` drops an oversized body without an error, which is why "no
     file received" names the upload limit as a likely cause.
@@ -831,9 +921,18 @@ code follows the overrides.
     `body_text` 32 000 in total, the body taking what is left and never more than
     its old 20 000. A cut is marked `[… truncated]`.
   - **A fatal error is guarded by a breadcrumb**, not a catch: the user config
-    `pdf_reading` holds the Message-ID while its PDFs are read. Still set on the
-    next run means that run died there, and the PDFs are skipped as `crashed` —
-    otherwise the unstored message is fetched and dies again every 15 minutes.
+    `pdf_reading` holds the Message-ID from the moment its PDFs are read until
+    the message row is written (`AttachmentService::finish`, from
+    `IngestionService::enqueue`'s `finally`). Still set on the next run means
+    that run died in between, and the PDFs are skipped as `crashed` — otherwise
+    the unstored message is fetched and dies again every 15 minutes. It used to
+    be cleared as soon as the PDFs were read, which left a fatal while
+    assembling or inserting the row unguarded. Not locked: two concurrent reads
+    of one mailbox can clear each other's, which costs at most one more crash.
+  - **The listed size is already the decoded estimate.** Horde scales a base64
+    part's BODYSTRUCTURE size by 3/4 before `setBytes()`, so `AttachmentRef::$bytes`
+    is compared with the 5 MB cap as it is — scaling it again let files of up to
+    ~6.7 MB be downloaded only to be refused afterwards.
   - **`messages.attachments` records every PDF found, read or not**, because a
     skipped file that leaves no trace makes the email look as though it had
     none. Its own column, not `issue_reasons`: those describe the last attempt
@@ -850,6 +949,42 @@ code follows the overrides.
     is also a PNR* — beside one (Amadeus) it became a matching key, while a
     Flibco shuttle ticket has no other reference, so there it is the
     booking_reference too. And a fare-class letter ("Class: Q") is not a cabin.
+- **A mailbox connection is verified, and goes only where it was checked**
+  (2026-11-11, from `docs/code-review-2026-11-11.md` items 1–2). The host is a
+  value any user sets and cron dials it from the server, so it is treated like
+  any other user-supplied URL. Consequences:
+  - **Certificates are verified, against Nextcloud's CA bundle.** Horde's socket
+    client merges `verify_peer => false` *under* the caller's context, so before
+    this nothing was verified and the mailbox password went to whoever answered
+    the name. `HordeImapClient::sslContext` now passes `verify_peer`,
+    `verify_peer_name` and `cafile = ICertificateManager::getAbsoluteBundlePath()`
+    — the bundle Nextcloud's own HTTP client uses, so a self-signed server works
+    once its CA is imported with `occ security:certificates:import`. The admin
+    switch **Verify mail server certificates** (`imap_verify_tls`, default on)
+    is the last-resort opt-out, as Mail's `app.mail.verify-tls-peer` is. A
+    refused certificate surfaces only as Horde's bare "Error connecting… [0]"
+    (the TLS warning is suppressed), so `describe()` adds a hint saying so.
+  - **Only a host name or an IP literal is a host** (`ImapEndpoint`). Horde
+    recognises a scheme only at offset 0 and drops a zero port, so
+    `tcp://127.0.0.1` and `unix:///path` (port 0) were dialled as written.
+    Port 1–65535; encryption one of `ssl`/`tls`/`none` — anything else used to
+    fall through to cleartext.
+  - **Local and private addresses need the admin's `allow_local_remote_servers`**,
+    via `IRemoteHostValidator`, Mail's rule for the same thing. **A mailbox on the
+    LAN or the same machine stops working until that flag is set**, and the error
+    names it. The validator only classifies the string it is given, so the
+    resolver checks the name *and* every A/AAAA address it resolves to, and one
+    local address refuses the lot.
+  - **The checked address is the one dialled.** Resolving again at connect time
+    would let a short-lived DNS answer pass as public and connect as 127.0.0.1,
+    so `hostspec` is the IP and the name rides in `peer_name` (certificate check
+    and SNI). IPv4 is preferred: without Happy Eyeballs a dead IPv6 route is a
+    timeout, not a fallback.
+  - **Checked on save and again before every connection.** Saving refuses a bad
+    address with a 400 and writes nothing, but does only the checks that need no
+    DNS — what a name resolves to can change after saving, and a DNS hiccup
+    should not stop someone saving their password. Rows saved before these rules
+    are still in the database, which is the other reason for the second check.
 - **Background jobs run in system context**, acting on behalf of each user: Task
   Processing tasks carry the `userId`; correlation rides on `customId` + the
   `tasks` table.
@@ -989,6 +1124,48 @@ debug panel for iterating without waiting for cron:
   `prinsfrank/pdfparser` plus a column-break rule, and every PDF's outcome is
   recorded in `messages.attachments`. Admin switch, default on. Scans (OCR) are
   out of scope. See the decision in §3 and `docs/pdf-attachments-spec.md`.
+- ✅ **Mailbox connection hardened** (2026-11-11): certificates verified against
+  Nextcloud's CA bundle (admin opt-out), host/port/encryption validated, local
+  addresses refused unless `allow_local_remote_servers`, and the checked IP is
+  the one dialled. No migration, no version bump. See the decision in §3.
+- ✅ **One bad message no longer stops a mailbox read** (2026-11-11, review items
+  3, 10, 11, 21, 22): per-message storing, outside text fitted to its column,
+  Message-IDs hashed when they cannot fit, a 2 MiB cap on each part download,
+  the PDF breadcrumb held until the row is written, the PDF size check fixed,
+  and a queued job re-checks the user's own switch. No migration. See §7.
+- ✅ **Extraction normalises loose values** (2026-11-12, review items 4, 13, 25,
+  27): numeric identifiers kept, ISO date suffixes stripped, journey span fixed,
+  segment shapes tolerated, and tier 2's evidence names a one-sided reference.
+  No migration. See the extraction contract in §2.
+- ✅ **JSON repair cannot lose bookings silently** (2026-11-12, review items 5,
+  12): an extra closer is dropped rather than ending the response, unreadable or
+  cut-off remainders raise `incomplete_json`, and a repeated key or a cut-off
+  before any booking fails the parse. No migration. See §2.
+- ✅ **Settling happens once** (2026-11-12, review items 9, 15 server half,
+  26): a task is claimed out of `pending` before its result is written, a
+  retry is a conditional requeue, and leaving or purging a duplicate group is
+  one transaction plus a second tidy after it. No migration. See §3.
+- ✅ **Writes and reloads cannot overtake each other on screen** (2026-11-12,
+  review items 6, 15 buttons, 19): only the latest reload writes, write buttons
+  are disabled while in flight, and a failed confirm-and-file reloads and
+  remembers what it already did. No backend change. See "Frontend layout".
+- ✅ **Backups are bounded** (2026-11-12, review items 8 and 24): a file's text
+  is cut to what ingestion would store, and what cannot be cut refuses the file
+  at preview. No migration. See the backup decision in §3.
+- ✅ **A rebooking is found whatever its punctuation** (2026-11-12, review item
+  14): identifier hits outside the date window are compared normalised, in
+  PHP. No migration. See the matcher decision in §3.
+- ✅ **Small display fixes** (2026-11-13, review items 16, 17, 18, 23, 28):
+  grid headings no longer sit at the 34px button floor and their margin applies,
+  booking titles are decoded on the grid, in the sort and on the back button, the
+  duplicate banner follows the grid's rule, the calendar keeps its month across
+  views, and an out-of-range entity no longer throws. Also: a badge strip wider
+  than its cell wraps to a second line instead of squeezing each lozenge's text
+  onto two (a trip with five booking types on the Trips grid), and that grid's
+  lozenge column shares the spare width with the name from a 340px floor, in
+  `fr` because each row is its own grid. The three lists keep their filters and
+  sort order across view switches, as the calendar keeps its month, and Trips
+  sorts from today by default, as Bookings does. No backend change.
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch
@@ -1240,9 +1417,12 @@ and the wording lives in `labels.ts`.
 - Week start and day/month names come from `@nextcloud/l10n` (`getFirstDay`,
   `getDayNamesMin`, `getMonthNames`), so a Sunday-first locale is right for free;
   `calendar.ts` takes `firstDay` as a **parameter** so it stays pure and tested.
-- The displayed month is a component ref, **not** in the hash. It survives view
-  switches (the module stays mounted) but not a reload — deliberate for now; put
-  it in the route if month links ever need sharing.
+- The displayed month is **`calendarMonth` in `navigation.ts`**, not a
+  component ref and **not** in the hash. `App.vue` mounts one view at a time
+  (`v-if`), so a ref inside `CalendarView` went back to today on every visit to
+  another view; a module-level ref survives the switch but not a reload —
+  deliberate for now; put it in the route if month links ever need sharing
+  (2026-11-13, review item 23).
 - **On a phone the toolbar still fits on one line** (`@container tm-cal
   (max-width: 420px)`): the month heading steps down to 1.25rem and **Today**
   shows only its `CalendarToday` icon. The button always carries the icon and an
@@ -1302,7 +1482,7 @@ store.ts        bookings / trips / messages / loading / reload + derived counts
 navigation.ts   the route, open/close/back, hash + history plumbing
 dialogs.ts      which dialog is open, on what, and the openX() calls
 labels.ts       how the domain is worded
-grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts backup.ts   pure, unit-tested
+grid.ts messages.ts bookings.ts trips.ts detail.ts calendar.ts backup.ts latest.ts   pure, unit-tested
 ```
 
 Adding the fourth view (the calendar) cost exactly what that promised: one nav
@@ -1317,6 +1497,15 @@ module and its stylesheet). Hold a fifth to the same bar.
 - **`store.ts` holds module-level refs**, not provide/inject or prop threading.
   Every view, the sidebar and most dialogs need the same three collections and
   the same `reload()`. Safe because the app mounts once; revisit if that changes.
+  **Only the latest `reload()` writes** (`latestOnly` in `latest.ts`): two
+  actions in a row start two, and the older response settling last used to
+  replace the newer list.
+- **A button that writes is disabled from the click until its request returns**
+  (2026-11-12, review item 15): the delete and trip dialogs, the sidebar's
+  Actions and "Not a duplicate", and Retry/Discard per Messages row. Set the flag
+  before the first `await`. The visible state only changes once the reload
+  lands, so until then a second click repeated the request: a second delete
+  404'd after the success toast, and a second create made a second trip.
 - **`dialogs.ts` is the same pattern for *what is open*, and `AppDialogs.vue`
   renders the lot.** Most dialogs are now raised from the detail panel and one
   ("New trip") from the Trips toolbar, so no view owns them; threading them
@@ -1326,9 +1515,22 @@ module and its stylesheet). Hold a fifth to the same bar.
   *not* unit-testable (§7). That is the trade for every view wording things
   identically. Keep decisions out of it — anything with a branch belongs in a
   pure module where it gets tested.
-- **Each view owns its own filter/sort refs.** Do not conflate view and filter
+- **Each view has its own filter and sort state.** Do not conflate view and filter
   again — the original single `filter` ref made "All bookings" a status and
-  "Trips" a view. All filtering/sorting is client-side and pure
+  "Trips" a view. **That state is not held in the view** (`bookingsList`/
+  `tripsList`/`messagesList` in `navigation.ts`, beside `calendarMonth`):
+  `App.vue` mounts one view at a time, so refs in the view went back to their
+  defaults on every visit to another (2026-11-13). Like the month, it survives
+  a view switch but not a reload. Two things that rely on a fresh "All" had to
+  be handled once it stopped being fresh: a remembered booking type whose last
+  booking is gone is reset (the chip that would clear it is hidden below two
+  types), and **opening a record a remembered filter hides clears that filter**,
+  in all three lists (a `watch` on `route.detail`). It fires on *opening* — from
+  a row, a link in the panel or another view — and never on a data change:
+  confirming a draft while filtered to Drafts must not throw the queue back to
+  All after every confirm. For Messages it also has to run before
+  `revealRoutedMessage`, since the row is the only place an email's prompt and
+  response are shown. All filtering/sorting is client-side and pure
   (`sortBookings`/`filterBookings`, `sortMessages`/`filterMessagesByStatus`,
   `sortTrips`/`filterTripsByPeriod`/`tripRows`, shared helpers in `src/grid.ts`).
 
@@ -1383,11 +1585,16 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
   not an arrow, because smart mode runs forward from today and then backward
   through the past, so any arrow misdescribes most of the list. The heading
   carries a `title` naming the mode, because the marker is `aria-hidden`. The
-  mode type is `BookingSortDirection`; `SortColumn` is generic over it so
-  Messages and Trips never see `'smart'`.
-- **`sortTrips('travel')` is the opposite call, on purpose**: a plain chronology,
-  because the Current/Future/Past chips already answer "what is coming up" and
-  re-ranking the column around today as well would fight them.
+  mode types are `BookingSortDirection` and `TripSortDirection`; `SortColumn`
+  is generic over them so Messages never sees `'smart'`. The tooltip wording is
+  shared, `travelSortLabel` in `labels.ts`.
+- **The Trips grid sorts the same way, and opens on it** (2026-11-13).
+  `sortTrips('travel', 'smart')` ranks by each row's own `period`, so the order
+  and the Current/Future/Past chips cannot disagree about what is past; undated
+  trips go last by name. It was a plain chronology before, on the argument that
+  the chips already answer "what is coming up" — but All is the view people
+  open on, and there the plain order put two years of past trips above the next
+  one.
 - **Trip dates and type lozenges are derived, never read from `trips.start_date`/
   `end_date`** (`tripRows`/`tripSpan` in `src/trips.ts`): the stored columns are
   user-entered and go stale the moment a booking is linked or unlinked, so the
@@ -1405,7 +1612,8 @@ It is a CSS grid, not a `<table>`. Consequences to preserve:
   because filing them under a period would make the period filters lie.
 - Headings are plain `<button>`s with a ▲/▼ marker, **not** `role="columnheader"`
   + `aria-sort`: grid ARIA would promise a table structure the markup does not
-  have. Sort state is a `sort` + `direction` ref per view; the `*_COLUMNS` array
+  have. Sort state is a `sort` + `direction` pair per view (held in
+  `navigation.ts`, see above); the `*_COLUMNS` array
   holds order and each column's default direction, and `nextSortDirection`
   implements "default on a new column, flip on the same one".
 - Column **labels live in the view SFC** as literal `t()` calls (extractable),
@@ -1732,7 +1940,11 @@ The patches, and one deliberate absence:
   widest step had too many cells, wrapped onto extra lines and sat over the
   wrong columns. The hide rules are now **`.columns.columns > …`** (0,3,0). It is
   the same chunk-order trap as `.tm-notice.tm-notice`: win on specificity,
-  never on order.
+  never on order. **So never double `.tm-column-heading`'s main rule**: at
+  (0,3,0) it ties the hide rules and wins on order again. The heading's
+  `min-height: 0` and negative margin, which have to beat the server's (0,2,1)
+  button rules, sit in a doubled rule of their own that sets no `display`
+  (2026-11-13, review item 16).
 - **Verify CSS against the server's own stylesheets, not just its variables.**
   A harness that defines `--color-*` and `--default-clickable-area` but omits
   `core/css/inputs.css` will happily measure a design that the real page does not
@@ -1756,8 +1968,7 @@ The patches, and one deliberate absence:
   re-add an explicit import (the build fails on it). Before v8 we needed one:
   the toast CSS only reached the bundle transitively, and when it stopped doing
   so the toast container lost `position: fixed` and every toast rendered
-  invisibly at the end of `<body>`. If toasts vanish again, check that first. Same story for **`@nextcloud/password-confirmation` — must be ^6** (v5
-  pins Vue 2 / `@nextcloud/vue ^8`; v6 dropped the peers and is Vue-3 clean).
+  invisibly at the end of `<body>`. If toasts vanish again, check that first.
 - **OCS URL helper must not encode path slashes.** `generateOcsUrl(url, params)`
   runs `encodeURIComponent` on every `{param}` (option `escape` defaults to
   `true`), so passing a multi-segment path as one param —
@@ -1767,14 +1978,17 @@ The patches, and one deliberate absence:
   `generateOcsUrl(\`apps/travelmanager/api/${path}\`)` (all our paths are
   app-controlled with numeric ids, so no escaping is needed). See `base()` in
   `src/api.ts`.
-- **`#[PasswordConfirmationRequired]` needs a frontend confirm step.** A method
-  marked `PasswordConfirmationRequired` (we use it on `SettingsController::update`,
-  which writes the IMAP app password) returns **403** unless the user re-confirmed
-  their password within the sudo window (~30 min; login counts, so it passes right
-  after sign-in then starts failing). Call **`await confirmPassword()`** from
-  `@nextcloud/password-confirmation` before the request (it only prompts when
-  needed; treat a rejection as the user cancelling). See `onSave()` in
-  `src/PersonalSettings.vue`.
+- **No password confirmation, anywhere — by decision** (2026-11-12). Saving the
+  IMAP password, importing a backup (even with "replace") and the data wipe all
+  rely on their own confirm dialog and on the OCS CSRF header
+  (`OCS-APIREQUEST`, which a cross-site request cannot set without a preflight).
+  `docs/code-review-2026-11-11.md` item 20 recommended adding
+  `#[PasswordConfirmationRequired]` to import and wipe; it was briefly done and
+  then removed, along with the one on the settings save and the
+  `@nextcloud/password-confirmation` dependency. Do not reintroduce it. If it
+  ever comes back: a marked method returns **403** outside the ~30-minute sudo
+  window, so the frontend must `await confirmPassword()` first, and the package
+  must be ^6 (v5 pins Vue 2 / `@nextcloud/vue ^8`).
 - **Native UI, not browser dialogs.** `@nextcloud/dialogs` is for **toasts only**
   (`showError`/`showSuccess`). For prompts/confirms use the **`NcDialog`**
   component (with `NcTextField`/`NcButton` in the `#actions` slot) controlled by a
@@ -1798,6 +2012,21 @@ The patches, and one deliberate absence:
 - **`package-lock.json` is committed** because the Makefile/CI use `npm ci`
   (which requires it). Run `npm install` (not `npm ci`) when changing deps, then
   commit the updated lockfile.
+- **Text from an email or a model is fitted to its column; text a user typed is
+  refused.** MySQL in strict mode refuses an over-long `VARCHAR(255)`, PostgreSQL
+  a NUL byte, both invalid UTF-8 — and **SQLite, which CI runs PHPUnit on, refuses
+  none of them**, so the suite cannot see it. A refusal costs more than the value:
+  inside the mailbox read it stopped the run on that message every time, and in
+  `applyExtraction` it failed the email on every retry. So `Db/ColumnText::fit`
+  (scrub, strip NUL, cut by character) is applied to subject, sender, mailbox and
+  the model's provider/reference/title, and `clean` to `body_text`. Edits and
+  trip names go through `ColumnText::fits` and a 400 instead: cutting what
+  someone just typed saves something they did not enter. The mailbox name is
+  refused at save, since every stored message records it. **Each message in a
+  read is now stored on its own** (`IngestionService::ingestForUser`): one that
+  still fails is logged and retried next run, a unique-key violation from a
+  concurrent read is treated as already stored, and the queue always gets its
+  turn (`finally`).
 - **DB identifier length:** keep index names short (`tm_*`) — Nextcloud enforces a
   ~30-char limit (Oracle); table names also stay well under it.
 - **IMAP / Horde.** `bytestream/horde-imap-client` is a **runtime** dep (in
@@ -1807,8 +2036,17 @@ The patches, and one deliberate absence:
   typed (e.g. `Imap/Html`) out of that class so it stays analysable and testable.
   Read-only discipline (V6) is enforced two ways: open the mailbox
   `OPEN_READONLY` (EXAMINE) **and** fetch body parts with `['peek' => true]` so
-  the `\Seen` flag is never set. Dedup key is the envelope `message_id` (with a
-  synthetic `<tm-{uidvalidity}-{uid}@…>` fallback when absent).
+  the `\Seen` flag is never set. Dedup key is the envelope `message_id`
+  (`Imap/MessageId::key`: a synthetic `<tm-{uidvalidity}-{uid}@…>` when absent,
+  and `<tm-sha1-…@…>` of the whole value when it is longer than its column or
+  not valid UTF-8 — **hashed, never cut**, since two ids sharing 255 characters
+  would otherwise be one email and the second would never be read). Each text
+  part is fetched with a `length` of 2 MiB: far above the text cap, because an
+  email's HTML can be ten times its text, so it bounds memory without cutting
+  an itinerary.
+  **Horde verifies no certificate unless told to** — always pass the `context`
+  built by `sslContext`, never construct `Horde_Imap_Client_Socket` without it
+  (see the connection decision in §3).
 - **Fetch the last N by sequence number, not SEARCH/SORT.** `fetchRecent` reads
   the mailbox `MESSAGES` count and fetches the trailing sequence range
   `max-N+1:max` (new mail arrives last). The earlier approach (`search()` with an empty `Search_Query` + a `SORT

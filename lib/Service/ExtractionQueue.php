@@ -225,8 +225,9 @@ class ExtractionQueue {
 		// get to overwrite the newer attempt's outcome, whatever became of it.
 		$latest = $this->taskMapMapper->findLatestForMessage($map->getUserId(), $map->getMessageId());
 		if ($latest !== null && $latest->getId() !== $map->getId()) {
-			$map->setStatus(TaskMap::STATUS_SUPERSEDED);
-			$this->taskMapMapper->update($map);
+			// Conditional, like the handlers' own settling: its event may be
+			// being handled at this very moment.
+			$this->taskMapMapper->settle($map->getId(), TaskMap::STATUS_SUPERSEDED);
 			return;
 		}
 

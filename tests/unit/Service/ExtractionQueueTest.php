@@ -278,9 +278,11 @@ final class ExtractionQueueTest extends TestCase {
 		$this->messageMapper->method('findByStatus')->willReturn([]);
 
 		$this->llmService->expects($this->never())->method('findTask');
+		// Conditional: its event may be being handled at this very moment.
 		$this->taskMapMapper->expects($this->once())
-			->method('update')
-			->with($this->callback(static fn (TaskMap $m) => $m->getStatus() === TaskMap::STATUS_SUPERSEDED));
+			->method('settle')
+			->with($stale->getId(), TaskMap::STATUS_SUPERSEDED);
+		$this->taskMapMapper->expects($this->never())->method('update');
 
 		$this->queue->reconcile();
 	}

@@ -183,11 +183,29 @@ class BookingMatcher {
 				$candidate,
 				BookingMatch::REASON_ITINERARY,
 				true,
-				'same ' . $sharedName . ' booking starting the same day, and neither email carried a reference to tell them apart',
+				'same ' . $sharedName . ' booking starting the same day, and ' . $this->referenceEvidence($incomingIds, $candidateIds),
 			);
 		}
 
 		return $fallback;
+	}
+
+	/**
+	 * Why tier 2's references could not tell two bookings apart, naming the one
+	 * reference there was. It used to say "neither email carried a reference"
+	 * even when this one did, which misdirects whoever is checking the call.
+	 *
+	 * @param list<string> $incomingIds
+	 * @param list<string> $candidateIds
+	 */
+	private function referenceEvidence(array $incomingIds, array $candidateIds): string {
+		if ($incomingIds !== []) {
+			return 'this email carries reference ' . implode(', ', $incomingIds) . ', but the existing booking has none to compare it with';
+		}
+		if ($candidateIds !== []) {
+			return 'the existing booking has reference ' . implode(', ', $candidateIds) . ', but this email carries none';
+		}
+		return 'neither email carried a reference to tell them apart';
 	}
 
 	/* ------------------------------------------------------------ identifiers */

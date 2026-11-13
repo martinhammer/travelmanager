@@ -20,7 +20,7 @@ final class MessageText {
 	/** One attachment's text, before its heading. Real tickets run 1–4 KB. */
 	public const PER_ATTACHMENT = 8000;
 
-	private const TRUNCATED = '[… truncated]';
+	public const TRUNCATED = '[… truncated]';
 
 	/**
 	 * Cut $text to at most $limit bytes, marked so the model and the Raw message

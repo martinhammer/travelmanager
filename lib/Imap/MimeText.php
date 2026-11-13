@@ -101,7 +101,10 @@ final class MimeText {
 	}
 
 	private static function filename(Horde_Mime_Part $part): ?string {
-		$name = trim((string)$part->getName());
+		// Scrubbed: a raw 8-bit name is not necessarily UTF-8, and the name is
+		// stored as JSON, which refuses it — that refusal used to stop the whole
+		// mailbox read on this message, every run.
+		$name = trim(mb_scrub((string)$part->getName(), 'UTF-8'));
 		return $name === '' ? null : $name;
 	}
 

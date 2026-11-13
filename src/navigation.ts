@@ -1,6 +1,11 @@
 import { computed, ref, watch } from 'vue'
 import type { Booking, Message, Trip } from './api'
 import { findMessageBySourceId } from './api'
+import type { BookingSort, BookingSortDirection } from './bookings'
+import { monthOf } from './calendar'
+import type { SortDirection } from './grid'
+import type { MessageSort } from './messages'
+import type { TripSort, TripSortDirection } from './trips'
 import type { DetailType, Route } from './detail'
 import { byId, detailLabel, detailRoute, formatRoute, keepsView, matchRoute, parseRoute } from './detail'
 import { bookings, messages, trips } from './store'
@@ -18,6 +23,37 @@ import { bookings, messages, trips } from './store'
  */
 
 export const route = ref<Route>(parseRoute(window.location.hash))
+
+/**
+ * The month the calendar shows. Here rather than in CalendarView, because App.vue
+ * mounts one view at a time (`v-if`) and a component ref went back to today on
+ * every visit to another view. Not in the hash: a reload still opens on today.
+ */
+export const calendarMonth = ref(monthOf())
+
+/**
+ * Each list's filters and sort order, here for the same reason as
+ * calendarMonth: refs in the view went back to their defaults on every visit to
+ * another view.
+ */
+export const bookingsList = {
+	filter: ref('all'),
+	type: ref('all'),
+	// 'travel' in 'smart' mode: what is under way or coming up next, first.
+	sort: ref<BookingSort>('travel'),
+	direction: ref<BookingSortDirection>('smart'),
+}
+export const tripsList = {
+	filter: ref('all'),
+	// As on Bookings: under way or coming up first, then the past.
+	sort: ref<TripSort>('travel'),
+	direction: ref<TripSortDirection>('smart'),
+}
+export const messagesList = {
+	filter: ref('all'),
+	sort: ref<MessageSort>('received'),
+	direction: ref<SortDirection>('desc'),
+}
 
 /** Caption for the panel's back button, or null when there is nowhere to go back to. */
 export const backLabel = ref<string | null>(null)
@@ -139,7 +175,9 @@ export const ensureSourceMessage = async (): Promise<void> => {
 	}
 	try {
 		const found = await findMessageBySourceId(sourceId)
-		if (found !== null) {
+		// Checked again: a reload during the await may have brought it in, and
+		// appending it then would list one message twice.
+		if (found !== null && !messages.value.some((m) => m.id === found.id)) {
 			messages.value = [...messages.value, found]
 		}
 	} catch (e) {

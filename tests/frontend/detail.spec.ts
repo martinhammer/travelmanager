@@ -237,4 +237,8 @@ describe('detailLabel', () => {
 		expect(detailLabel('booking', booking({ title: null }))).toBe('flight')
 		expect(detailLabel('message', message({ subject: null }))).toBe('<abc@example.com>')
 	})
+
+	it('decodes a leftover entity, as the panel itself shows the title', () => {
+		expect(detailLabel('booking', booking({ title: 'Sebie&#39;s birthday' }))).toBe('Sebie\'s birthday')
+	})
 })

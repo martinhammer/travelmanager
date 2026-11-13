@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import { t } from '@nextcloud/l10n'
 import { openTripEditor } from './dialogs'
 import GridSortMenu from './GridSortMenu.vue'
-import { type SortDirection, formatSpan, nextSortDirection, sortMarker } from './grid'
-import { tripLabel, tripTypeLabel, typeName } from './labels'
-import { isOpen, openDetail } from './navigation'
+import { formatSpan, nextSortDirection, sortMarker } from './grid'
+import { travelSortLabel, tripLabel, tripTypeLabel, typeName } from './labels'
+import { isOpen, openDetail, route, tripsList } from './navigation'
 import { allTripRows, loading, trips } from './store'
 import { type TripSort, TRIP_COLUMNS, filterTripsByPeriod, sortTrips } from './trips'
 
-const filter = ref('all')
-const sort = ref<TripSort>('travel')
-const direction = ref<SortDirection>('asc')
+const { filter, sort, direction } = tripsList
+
+// The period filter is remembered across views, so it can hide the trip just
+// opened; opening it clears the filter. Only on opening, as in BookingsView.
+watch(() => route.value.detail, (detail) => {
+	if (detail?.type === 'trip'
+		&& filter.value !== 'all'
+		&& allTripRows.value.some((row) => row.trip.id === detail.id)
+		&& !filterTripsByPeriod(allTripRows.value, filter.value).some((row) => row.trip.id === detail.id)) {
+		filter.value = 'all'
+	}
+}, { immediate: true })
 
 const visible = computed(() => sortTrips(
 	filterTripsByPeriod(allTripRows.value, filter.value),
@@ -29,6 +38,9 @@ const columnLabels: Record<TripSort, string> = {
 }
 
 const columns = TRIP_COLUMNS.map((column) => ({ key: column.key, label: columnLabels[column.key] }))
+
+const headingTitle = (column: TripSort): string | undefined =>
+	column === 'travel' && sort.value === 'travel' ? travelSortLabel(direction.value) : undefined
 
 const onSortColumn = (column: TripSort): void => {
 	direction.value = nextSortDirection(TRIP_COLUMNS, column, sort.value, direction.value)
@@ -56,6 +68,7 @@ const onNewTrip = () => openTripEditor(null)
 			<GridSortMenu :columns="columns"
 				:sort="sort"
 				:direction="direction"
+				:describe="headingTitle('travel')"
 				@select="onSortColumn($event as TripSort)" />
 			<NcButton variant="primary" @click="onNewTrip">
 				{{ t('travelmanager', 'Create trip') }}
@@ -80,6 +93,7 @@ const onNewTrip = () => openTripEditor(null)
 				:key="column.key"
 				type="button"
 				:class="['tm-column-heading', { 'tm-column-heading-active': sort === column.key }]"
+				:title="headingTitle(column.key)"
 				@click="onSortColumn(column.key)">
 				<span class="tm-heading-label">{{ column.label }}</span>
 				<span class="tm-sort-marker" aria-hidden="true">
@@ -138,11 +152,16 @@ const onNewTrip = () => openTripEditor(null)
 </template>
 
 <style module>
-/* Name | Type | Travel dates | booking lozenges. The name takes the stretch;
-   Type needs only its one word, and the lozenge strip a generous fixed width
-   since its count varies with the trip's booking types. */
+/* Name | Type | Travel dates | booking lozenges. Type needs only its one word.
+   The name and the lozenge strip share what is left equally: trip names are
+   short, while a trip with four or five booking types needs more than the
+   340px floor, and a fixed strip wrapped it onto a second line beside a name
+   column that was mostly empty. Shares in fr, never max-content: every row is
+   its own grid, so a content-sized column would differ per row and the columns
+   would stop lining up. Below ~1100px the strip sits at its floor and the
+   name gets the rest, as before. */
 .columns {
-	grid-template-columns: minmax(0, 1fr) 110px 190px 340px;
+	grid-template-columns: minmax(0, 1fr) 110px 190px minmax(340px, 1fr);
 }
 
 /* Steps follow the space the grid has, not the window — see the note in

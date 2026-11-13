@@ -100,7 +100,7 @@ const onCheck = async () => {
 }
 
 const onImport = async () => {
-	if (file.value === null) {
+	if (file.value === null || importing.value) {
 		return
 	}
 	importing.value = true

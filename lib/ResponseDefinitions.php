@@ -99,6 +99,7 @@ namespace OCA\TravelManager;
  *     maxInFlight: int,
  *     maxPerHour: int,
  *     pdfAttachments: bool,
+ *     verifyImapCertificates: bool,
  * }
  *
  * @psalm-type TravelManagerConnectionTest = array{

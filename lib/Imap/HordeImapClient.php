@@ -11,6 +11,8 @@ use Horde_Imap_Client_Ids;
 use Horde_Imap_Client_Socket;
 use Horde_Mime_Part;
 use OCA\TravelManager\Exception\ImapException;
+use OCA\TravelManager\Service\ConfigService;
+use OCP\ICertificateManager;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -41,8 +43,22 @@ class HordeImapClient implements IImapClient {
 	 */
 	private const MAX_BODY_LENGTH = 100000;
 
+	/**
+	 * Most bytes downloaded of one text part, before decoding. Far above the
+	 * text cap on purpose: that is applied to *text*, and a booking email's
+	 * HTML can be ten times the size of what is left once its markup is
+	 * stripped, so cutting the download at the text cap would lose the
+	 * itinerary of exactly the heaviest emails. This only stops a multi-
+	 * megabyte part being held whole in memory. A multiple of 4, so a cut
+	 * through base64 still decodes.
+	 */
+	private const MAX_PART_FETCH = 2 * 1024 * 1024;
+
 	public function __construct(
 		private LoggerInterface $logger,
+		private ConfigService $configService,
+		private ImapEndpointResolver $endpointResolver,
+		private ICertificateManager $certificateManager,
 	) {
 	}
 
@@ -53,7 +69,7 @@ class HordeImapClient implements IImapClient {
 			// Opening read-only confirms the mailbox exists and is selectable.
 			$client->openMailbox($connection->mailbox, Horde_Imap_Client::OPEN_READONLY);
 		} catch (Horde_Imap_Client_Exception $e) {
-			throw new ImapException('IMAP verification failed: ' . $this->describe($e), 0, $e);
+			throw new ImapException('IMAP verification failed: ' . $this->describe($e, $connection), 0, $e);
 		} finally {
 			$this->logout($client);
 		}
@@ -104,7 +120,7 @@ class HordeImapClient implements IImapClient {
 			usort($messages, static fn (ImapMessage $a, ImapMessage $b): int => $a->uid <=> $b->uid);
 			return $messages;
 		} catch (Horde_Imap_Client_Exception $e) {
-			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
+			throw new ImapException('IMAP fetch failed: ' . $this->describe($e, $connection), 0, $e);
 		} finally {
 			$this->logout($client);
 		}
@@ -161,7 +177,7 @@ class HordeImapClient implements IImapClient {
 			}
 			return $parts;
 		} catch (Horde_Imap_Client_Exception $e) {
-			throw new ImapException('IMAP fetch failed: ' . $this->describe($e), 0, $e);
+			throw new ImapException('IMAP fetch failed: ' . $this->describe($e, $connection), 0, $e);
 		} finally {
 			$this->logout($client);
 		}
@@ -180,11 +196,21 @@ class HordeImapClient implements IImapClient {
 	 * @psalm-suppress RedundantConditionGivenDocblockType
 	 * @psalm-suppress DocblockTypeContradiction
 	 */
-	private function describe(Horde_Imap_Client_Exception $e): string {
+	private function describe(Horde_Imap_Client_Exception $e, ImapConnection $connection): string {
 		$message = $e->getMessage();
 		$details = trim((string)($e->details ?? ''));
 		if ($details !== '' && stripos($message, $details) === false) {
 			$message .= ' — server said: ' . $details;
+		}
+		// A refused certificate surfaces as a bare connect failure: the TLS error
+		// is a PHP warning Horde suppresses, leaving `[0]` as the details. Since
+		// verification is new for servers that were working without it, say so.
+		if ($e->getCode() === Horde_Imap_Client_Exception::SERVER_CONNECT
+			&& strtolower($connection->security) !== ImapEndpoint::SECURITY_NONE
+			&& $this->configService->isImapTlsVerified()) {
+			$message .= ' — this can also mean the server\'s certificate could not be verified for '
+				. $connection->host . '. A self-signed certificate needs its CA imported by the administrator'
+				. ' (occ security:certificates:import).';
 		}
 		$code = $e->getCode();
 		if ($code !== 0) {
@@ -193,20 +219,73 @@ class HordeImapClient implements IImapClient {
 		return $message;
 	}
 
+	/**
+	 * A client for this connection, checked and pinned before anything is sent.
+	 *
+	 * Checked again here, not only on save: rows saved before the rules existed
+	 * are still in the database, and cron dials every enrolled user.
+	 *
+	 * Horde's socket client turns certificate checks *off* unless told otherwise
+	 * (`Horde\Socket\Client::__construct` merges `verify_peer => false` under the
+	 * caller's context), so the context below is what verifies anything at all.
+	 * The bundle is Nextcloud's own, the one its HTTP client uses, so a CA an
+	 * admin imported with `occ security:certificates:import` is trusted here too.
+	 *
+	 * The host is dialled by the address the resolver checked, never by name
+	 * (see ImapEndpointResolver), so the name goes in `peer_name`: that is what
+	 * the certificate is verified against and what SNI sends.
+	 *
+	 * @throws ImapException when the endpoint is invalid or may not be reached
+	 */
 	private function createSocket(ImapConnection $connection): Horde_Imap_Client_Socket {
+		$problem = ImapEndpoint::problem($connection->host, $connection->port, strtolower($connection->security));
+		if ($problem !== null) {
+			throw new ImapException($problem);
+		}
+		$address = $this->endpointResolver->resolve($connection->host);
+
 		$secure = match (strtolower($connection->security)) {
-			'ssl' => 'ssl',
-			'tls' => 'tls',
+			ImapEndpoint::SECURITY_SSL => 'ssl',
+			ImapEndpoint::SECURITY_TLS => 'tls',
 			default => false,
 		};
 		return new Horde_Imap_Client_Socket([
 			'username' => $connection->user,
 			'password' => $connection->password,
-			'hostspec' => $connection->host,
+			'hostspec' => $address,
 			'port' => $connection->port,
 			'secure' => $secure,
 			'timeout' => 20,
+			'context' => ['ssl' => $this->sslContext($connection->host)],
 		]);
+	}
+
+	/**
+	 * @return array<string, bool|string>
+	 */
+	private function sslContext(string $host): array {
+		$peerName = ImapEndpoint::ipLiteral($host) ?? $host;
+		if (!$this->configService->isImapTlsVerified()) {
+			return [
+				'verify_peer' => false,
+				'verify_peer_name' => false,
+				'allow_self_signed' => true,
+				'peer_name' => $peerName,
+			];
+		}
+		$context = [
+			'verify_peer' => true,
+			'verify_peer_name' => true,
+			'allow_self_signed' => false,
+			'peer_name' => $peerName,
+		];
+		try {
+			$context['cafile'] = $this->certificateManager->getAbsoluteBundlePath();
+		} catch (\Throwable $e) {
+			// Still verified, against the system's CA store instead.
+			$this->logger->warning('Travel Manager: could not locate the certificate bundle, using the system CA store: ' . $e->getMessage());
+		}
+		return $context;
 	}
 
 	private function logout(Horde_Imap_Client_Socket $client): void {
@@ -226,11 +305,8 @@ class HordeImapClient implements IImapClient {
 		$envelope = $data->getEnvelope();
 		$uid = (int)$data->getUid();
 
-		$messageId = trim((string)$envelope->message_id);
-		if ($messageId === '') {
-			// Synthetic but stable id so dedup still works without a Message-ID.
-			$messageId = sprintf('<tm-%d-%d@travelmanager.local>', $uidValidity, $uid);
-		}
+		// Synthetic but stable when the header is missing or cannot be stored.
+		$messageId = MessageId::key((string)$envelope->message_id, $uidValidity, $uid);
 
 		$subject = (string)$envelope->subject;
 		$date = $this->toDate($envelope->date);
@@ -292,7 +368,7 @@ class HordeImapClient implements IImapClient {
 		$query = new Horde_Imap_Client_Fetch_Query();
 		foreach ($partIds as $partId) {
 			// `peek` => do NOT set the \Seen flag (read-only, V6).
-			$query->bodyPart($partId, ['peek' => true]);
+			$query->bodyPart($partId, ['peek' => true, 'length' => self::MAX_PART_FETCH]);
 		}
 		$result = $client->fetch($mailbox, $query, ['ids' => new Horde_Imap_Client_Ids([$data->getUid()])]);
 

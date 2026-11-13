@@ -33,8 +33,13 @@ class UserIngestionJob extends QueuedJob {
 			return;
 		}
 
-		// Re-check the flags: state may have changed since dispatch.
-		if (!$this->configService->isFeatureEnabled() || !$this->configService->userExists($userId)) {
+		// Re-check the flags: state may have changed since dispatch — including
+		// the user's own switch, so turning the account off stops a job that was
+		// already queued. "Read mailbox now" calls the service directly, so it
+		// still works with the switch off, as it always has.
+		if (!$this->configService->isFeatureEnabled()
+			|| !$this->configService->userExists($userId)
+			|| !$this->configService->isUserEnabled($userId)) {
 			return;
 		}
 

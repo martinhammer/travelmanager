@@ -1,5 +1,6 @@
 import type { Booking, Message, MessageAttachment } from './api'
 import type { SortColumn, SortDirection } from './grid'
+import { hasPossibleDuplicate } from './bookings'
 
 /**
  * Human labels for the ingestion ledger's statuses. The wording matters here:
@@ -347,8 +348,10 @@ const attachmentNotices = (message: Message): MessageNotice[] => {
  * response we repaired.
  * @param message the ledger row
  * @param created the bookings this message produced (see bookingsFromMessage)
+ * @param allBookings every booking, since whether one still has a partner to
+ *   compare with depends on the others
  */
-export const messageNotices = (message: Message, created: Booking[] = []): MessageNotice[] => {
+export const messageNotices = (message: Message, created: Booking[] = [], allBookings: Booking[] = created): MessageNotice[] => {
 	// The discard sits directly after the outcome it answers: the failure is still
 	// described in full (that is what prompt tuning reads), and this says what the
 	// user decided about it.
@@ -364,7 +367,13 @@ export const messageNotices = (message: Message, created: Booking[] = []): Messa
 	// email came second is an accident of arrival order the reader has no way to
 	// know. The wording says the booking may be a duplicate rather than that this
 	// email duplicated something, so it is true from either side.
-	if (created.some((booking) => booking.duplicateGroupId !== null)) {
+	//
+	// And only while there is still something to compare, by the same rule as
+	// the Bookings grid's mark (hasPossibleDuplicate): once the other booking is
+	// discarded or archived the group id stays on the row, but the sidebar lists
+	// no partner, and a warning asking for a comparison nobody can make is one
+	// the user cannot clear.
+	if (created.some((booking) => hasPossibleDuplicate(allBookings, booking))) {
 		notices.push({
 			type: 'warning',
 			text: 'A booking from this email may be the same as one from another email. Compare them and discard whichever is wrong.',
@@ -378,6 +387,16 @@ export const messageNotices = (message: Message, created: Booking[] = []): Messa
 		notices.push({
 			type: 'warning',
 			text: 'The model returned malformed JSON, which Travel Manager repaired before reading it.',
+		})
+	}
+
+	// Also not tied to a status: what *was* read may have made a booking, so the
+	// row can be processed and still be missing the rest. Retrying is how to get
+	// it, which is why it warns rather than informs.
+	if (message.issueReasons.includes('incomplete_json')) {
+		notices.push({
+			type: 'warning',
+			text: 'Part of the model\'s response was cut off or could not be read, so bookings from this email may be missing. Retry the extraction to try again.',
 		})
 	}
 

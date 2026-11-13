@@ -197,6 +197,32 @@ class ProcessedMessageMapper extends QBMapper {
 	}
 
 	/**
+	 * Put a row back in the queue for a retry, **only if its status is still the
+	 * one the caller read**.
+	 *
+	 * Two Retry clicks, or a click and a second tab, both read `failed` before
+	 * either wrote anything; each then queued its own attempt, and whichever
+	 * answer landed last won. One conditional statement lets exactly one of them
+	 * through. Everything a retry resets is in the same statement, so a pump
+	 * claiming the row a moment later cannot be overwritten by a second write.
+	 */
+	public function requeueForRetry(int $id, string $userId, string $fromStatus, \DateTime $now): bool {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('status', $qb->createNamedParameter(ProcessedMessage::STATUS_QUEUED))
+			->set('error', $qb->createNamedParameter(null))
+			->set('failure_kind', $qb->createNamedParameter(null))
+			->set('issue_reasons', $qb->createNamedParameter(null))
+			->set('related_booking_ids', $qb->createNamedParameter(null))
+			->set('discarded', $qb->createNamedParameter(false, IQueryBuilder::PARAM_BOOL))
+			->set('processed_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_DATETIME_MUTABLE))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('status', $qb->createNamedParameter($fromStatus)));
+		return $qb->executeStatement() === 1;
+	}
+
+	/**
 	 * Rows in a status across all users, oldest first. For housekeeping over the
 	 * in-flight set, which the cap keeps small.
 	 *

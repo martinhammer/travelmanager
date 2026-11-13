@@ -6,6 +6,7 @@ namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\Db\Booking;
 use OCA\TravelManager\Db\BookingMapper;
+use OCA\TravelManager\Db\ColumnText;
 use OCA\TravelManager\Db\Trip;
 use OCA\TravelManager\Db\TripMapper;
 use OCA\TravelManager\Service\Dto\AppliedExtraction;
@@ -100,14 +101,18 @@ class BookingService {
 	 * @return list<MatchCandidate>
 	 */
 	private function findCandidates(string $userId, ExtractedBooking $extracted, array $exclude = []): array {
-		$identifiers = [];
-		foreach ([$extracted->bookingReference, $extracted->confirmationNumber] as $value) {
-			if ($value !== null && $value !== '') {
-				$identifiers[] = $value;
-			}
-			$normalized = $this->matcher->normalizeIdentifier($value);
-			if ($normalized !== null) {
-				$identifiers[] = $normalized;
+		// Compared normalised, as the matcher compares them: the columns hold
+		// what the model wrote, so `ES867-772 590` stored would never equal an
+		// incoming `es867772590` in SQL, and a rebooking that moved the dates
+		// out of the window became a second draft. An identifier too short or
+		// generic to normalise is no evidence the matcher would use either.
+		$incoming = $this->matcher->identifierSet($extracted->bookingReference, $extracted->confirmationNumber);
+		$ids = [];
+		if ($incoming !== []) {
+			foreach ($this->bookingMapper->findIdentifiers($userId, $extracted->type) as $id => [$reference, $confirmation]) {
+				if (array_intersect($incoming, $this->matcher->identifierSet($reference, $confirmation)) !== []) {
+					$ids[] = $id;
+				}
 			}
 		}
 
@@ -116,7 +121,7 @@ class BookingService {
 			$extracted->type,
 			$this->toDateTime($extracted->startDate),
 			self::MATCH_WINDOW_DAYS,
-			array_values(array_unique($identifiers)),
+			$ids,
 		);
 
 		$rows = array_filter($rows, static fn (Booking $booking): bool => !in_array($booking->getId(), $exclude, true));
@@ -176,10 +181,13 @@ class BookingService {
 		$booking->setReviewState(Booking::REVIEW_DRAFT);
 		$booking->setCreatedAt($now);
 		$booking->setUpdatedAt($now);
-		$booking->setProvider($extracted->provider);
-		$booking->setBookingReference($extracted->bookingReference);
-		$booking->setConfirmationNumber($extracted->confirmationNumber);
-		$booking->setTitle($extracted->title);
+		// The model's strings are fitted to their columns rather than refused: an
+		// over-long title is no reason to lose the booking, and failing the insert
+		// marked the email failed on every retry.
+		$booking->setProvider(ColumnText::fit($extracted->provider));
+		$booking->setBookingReference(ColumnText::fit($extracted->bookingReference));
+		$booking->setConfirmationNumber(ColumnText::fit($extracted->confirmationNumber));
+		$booking->setTitle(ColumnText::fit($extracted->title));
 		$booking->setSourceMessageId($messageId);
 		$booking->setDuplicateGroupId($duplicateGroupId);
 		$booking->setConfidence($extracted->confidence);
@@ -283,7 +291,12 @@ class BookingService {
 	public function purge(string $userId, int $bookingId): void {
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		$groupId = $booking->getDuplicateGroupId();
-		$this->bookingMapper->delete($booking);
+		$this->inTransaction(function () use ($booking, $userId, $groupId): void {
+			$this->bookingMapper->delete($booking);
+			if ($groupId !== null) {
+				$this->tidyDuplicateGroup($userId, $groupId);
+			}
+		});
 		if ($groupId !== null) {
 			$this->tidyDuplicateGroup($userId, $groupId);
 		}
@@ -311,7 +324,10 @@ class BookingService {
 		}
 		$booking->setDuplicateGroupId(null);
 		$booking->setUpdatedAt($this->timeFactory->getDateTime());
-		$this->bookingMapper->update($booking);
+		$this->inTransaction(function () use ($booking, $userId, $groupId): void {
+			$this->bookingMapper->update($booking);
+			$this->tidyDuplicateGroup($userId, $groupId);
+		});
 		$this->tidyDuplicateGroup($userId, $groupId);
 	}
 
@@ -319,10 +335,33 @@ class BookingService {
 	 * A group of one claims nothing, so clear it rather than leaving a value
 	 * behind that reads like a flag in the database and shows as nothing in the
 	 * UI. Callers pass the group a booking has just left or been deleted from.
+	 *
+	 * Callers run it twice: inside the transaction that removed the member, so
+	 * no crash can separate the two writes, and again after the commit. The
+	 * second is for concurrency, which the transaction makes worse rather than
+	 * better: two members of a three-member group leaving at once each count
+	 * the other as still present, since neither sees the other's uncommitted
+	 * write, and neither dissolves the one left. Whichever commits second then
+	 * sees both on its second count.
 	 */
 	private function tidyDuplicateGroup(string $userId, int $groupId): void {
-		if ($this->bookingMapper->countInDuplicateGroup($userId, $groupId) < 2) {
-			$this->bookingMapper->clearDuplicateGroup($userId, $groupId);
+		$members = $this->bookingMapper->duplicateGroupMemberIds($userId, $groupId, 2);
+		if (count($members) === 1) {
+			$this->bookingMapper->clearDuplicateGroupOf($userId, $members[0], $groupId);
+		}
+	}
+
+	/**
+	 * @param callable(): void $work
+	 */
+	private function inTransaction(callable $work): void {
+		$this->db->beginTransaction();
+		try {
+			$work();
+			$this->db->commit();
+		} catch (\Throwable $e) {
+			$this->db->rollBack();
+			throw $e;
 		}
 	}
 
@@ -330,8 +369,16 @@ class BookingService {
 	 * Apply user edits to a draft booking's own fields.
 	 *
 	 * @param array{title?:string,provider?:string,bookingReference?:string,confirmationNumber?:string} $values
+	 * @throws \InvalidArgumentException when a value is longer than its column
 	 */
 	public function updateBookingFields(string $userId, int $bookingId, array $values): Booking {
+		// What the user typed is refused rather than cut: shortening it silently
+		// would save something they did not enter.
+		foreach (['title', 'provider', 'bookingReference', 'confirmationNumber'] as $field) {
+			if (array_key_exists($field, $values) && !ColumnText::fits($values[$field])) {
+				throw new \InvalidArgumentException(self::tooLong($field));
+			}
+		}
 		$booking = $this->bookingMapper->find($bookingId, $userId);
 		if (array_key_exists('title', $values)) {
 			$booking->setTitle($values['title']);
@@ -359,9 +406,13 @@ class BookingService {
 	}
 
 	/**
-	 * @throws \InvalidArgumentException when the type or colour is not one we store
+	 * @throws \InvalidArgumentException when the type or colour is not one we
+	 *                                   store, or the name is too long
 	 */
 	public function createTrip(string $userId, string $name, ?string $notes = null, ?string $type = null, ?string $color = null): Trip {
+		if (!ColumnText::fits($name)) {
+			throw new \InvalidArgumentException(self::tooLong('name'));
+		}
 		$now = $this->timeFactory->getDateTime();
 		$trip = new Trip();
 		$trip->setUserId($userId);
@@ -383,9 +434,13 @@ class BookingService {
 	 * with those, "not supplied" and "clear it" are the same value.
 	 *
 	 * @param array{name?:string,notes?:string,type?:string|null,color?:string|null} $values
-	 * @throws \InvalidArgumentException when the type or colour is not one we store
+	 * @throws \InvalidArgumentException when the type or colour is not one we
+	 *                                   store, or the name is too long
 	 */
 	public function updateTrip(string $userId, int $tripId, array $values): Trip {
+		if (array_key_exists('name', $values) && !ColumnText::fits($values['name'])) {
+			throw new \InvalidArgumentException(self::tooLong('name'));
+		}
 		$trip = $this->tripMapper->find($tripId, $userId);
 		if (array_key_exists('name', $values)) {
 			$trip->setName($values['name']);
@@ -401,6 +456,10 @@ class BookingService {
 		}
 		$trip->setUpdatedAt($this->timeFactory->getDateTime());
 		return $this->tripMapper->update($trip);
+	}
+
+	private static function tooLong(string $field): string {
+		return 'The ' . $field . ' must be at most ' . ColumnText::VARCHAR . ' characters.';
 	}
 
 	/**

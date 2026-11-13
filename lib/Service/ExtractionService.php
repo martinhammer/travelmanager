@@ -245,23 +245,29 @@ JSON;
 	 * @throws ExtractionException when the response is not recoverable JSON
 	 */
 	public function parseAndValidate(string $rawOutput): ExtractionResult {
-		$repairNote = null;
-		$json = $this->extractJsonObject($rawOutput, $repairNote);
+		$repair = $this->repairJson($rawOutput);
+		if ($repair['refusal'] !== null) {
+			throw new ExtractionException($repair['refusal']);
+		}
+		$json = $repair['json'];
 		if ($json === null) {
 			throw new ExtractionException('No JSON object found in LLM response');
 		}
 
 		/** @var ExtractionIssue[] $issues */
 		$issues = [];
-		if ($repairNote !== null) {
+		if ($repair['note'] !== null) {
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_REPAIRED_JSON,
-				'The model returned malformed JSON, repaired before parsing: ' . $repairNote,
+				'The model returned malformed JSON, repaired before parsing: ' . $repair['note'],
 				false,
 			);
 		}
 
-		$decoded = json_decode($json, true);
+		// Big integers as strings: an unquoted 16-digit ticket number overflows
+		// PHP's int, and as a float it would come back rounded — a different
+		// number that still looks like a plausible identifier.
+		$decoded = json_decode($json, true, 512, JSON_BIGINT_AS_STRING);
 		if (!is_array($decoded)) {
 			throw new ExtractionException('LLM response is not valid JSON');
 		}
@@ -269,6 +275,18 @@ JSON;
 		$rawBookings = $decoded['bookings'] ?? null;
 		if (!is_array($rawBookings)) {
 			throw new ExtractionException('LLM response is missing a "bookings" array');
+		}
+		if ($repair['lost'] !== null) {
+			// Nothing read and something missing is not "no booking": closing
+			// `{"bookings": [` gives an empty list that would read as exactly that.
+			if ($rawBookings === []) {
+				throw new ExtractionException('LLM response is incomplete and no booking could be read from it');
+			}
+			$issues[] = new ExtractionIssue(
+				ExtractionIssue::REASON_INCOMPLETE_JSON,
+				'The model returned incomplete JSON: ' . $repair['lost'],
+				true,
+			);
 		}
 
 		$bookings = [];
@@ -328,8 +346,8 @@ JSON;
 		return new ExtractedBooking(
 			$type,
 			$this->nullableString($raw['provider'] ?? null),
-			$this->nullableString($raw['booking_reference'] ?? null),
-			$this->nullableString($raw['confirmation_number'] ?? null),
+			$this->identifier($raw['booking_reference'] ?? null),
+			$this->identifier($raw['confirmation_number'] ?? null),
 			$status,
 			$this->nullableString($raw['title'] ?? null),
 			$details,
@@ -354,34 +372,45 @@ JSON;
 	 */
 	private function validateSegmentedDetails(array $details, string $noun, string $label, array &$issues): ?array {
 		$segments = [];
-		$dates = [];
+		$departures = [];
+		$arrivals = [];
+		/** @var list<string> $unusable what each rejected segment offered, for the issue text */
+		$unusable = [];
 		$seen = 0;
-		foreach ($this->asArray($details['segments'] ?? null) as $rawSegment) {
+		foreach ($this->segmentList($details['segments'] ?? null) as $rawSegment) {
+			// Counted whatever it is: an entry that is not an object is still a
+			// leg the model meant, and "no segments" would misdescribe it.
+			$seen++;
 			if (!is_array($rawSegment)) {
+				$unusable[] = 'an entry that was not an object';
 				continue;
 			}
-			$seen++;
 			$departure = $this->normalizeDate($rawSegment['departureLocal'] ?? null);
 			if ($departure === null) {
 				// A leg without a valid departure time is not usable.
+				$unusable[] = $this->rawValue($rawSegment['departureLocal'] ?? null);
 				continue;
 			}
 			$rawSegment['departureLocal'] = $departure;
 			$arrival = $this->normalizeDate($rawSegment['arrivalLocal'] ?? null);
 			$rawSegment['arrivalLocal'] = $arrival;
+			$rawSegment = $this->numbersAsStrings($rawSegment, ['flightNumber', 'serviceNumber']);
 			$segments[] = $rawSegment;
-			$dates[] = $departure;
+			$departures[] = $departure;
 			if ($arrival !== null) {
-				$dates[] = $arrival;
+				$arrivals[] = $arrival;
 			}
 		}
 
+		// What the rejected legs carried is what the prompt gets tuned against,
+		// as the car and hotel issues already quote theirs.
+		$got = $unusable === [] ? '' : ' (got ' . implode(', ', $unusable) . ')';
 		if ($segments === []) {
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_MISSING_DEPARTURE,
 				$label . ': ' . $noun . ' dropped — ' . ($seen === 0
 					? 'details contained no segments'
-					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal'),
+					: 'none of its ' . $seen . ' segment(s) had a parseable departureLocal' . $got),
 				true,
 			);
 			return null;
@@ -393,13 +422,47 @@ JSON;
 			$issues[] = new ExtractionIssue(
 				ExtractionIssue::REASON_PARTIAL_SEGMENTS,
 				$label . ': kept ' . count($segments) . ' of ' . $seen
-					. ' ' . $noun . ' segment(s); the rest had no parseable departureLocal',
+					. ' ' . $noun . ' segment(s); the rest had no parseable departureLocal' . $got,
 				false,
 			);
 		}
 
 		$details['segments'] = $segments;
-		return [$details, $this->minDate($dates), $this->maxDate($dates)];
+		if (isset($details['passengers']) && is_array($details['passengers'])) {
+			$details['passengers'] = array_map(
+				fn (mixed $passenger): mixed => is_array($passenger) ? $this->numbersAsStrings($passenger, ['ticketNumber']) : $passenger,
+				$details['passengers'],
+			);
+		}
+		// The journey starts at its first departure. An arrival can only end it:
+		// a date-only arrival reads as midnight, so letting arrivals into the
+		// start made a 22:00 departure begin at 00:00 the same day.
+		return [$details, $this->minDate($departures), $this->maxDate([...$departures, ...$arrivals])];
+	}
+
+	/**
+	 * The segments as a list, whatever shape they came in.
+	 *
+	 * A one-leg journey sometimes arrives as `"segments": { "departureLocal": … }`
+	 * — one object rather than a list of one. PHP decodes that to an array as
+	 * well, so iterating it walked the leg's *fields* and reported "no segments".
+	 * An object whose values are all objects is read as a keyed list of legs.
+	 *
+	 * @return list<mixed>
+	 */
+	private function segmentList(mixed $value): array {
+		if (!is_array($value) || $value === []) {
+			return [];
+		}
+		if (array_is_list($value)) {
+			return $value;
+		}
+		foreach ($value as $entry) {
+			if (!is_array($entry)) {
+				return [$value];
+			}
+		}
+		return array_values($value);
 	}
 
 	/**
@@ -459,18 +522,26 @@ JSON;
 	}
 
 	/**
-	 * Strip markdown fences and isolate the first balanced JSON object.
+	 * Strip markdown fences and isolate the first balanced JSON object, with
+	 * what the repair could not vouch for.
 	 *
 	 * When the response runs out before the structure closes — the observed
 	 * failure mode is a reply exactly one `}` short — the unclosed containers are
 	 * closed so an otherwise-correct extraction is not thrown away. Any such
-	 * repair is reported through $repairNote; it is never done silently.
+	 * repair is reported in `note`; it is never done silently.
 	 *
-	 * @param ?string $repairNote out-param: a description of the repair, or null
-	 *                            when the response needed none
+	 * - `json`: the object to decode, or null when there is none worth decoding.
+	 * - `note`: what was changed, or null when nothing was.
+	 * - `lost`: set when part of the response may be missing from `json` — it
+	 *   was cut off below the root, or text that looked like more of it could
+	 *   not be read. Bookings can be in that part, so it is never just a repair.
+	 * - `refusal`: set when the response is well-formed enough to read but
+	 *   ambiguous, so reading it would mean guessing (a repeated key).
+	 *
+	 * @return array{json: ?string, note: ?string, lost: ?string, refusal: ?string}
 	 */
-	public function extractJsonObject(string $text, ?string &$repairNote = null): ?string {
-		$repairNote = null;
+	public function repairJson(string $text): array {
+		$none = ['json' => null, 'note' => null, 'lost' => null, 'refusal' => null];
 		$text = trim($text);
 		// Remove ```json ... ``` or ``` ... ``` fences if present.
 		$text = preg_replace('/^```(?:json)?\s*/i', '', $text) ?? $text;
@@ -478,22 +549,111 @@ JSON;
 
 		$start = strpos($text, '{');
 		if ($start === false) {
-			return null;
+			return $none;
 		}
 
-		// A stack of the containers currently open, rather than a depth counter:
-		// a missing `}` is not always at the end. The observed failure closes the
-		// bookings array while a booking object is still open, so the repair has
-		// to insert that booking's `}` *before* the `]`, which a count cannot
-		// locate. The output is rebuilt as we scan; for a well-formed response it
-		// is byte-identical to the input slice.
+		// A closer that does not match the innermost open container has two
+		// readings: the model forgot the closers in between (the observed
+		// failure), or this one is extra. The scan assumes the first. When that
+		// ends the document early with more JSON still to come — `{flight}}` then
+		// a bus — the second was right, and assuming the first would silently
+		// drop every later booking. So read that closer as stray and scan again.
+		/** @var list<int> $stray */
+		$stray = [];
+		$scan = $this->scan($text, $start, $stray);
+		$lost = null;
+		for ($tries = 0; $scan['complete'] && $scan['lastForced'] !== null; $tries++) {
+			$rest = trim(substr($text, $scan['end'] + 1));
+			if (preg_match('/^[,\]}]|[{\[]/', $rest) !== 1) {
+				break;
+			}
+			$retry = $this->scan($text, $start, [...$stray, $scan['lastForced']]);
+			if ($tries >= 5 || !$this->closesAndParses($retry)) {
+				// Neither reading accounts for everything: keep what parsed, and
+				// say that the rest was not read rather than pass it off as whole.
+				$lost = 'text after the end of the JSON object could not be read, so bookings in it are missing';
+				break;
+			}
+			$stray[] = $scan['lastForced'];
+			$scan = $retry;
+		}
+
+		if ($scan['duplicate'] !== null) {
+			return ['refusal' => 'LLM response repeats the key "' . $scan['duplicate'] . '" in one object, so which value was meant is unknown'] + $none;
+		}
+
+		$out = $scan['out'];
+		$inserted = $scan['inserted'];
+		if (!$scan['complete']) {
+			// Cut off inside a string: closing the quote would turn a half-written
+			// value into a plausible whole one, which is worse than failing.
+			if ($scan['inString'] || $scan['open'] === []) {
+				return $none;
+			}
+			// Only the root left open is a reply one `}` short; anything deeper
+			// was cut off mid-list, and whatever came next never arrived.
+			if (count($scan['open']) > 1) {
+				$lost = 'the response ended before it was complete, so any bookings after the last one read are missing';
+			}
+			// Cut off between two entries: the comma promises one that never came.
+			$out = preg_replace('/,\s*$/', '', $out) ?? $out;
+			$out .= $this->closers($scan['open']);
+			$inserted += count($scan['open']);
+		}
+
+		$removed = $scan['removed'];
+		if ($inserted === 0 && $removed === 0) {
+			return ['json' => $out, 'lost' => $lost] + $none;
+		}
+
+		// Only accept a repair that actually parses — one that yields
+		// different-but-still-broken JSON just moves the error somewhere less
+		// obvious.
+		if (!is_array(json_decode($out, true))) {
+			return $none;
+		}
+
+		$changes = [];
+		if ($inserted > 0) {
+			$changes[] = 'inserted ' . $inserted . ' missing closing character(s)';
+		}
+		if ($removed > 0) {
+			$changes[] = 'removed ' . $removed . ' stray closing character(s)';
+		}
+		return ['json' => $out, 'note' => implode(', ', $changes), 'lost' => $lost, 'refusal' => null];
+	}
+
+	/**
+	 * One pass over the response from its first `{`, rebuilding it as it goes;
+	 * for a well-formed response the output is byte-identical to the input slice.
+	 *
+	 * A stack of the containers currently open, rather than a depth counter: a
+	 * missing `}` is not always at the end. The observed failure closes the
+	 * bookings array while a booking object is still open, so the repair has to
+	 * insert that booking's `}` *before* the `]`, which a count cannot locate.
+	 *
+	 * Repeated keys are caught here too, because `json_decode` keeps the last
+	 * value without a word: a flight under `bookings` followed by a second
+	 * `"bookings": []` decoded as an email with nothing in it.
+	 *
+	 * @param list<int> $stray offsets of closers to drop as extra
+	 * @return array{out: string, complete: bool, end: int, inString: bool, open: list<string>, inserted: int, removed: int, lastForced: ?int, duplicate: ?string}
+	 */
+	private function scan(string $text, int $start, array $stray): array {
 		/** @var list<string> $open */
 		$open = [];
+		/** @var list<array<string, true>> $keys the keys seen so far, per open container */
+		$keys = [];
 		$out = '';
 		$inserted = 0;
+		$removed = 0;
+		$lastForced = null;
+		$duplicate = null;
 		$complete = false;
 		$inString = false;
 		$escaped = false;
+		$stringStart = 0;
+		$lastString = null;
 		$length = strlen($text);
 
 		for ($i = $start; $i < $length; $i++) {
@@ -507,6 +667,7 @@ JSON;
 					$escaped = true;
 				} elseif ($char === '"') {
 					$inString = false;
+					$lastString = substr($text, $stringStart, $i - $stringStart + 1);
 				}
 				continue;
 			}
@@ -514,12 +675,27 @@ JSON;
 			if ($char === '"') {
 				$out .= $char;
 				$inString = true;
+				$stringStart = $i;
 				continue;
+			}
+
+			if ($char === ':' && $lastString !== null && end($open) === '{') {
+				// As written: a model does not spell one key two ways.
+				$key = substr($lastString, 1, -1);
+				$depth = count($keys) - 1;
+				if (isset($keys[$depth][$key])) {
+					$duplicate ??= $key;
+				}
+				$keys[$depth][$key] = true;
+			}
+			if (!ctype_space($char)) {
+				$lastString = null;
 			}
 
 			if ($char === '{' || $char === '[') {
 				$out .= $char;
 				$open[] = $char;
+				$keys[] = [];
 				continue;
 			}
 
@@ -529,19 +705,23 @@ JSON;
 			}
 
 			$expected = $char === '}' ? '{' : '[';
-			if (!in_array($expected, $open, true)) {
+			if (in_array($i, $stray, true) || !in_array($expected, $open, true)) {
 				// A closer with nothing to match: drop it rather than unbalance
 				// everything after it.
-				$inserted++;
+				$removed++;
 				continue;
 			}
 			// Close whatever the model forgot to close before this one.
+			if (end($open) !== $expected) {
+				$lastForced = $i;
+			}
 			while (end($open) !== $expected) {
-				$missing = array_pop($open);
-				$out .= $missing === '{' ? '}' : ']';
+				$out .= $this->closers([array_pop($open)]);
+				array_pop($keys);
 				$inserted++;
 			}
 			array_pop($open);
+			array_pop($keys);
 			$out .= $char;
 			if ($open === []) {
 				$complete = true;
@@ -549,32 +729,42 @@ JSON;
 			}
 		}
 
-		if (!$complete) {
-			// Cut off inside a string: closing the quote would turn a half-written
-			// value into a plausible whole one, which is worse than failing.
-			if ($inString || $open === []) {
-				return null;
-			}
-			while ($open !== []) {
-				$missing = array_pop($open);
-				$out .= $missing === '{' ? '}' : ']';
-				$inserted++;
-			}
-		}
+		return [
+			'out' => $out,
+			'complete' => $complete,
+			'end' => $i,
+			'inString' => $inString,
+			'open' => $open,
+			'inserted' => $inserted,
+			'removed' => $removed,
+			'lastForced' => $lastForced,
+			'duplicate' => $duplicate,
+		];
+	}
 
-		if ($inserted === 0) {
-			return $out;
+	/**
+	 * Whether a scan's output, closed where it stopped, is JSON.
+	 *
+	 * @param array{out: string, complete: bool, inString: bool, open: list<string>, ...} $scan
+	 */
+	private function closesAndParses(array $scan): bool {
+		if ($scan['inString']) {
+			return false;
 		}
+		return is_array(json_decode($scan['out'] . ($scan['complete'] ? '' : $this->closers($scan['open'])), true));
+	}
 
-		// Only accept a repair that actually parses — one that yields
-		// different-but-still-broken JSON just moves the error somewhere less
-		// obvious.
-		if (!is_array(json_decode($out, true))) {
-			return null;
+	/**
+	 * The closers for these open containers, innermost first.
+	 *
+	 * @param list<string> $open
+	 */
+	private function closers(array $open): string {
+		$closers = '';
+		foreach (array_reverse($open) as $opener) {
+			$closers .= $opener === '{' ? '}' : ']';
 		}
-
-		$repairNote = 'inserted ' . $inserted . ' missing closing character(s)';
-		return $out;
+		return $closers;
 	}
 
 	/**
@@ -587,6 +777,13 @@ JSON;
 		$value = trim($value);
 		if ($value === '') {
 			return null;
+		}
+		// Models often append ISO decoration they were not asked for: fractional
+		// seconds, `Z`, a numeric offset. Each is dropped and the wall-clock part
+		// kept exactly as written — no conversion (V8) — because rejecting it
+		// cost the leg, and a one-leg flight its booking.
+		if (preg_match('/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/i', $value, $m) === 1) {
+			$value = $m[1];
 		}
 		foreach (self::ACCEPTED_DATE_FORMATS as $format) {
 			$dt = \DateTimeImmutable::createFromFormat('!' . $format, $value);
@@ -644,6 +841,45 @@ JSON;
 			return '';
 		}
 		return ' (got "' . trim($value) . '")';
+	}
+
+	/**
+	 * An identifier the model may have written as a JSON number. An all-digit
+	 * reference without its quotes decodes to an int (or, past PHP_INT_MAX, a
+	 * string, given JSON_BIGINT_AS_STRING), and it is the same reference either
+	 * way. It used to come back null with no issue raised, and with both
+	 * identifiers gone BookingMatcher could no longer see that two bookings'
+	 * references differed. A float is not an identifier: it has lost digits
+	 * or never was one.
+	 */
+	private function identifier(mixed $value): ?string {
+		return is_int($value) ? (string)$value : $this->nullableString($value);
+	}
+
+	/**
+	 * As identifier(), for identifier fields inside `details`, which passes
+	 * unknown values through: a numeric one becomes its string, anything else
+	 * — including a missing field — is left exactly as it was.
+	 *
+	 * @param array<array-key, mixed> $item
+	 * @param list<string> $fields
+	 * @return array<array-key, mixed>
+	 */
+	private function numbersAsStrings(array $item, array $fields): array {
+		foreach ($fields as $field) {
+			if (isset($item[$field]) && is_int($item[$field])) {
+				$item[$field] = (string)$item[$field];
+			}
+		}
+		return $item;
+	}
+
+	/** A raw value for an issue's text: quoted when there was one. */
+	private function rawValue(mixed $value): string {
+		if (is_string($value) && trim($value) !== '') {
+			return '"' . trim($value) . '"';
+		}
+		return $value === null ? 'no departureLocal' : 'a ' . get_debug_type($value) . ' departureLocal';
 	}
 
 	private function nullableString(mixed $value): ?string {

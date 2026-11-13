@@ -71,6 +71,11 @@
       <code><![CDATA[__construct]]></code>
     </PossiblyUnusedMethod>
   </file>
+  <file src="lib/Imap/ImapEndpointResolver.php">
+    <PossiblyUnusedMethod>
+      <code><![CDATA[__construct]]></code>
+    </PossiblyUnusedMethod>
+  </file>
   <file src="lib/Listener/TaskFailedListener.php">
     <PossiblyUnusedMethod>
       <code><![CDATA[__construct]]></code>

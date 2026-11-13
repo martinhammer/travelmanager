@@ -127,6 +127,16 @@ describe('sortBookings', () => {
 		expect(sortBookings(pool, 'travel', 'smart', now).map((b) => b.id)).toEqual([2, 4, 5, 1, 3])
 	})
 
+	it('sorts titles as they are shown, with entities decoded', () => {
+		// Raw, "&#39;" (code 38) sorted before every letter; shown, it is an
+		// apostrophe in "Bob's", which belongs after "Alice".
+		const titled = [
+			booking({ id: 1, title: 'Bob&#39;s flight' }),
+			booking({ id: 2, title: 'Alice flight' }),
+		]
+		expect(sortBookings(titled, 'title', 'asc', now).map((b) => b.id)).toEqual([2, 1])
+	})
+
 	it('defaults to the smart order', () => {
 		expect(sortBookings(pool, 'travel').map((b) => b.id)).toEqual(sortBookings(pool, 'travel', 'smart').map((b) => b.id))
 	})
@@ -486,6 +496,12 @@ describe('decodeHtmlEntities', () => {
 	it('leaves plain text and unknown refs untouched', () => {
 		expect(decodeHtmlEntities('August Norway trip')).toBe('August Norway trip')
 		expect(decodeHtmlEntities('Rock &amp; Roll &unknown; test')).toBe('Rock & Roll &unknown; test')
+	})
+
+	it('leaves a reference beyond Unicode as written rather than throwing', () => {
+		// fromCodePoint throws a RangeError above U+10FFFF, and this runs inside
+		// every label, so one such title used to take down the view reading it.
+		expect(decodeHtmlEntities('Hotel &#x110000; &#1114112; &#39;s')).toBe('Hotel &#x110000; &#1114112; \'s')
 	})
 
 	it('resolves double-encoded entities (e.g. "&amp;#39;")', () => {

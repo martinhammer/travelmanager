@@ -33,11 +33,20 @@ export type TripPeriod = 'current' | 'future' | 'past' | 'undated'
 /** The Trips grid's sortable columns. */
 export type TripSort = 'name' | 'type' | 'travel' | 'bookings'
 
-/** See SortColumn in ./grid. Labels live in the component. */
-export const TRIP_COLUMNS: SortColumn<TripSort>[] = [
+/**
+ * The Trips grid's sort modes: asc/desc, plus 'smart', the travel-from-today
+ * order the Travel dates column offers, as on the Bookings grid (see sortTrips).
+ */
+export type TripSortDirection = SortDirection | 'smart'
+
+/**
+ * See SortColumn in ./grid. Labels live in the component. 'travel' opens on
+ * 'smart' and cycles smart → desc → asc, exactly as BOOKING_COLUMNS does.
+ */
+export const TRIP_COLUMNS: SortColumn<TripSort, TripSortDirection>[] = [
 	{ key: 'name', defaultDirection: 'asc' },
 	{ key: 'type', defaultDirection: 'asc' },
-	{ key: 'travel', defaultDirection: 'asc' },
+	{ key: 'travel', defaultDirection: 'smart', cycle: ['smart', 'desc', 'asc'] },
 	{ key: 'bookings', defaultDirection: 'desc' },
 ]
 
@@ -266,18 +275,40 @@ const sortValue = (row: TripRow, sort: TripSort): string | number | null => {
 	}
 }
 
+// Upcoming soonest first, past most recent first, undated by name.
+const SMART_RANK: Record<TripPeriod, number> = { current: 0, future: 0, past: 1, undated: 2 }
+
 /**
  * Order rows by one column, valueless rows last in both directions.
  *
- * Unlike sortBookings, 'travel' here is a plain chronological sort: the
- * Current/Future/Past filters already answer "what is coming up", so re-ranking
- * the column around today as well would fight them.
+ * 'travel' with direction 'smart' is the default, as on the Bookings grid:
+ * what is under way or coming up first (soonest start first), then past trips
+ * most recent first, undated last. It ranks by the row's own `period`, so the
+ * order and the Current/Future/Past chips cannot disagree about which trips
+ * are past. Plain 'asc' and 'desc' are ordinary chronologies by start.
  * @param rows the rows to order (not mutated)
  * @param sort the column to order by
- * @param direction 'asc' or 'desc'
+ * @param direction 'asc', 'desc', or 'smart' (meaningful for 'travel' only;
+ *   any other column treats it as 'asc')
  */
-export const sortTrips = (rows: TripRow[], sort: TripSort, direction: SortDirection = 'asc'): TripRow[] => {
-	const sign = direction === 'asc' ? 1 : -1
+export const sortTrips = (rows: TripRow[], sort: TripSort, direction: TripSortDirection = 'smart'): TripRow[] => {
+	if (sort === 'travel' && direction === 'smart') {
+		return [...rows].sort((a, b) => {
+			const ra = SMART_RANK[a.period]
+			const rb = SMART_RANK[b.period]
+			if (ra !== rb) {
+				return ra - rb
+			}
+			if (ra === 2) {
+				return a.trip.name.toLowerCase().localeCompare(b.trip.name.toLowerCase())
+			}
+			// Both dated in these ranks, so start is never null here.
+			const order = (a.start ?? '').localeCompare(b.start ?? '')
+			return ra === 0 ? order : -order
+		})
+	}
+
+	const sign = direction === 'desc' ? -1 : 1
 	return [...rows].sort((a, b) => {
 		const av = sortValue(a, sort)
 		const bv = sortValue(b, sort)

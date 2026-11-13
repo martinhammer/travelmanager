@@ -29,6 +29,7 @@ class AdminSettings implements ISettings {
 			'maxInFlight' => $this->configService->getMaxInFlight(),
 			'maxPerHour' => $this->configService->getMaxPerHour(),
 			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
+			'verifyImapCertificates' => $this->configService->isImapTlsVerified(),
 		]);
 		// Read-only diagnostics: which model extractions actually go to, and the
 		// instructions they are sent with. The admin sees the endpoint URL in

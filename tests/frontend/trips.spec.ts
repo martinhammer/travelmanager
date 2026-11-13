@@ -186,11 +186,42 @@ describe('sortTrips', () => {
 		expect(sortTrips(rows, 'name', 'asc').map((r) => r.trip.id)).toEqual([2, 3, 1])
 	})
 
-	it('sorts chronologically, undated last in both directions', () => {
-		// Plain chronology, deliberately unlike sortBookings: the period chips
-		// already answer "what is coming up".
+	it('sorts plainly by start when asked asc or desc, undated last in both', () => {
 		expect(sortTrips(rows, 'travel', 'asc').map((r) => r.trip.id)).toEqual([2, 1, 3])
 		expect(sortTrips(rows, 'travel', 'desc').map((r) => r.trip.id)).toEqual([1, 2, 3])
+	})
+
+	describe('from today (the default)', () => {
+		// Today is 14 Aug. Current and coming trips soonest first, then the past
+		// most recent first, then undated by name — as the Bookings grid does.
+		const smart = tripRows(
+			[
+				trip({ id: 1, name: 'Spring' }),
+				trip({ id: 2, name: 'Christmas' }),
+				trip({ id: 3, name: 'Under way' }),
+				trip({ id: 4, name: 'Summer' }),
+				trip({ id: 5, name: 'Zanzibar' }),
+				trip({ id: 6, name: 'Autumn' }),
+				trip({ id: 7, name: 'Atlas' }),
+			],
+			[
+				booking({ id: 1, tripId: 1, startDate: '2026-04-01T08:00:00' }),
+				booking({ id: 2, tripId: 2, startDate: '2026-12-22T08:00:00' }),
+				// Began before today, ends after it: current, so first.
+				booking({ id: 3, tripId: 3, startDate: '2026-08-10T08:00:00', endDate: '2026-08-20T08:00:00' }),
+				booking({ id: 4, tripId: 4, startDate: '2026-07-01T08:00:00' }),
+				booking({ id: 5, tripId: 6, startDate: '2026-10-01T08:00:00' }),
+			],
+			now,
+		)
+
+		it('puts what is under way or coming first, then the past, undated last', () => {
+			expect(sortTrips(smart, 'travel', 'smart').map((r) => r.trip.id)).toEqual([3, 6, 2, 4, 1, 7, 5])
+		})
+
+		it('is what sortTrips does when no direction is given', () => {
+			expect(sortTrips(smart, 'travel').map((r) => r.trip.id)).toEqual([3, 6, 2, 4, 1, 7, 5])
+		})
 	})
 
 	it('sorts by booking count numerically', () => {

@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace OCA\TravelManager\Service;
 
 use OCA\TravelManager\AppInfo\Application;
+use OCA\TravelManager\Db\ColumnText;
+use OCA\TravelManager\Imap\ImapEndpoint;
+use OCA\TravelManager\Imap\ImapEndpointResolver;
 use OCP\Config\IUserConfig;
 use OCP\IAppConfig;
 use OCP\IUserManager;
@@ -54,6 +57,13 @@ class ConfigService {
 	// some booking emails carry the itinerary nowhere else. Namespaced, never
 	// a bare 'enabled' — see above.
 	public const APP_PDF_ATTACHMENTS = 'pdf_attachments_enabled';
+	// Whether IMAP server certificates are verified. On unless an admin turns
+	// it off: Horde's socket client defaults to *not* verifying, so without
+	// this the mailbox password went to whoever answered the name. The way to
+	// trust a self-signed server is importing its CA (occ
+	// security:certificates:import); this is the opt-out where that cannot be
+	// done, as Mail's `app.mail.verify-tls-peer` is.
+	public const APP_IMAP_VERIFY_TLS = 'imap_verify_tls';
 
 	public const DEFAULT_FETCH_PER_RUN = 20;
 	public const DEFAULT_MAX_IN_FLIGHT = 2;
@@ -79,6 +89,7 @@ class ConfigService {
 		private IUserManager $userManager,
 		private ICredentialsManager $credentialsManager,
 		private LoggerInterface $logger,
+		private ImapEndpointResolver $endpointResolver,
 	) {
 	}
 
@@ -131,6 +142,15 @@ class ConfigService {
 		$this->appConfig->setValueBool(Application::APP_ID, self::APP_PDF_ATTACHMENTS, $enabled);
 	}
 
+	/** Whether IMAP server certificates are verified; on by default. */
+	public function isImapTlsVerified(): bool {
+		return $this->appConfig->getValueBool(Application::APP_ID, self::APP_IMAP_VERIFY_TLS, true);
+	}
+
+	public function setImapTlsVerified(bool $verified): void {
+		$this->appConfig->setValueBool(Application::APP_ID, self::APP_IMAP_VERIFY_TLS, $verified);
+	}
+
 	/* ----------------------------------------------------------------- user */
 
 	/**
@@ -153,7 +173,7 @@ class ConfigService {
 
 	public function getUserSettings(string $userId): UserSettings {
 		return new UserSettings(
-			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1',
+			$this->isUserEnabled($userId),
 			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, ''),
 			(int)$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, '993'),
 			$this->userConfig->getValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, 'ssl'),
@@ -164,6 +184,11 @@ class ConfigService {
 		);
 	}
 
+	/** The user's own switch alone, without reading the stored credential. */
+	public function isUserEnabled(string $userId): bool {
+		return $this->userConfig->getValueString($userId, Application::APP_ID, self::USER_ENABLED, '0') === '1';
+	}
+
 	public function setUserEnabled(string $userId, bool $enabled): void {
 		$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_ENABLED, $enabled ? '1' : '0');
 	}
@@ -171,17 +196,45 @@ class ConfigService {
 	/**
 	 * Persist the non-secret IMAP/account settings for a user.
 	 *
+	 * The mailbox address is validated before anything is written, so a refused
+	 * save changes nothing. The same rules run again before every connection
+	 * (`HordeImapClient`), because values saved before they existed are still
+	 * in the database.
+	 *
 	 * @param array<string, mixed> $values
+	 * @throws \InvalidArgumentException when the host, port, encryption or
+	 *                                   mailbox name is not one the app will use;
+	 *                                   the message is written for the user
 	 */
 	public function setUserSettings(string $userId, array $values): void {
-		if (isset($values['imapHost'])) {
-			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, (string)$values['imapHost']);
+		$host = isset($values['imapHost']) ? trim((string)$values['imapHost']) : null;
+		$port = isset($values['imapPort']) ? (int)$values['imapPort'] : null;
+		$security = isset($values['imapSecurity']) ? strtolower(trim((string)$values['imapSecurity'])) : null;
+		// An empty host is how an unconfigured mailbox looks, so it may be saved;
+		// it is refused only when something tries to connect to it.
+		$problem = ($host === null || $host === '' ? null : ImapEndpoint::hostProblem($host))
+			?? ($port === null ? null : ImapEndpoint::portProblem($port))
+			?? ($security === null ? null : ImapEndpoint::securityProblem($security))
+			// Every stored message records its mailbox, so one too long for that
+			// column would make every message of every read fail to store.
+			?? (isset($values['mailbox']) && !ColumnText::fits((string)$values['mailbox'])
+				? 'The mailbox name must be at most ' . ColumnText::VARCHAR . ' characters.'
+				: null);
+		if ($problem !== null) {
+			throw new \InvalidArgumentException($problem);
 		}
-		if (isset($values['imapPort'])) {
-			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, (string)(int)$values['imapPort']);
+		if ($host !== null && $host !== '' && !$this->endpointResolver->isAllowedBeforeLookup($host)) {
+			throw new \InvalidArgumentException(ImapEndpointResolver::localMessage($host));
 		}
-		if (isset($values['imapSecurity'])) {
-			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, (string)$values['imapSecurity']);
+
+		if ($host !== null) {
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_HOST, $host);
+		}
+		if ($port !== null) {
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_PORT, (string)$port);
+		}
+		if ($security !== null) {
+			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_SECURITY, $security);
 		}
 		if (isset($values['imapUser'])) {
 			$this->userConfig->setValueString($userId, Application::APP_ID, self::USER_IMAP_USER, (string)$values['imapUser']);

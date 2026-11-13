@@ -33,6 +33,25 @@ class TaskMapMapper extends QBMapper {
 	}
 
 	/**
+	 * Move one row out of pending, **only if it is still pending**.
+	 *
+	 * The task-event listener and ExtractionQueue::reconcile() can both arrive at
+	 * one task, and cron and the AI worker can run them at the same moment. A
+	 * check of the status each loaded is no guard: both read `pending`, and both
+	 * apply the extraction. Exactly one caller sees an affected row here, so the
+	 * handlers claim the task with this *before* writing anything, as
+	 * `ProcessedMessageMapper::claimQueued` does for sending.
+	 */
+	public function settle(int $id, string $status): bool {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('status', $qb->createNamedParameter($status))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('status', $qb->createNamedParameter(TaskMap::STATUS_PENDING)));
+		return $qb->executeStatement() === 1;
+	}
+
+	/**
 	 * The most recent task scheduled for a message — the attempt whose outcome
 	 * the message row reflects. An older pending row for the same message is a
 	 * superseded attempt and must not be allowed to overwrite it.

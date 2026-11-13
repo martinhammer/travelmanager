@@ -13,7 +13,8 @@ use OCP\IRequest;
 
 /**
  * Admin-only settings: the global feature flag, how much of each mailbox a run
- * reads, and the two limits on how hard extraction leans on the model.
+ * reads, the two limits on how hard extraction leans on the model, and whether
+ * IMAP server certificates are verified.
  *
  * @psalm-import-type TravelManagerAdminSettings from \OCA\TravelManager\ResponseDefinitions
  *
@@ -43,6 +44,7 @@ class AdminController extends OCSController {
 			'maxInFlight' => $this->configService->getMaxInFlight(),
 			'maxPerHour' => $this->configService->getMaxPerHour(),
 			'pdfAttachments' => $this->configService->isPdfAttachmentsEnabled(),
+			'verifyImapCertificates' => $this->configService->isImapTlsVerified(),
 		]);
 	}
 
@@ -54,12 +56,13 @@ class AdminController extends OCSController {
 	 * @param int|null $maxInFlight Most extractions waiting on the model at once, instance-wide (at least 1)
 	 * @param int|null $maxPerHour Most extractions started per rolling hour, instance-wide (0 for no limit)
 	 * @param bool|null $pdfAttachments Whether the text of PDF attachments is sent to the model with the email
+	 * @param bool|null $verifyImapCertificates Whether IMAP server certificates are verified
 	 * @return DataResponse<Http::STATUS_OK, TravelManagerAdminSettings, array{}>
 	 *
 	 * 200: Updated admin settings returned
 	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/admin/settings')]
-	public function update(?bool $enabled = null, ?int $fetchPerRun = null, ?int $maxInFlight = null, ?int $maxPerHour = null, ?bool $pdfAttachments = null): DataResponse {
+	public function update(?bool $enabled = null, ?int $fetchPerRun = null, ?int $maxInFlight = null, ?int $maxPerHour = null, ?bool $pdfAttachments = null, ?bool $verifyImapCertificates = null): DataResponse {
 		if ($enabled !== null) {
 			$this->configService->setFeatureEnabled($enabled);
 		}
@@ -74,6 +77,9 @@ class AdminController extends OCSController {
 		}
 		if ($pdfAttachments !== null) {
 			$this->configService->setPdfAttachmentsEnabled($pdfAttachments);
+		}
+		if ($verifyImapCertificates !== null) {
+			$this->configService->setImapTlsVerified($verifyImapCertificates);
 		}
 		return $this->show();
 	}

@@ -15,7 +15,10 @@ final class AttachmentRef {
 		public readonly string $mimeId,
 		/** The sender's filename, or null when the part names none. */
 		public readonly ?string $filename,
-		/** Size on the wire — transfer-encoded, so base64 runs a third over the file. */
+		/**
+		 * Decoded size, estimated: Horde scales a base64 part's BODYSTRUCTURE
+		 * size by 3/4 when it parses it, so this is close to the file's own size.
+		 */
 		public readonly int $bytes,
 	) {
 	}
