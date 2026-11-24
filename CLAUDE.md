@@ -1724,7 +1724,7 @@ templates call them with `--if-present` — remove one and its job goes green
 while running nothing.
 
 **The workflows are the `nextcloud/.github` org templates, synced, not edited**
-(guide: `~/Code/nextcloud-guides/nextcloud-github-ci.md`). The deviations are
+(guide: `~/Code/nextcloud-guides/skills/github-ci/nextcloud-github-ci.md`). The deviations are
 two mechanical rewrites done by the guide's **post-sync step** after every sync,
 plus two `.github/workflows/*.yml.patch` files that every sync re-applies. The
 post-sync step:
