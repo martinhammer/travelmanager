@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "nextcloud@nextcloud-guides": true,
+    "nextcloud-skills@nextcloud-skills": true
+  }
+}
