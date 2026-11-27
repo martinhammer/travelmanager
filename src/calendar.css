@@ -84,10 +84,37 @@
 	pointer-events: none;
 }
 
+/* Full month names, or short ones on a phone (the 420px step below). The set
+   not in use is display:none, so it neither shows nor sizes the heading, and
+   is out of the accessibility tree. */
+.tm-cal-month-short {
+	display: none;
+}
+
 .tm-cal-nav {
 	display: flex;
 	align-items: center;
 	gap: 4px;
+}
+
+/* The switch and, on a phone, Refresh after it: one end of the toolbar. */
+.tm-cal-end {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-inline-start: auto;
+}
+
+/* "Show archived & discarded": the worded switch while there is room, an icon
+   button once the calendar is narrow (see the compaction rules below). Our own
+   wrappers carry the display, so no library component's scoped rule has to be
+   outranked. */
+.tm-cal-show-switch {
+	display: contents;
+}
+
+.tm-cal-show-toggle {
+	display: none;
 }
 
 .tm-cal-weekdays,
@@ -415,20 +442,35 @@
 		display: none;
 	}
 
+	/* The same step at which the list views trade their headings for the sort
+	   icon (600px of grid width there). */
+	.tm-cal-show-switch {
+		display: none;
+	}
+
+	.tm-cal-show-toggle {
+		display: contents;
+	}
+
 	.tm-cal .tm-cal-bar {
 		justify-content: center;
 		padding-inline: 2px;
 	}
 
-	.tm-cal {
+	/* On the grid, not on .tm-cal: a container query never matches the
+	   container itself, so set there this rule never applied. Touch screens
+	   keep their higher floor (the pointer: coarse rule, which outranks this). */
+	.tm-cal-grid {
 		--tm-cal-week-min: 106px;
 	}
 }
 
 /* Phones. The toolbar's first line has to hold the toggle indent (grid.css),
-   the month heading at the width of the *longest* month name, and three
-   buttons — over 312px at h2 size with a worded Today, which is all a 360px
-   phone has. So the heading steps down a size and Today becomes its icon. The
+   the month heading at the width of the *longest* month name, three buttons,
+   and at the end the archive toggle and Refresh. With full month names and a
+   worded Today that is more than a 360–412px phone has, and the last two
+   wrapped onto a line of their own. So the heading steps down a size and uses
+   short month names (the year stays in full), and Today becomes its icon. The
    ghost months stay: they are what keeps the buttons still while paging. */
 @container tm-cal (max-width: 420px) {
 	.tm-cal-weekday {
@@ -438,6 +480,14 @@
 
 	.tm-cal-month {
 		font-size: 1.25rem;
+	}
+
+	.tm-cal-month .tm-cal-month-long {
+		display: none;
+	}
+
+	.tm-cal-month .tm-cal-month-short {
+		display: inline;
 	}
 
 	.tm-cal .tm-cal-today.tm-cal-today {
@@ -462,6 +512,12 @@
 	.tm-cal {
 		--tm-cal-bar-height: 24px;
 		--tm-cal-lane-gap: 3px;
+		--tm-cal-week-min: 134px;
+	}
+
+	/* Repeated on the grid so it beats the narrow calendar's 106px there
+	   (doubled class: specificity, not source order, decides). */
+	.tm-cal .tm-cal-grid {
 		--tm-cal-week-min: 134px;
 	}
 }

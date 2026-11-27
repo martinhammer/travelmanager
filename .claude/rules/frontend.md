@@ -9,10 +9,11 @@ paths:
 ```
 App.vue              shell only: nav, which view is showing, the detail panel
 ├─ NavCounter.vue    one nav row's count: lozenge for the queue, muted total
+├─ RefreshButton.vue re-read everything: nav header (wide) or each toolbar (phone)
 ├─ CalendarView.vue  the month grid, its toolbar and month summary
 │   └─ CalendarBar.vue    one trip/booking bar: its icon, colour and draft cue
 ├─ BookingsView.vue  grid only — no dialogs, no actions
-├─ TripsView.vue     grid + the "Create trip" button
+├─ TripsView.vue     grid + the "New trip" button
 ├─ MessagesView.vue  grid + the expandable diagnostic body
 │   (all three)  └─ GridSortMenu.vue   the column headings as a menu, compact only
 ├─ DetailSidebar.vue  one panel for booking | trip | message, incl. its Actions

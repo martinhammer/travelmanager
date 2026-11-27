@@ -99,3 +99,17 @@ work; the total is muted text beside it. Reasons, in the order they bind:
   `App.vue`). `NcAppNavigationItem` does this only for router links, and
   `NcAppNavigation` 9.14 has no controlled `open` prop, so it emits
   `toggle-navigation` on `@nextcloud/event-bus`, which is a direct dependency.
+
+## Refresh
+
+- **One `RefreshButton.vue`, two homes, switched on `useIsMobile()`**: the
+  navigation's `#search` slot on a wide window (Mail's spot), each view's toolbar
+  on a phone, where the drawer is closed. It calls `reload()` and spins on the
+  store's shared `loading`. Decision: "Refresh re-reads, and sits in the
+  navigation" in `docs/decisions.md`.
+- **Toolbar order: display controls, then actions.** Lists: sort menu, Refresh,
+  then Trips' "New trip". Calendar: the archive toggle, then Refresh. In a grid
+  toolbar whichever of sort menu and Refresh is first on screen takes the auto
+  margin (`grid.css`): two auto margins split the free space and strand one
+  button mid-row. On the calendar they share `.tm-cal-end`, so the toolbar keeps
+  exactly two ends.

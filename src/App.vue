@@ -13,6 +13,7 @@ import CalendarView from './CalendarView.vue'
 import DetailSidebar from './DetailSidebar.vue'
 import MessagesView from './MessagesView.vue'
 import NavCounter from './NavCounter.vue'
+import RefreshButton from './RefreshButton.vue'
 import TripsView from './TripsView.vue'
 import {
 	backLabel,
@@ -74,6 +75,16 @@ const showView = (name: ViewName): void => {
 <template>
 	<NcContent app-name="travelmanager">
 		<NcAppNavigation>
+			<!-- Refresh where Mail has it: a header row above the list, in the
+			     `search` slot as Mail's NewMessageButtonHeader is. Wide windows
+			     only — on a phone the navigation is a closed drawer, so each view's
+			     toolbar carries it instead. Alone in the row for now; a future
+			     "Add booking" would sit beside it (docs/backlog.md). -->
+			<template v-if="!isMobile" #search>
+				<div :class="$style.header">
+					<RefreshButton />
+				</div>
+			</template>
 			<template #list>
 				<!-- Four views; what to show within each is a filter, not a
 				     navigation choice. A counter is "what awaits you, over how much
@@ -146,3 +157,12 @@ const showView = (name: ViewName): void => {
 		<AppDialogs />
 	</NcContent>
 </template>
+
+<style module>
+/* Mail's padding for the same row, so the button lines up with the list items. */
+.header {
+	display: flex;
+	justify-content: flex-end;
+	padding: calc(var(--default-grid-baseline, 4px) * 2);
+}
+</style>

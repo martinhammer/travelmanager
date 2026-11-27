@@ -5,9 +5,11 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
 import { t } from '@nextcloud/l10n'
 import { discardMessage, fetchMessageBody, retryMessage } from './api'
 import GridSortMenu from './GridSortMenu.vue'
+import RefreshButton from './RefreshButton.vue'
 import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import {
 	type MessageSort,
@@ -202,6 +204,9 @@ const onDiscard = (id: number, discarded: boolean) => whileInFlight(id, async ()
 		showError(t('travelmanager', 'Could not update this message'))
 	}
 })
+
+// On a phone the navigation is a closed drawer, so Refresh moves here.
+const isMobile = useIsMobile()
 </script>
 
 <template>
@@ -214,6 +219,9 @@ const onDiscard = (id: number, discarded: boolean) => whileInFlight(id, async ()
 				:sort="sort"
 				:direction="direction"
 				@select="onSortColumn($event as MessageSort)" />
+			<!-- Display controls first (sort), then actions (Refresh, and on Trips
+			     "New trip"); grid.css keeps the group together at the end. -->
+			<RefreshButton v-if="isMobile" />
 		</div>
 		<div class="tm-chips">
 			<NcButton v-for="chip in filters"

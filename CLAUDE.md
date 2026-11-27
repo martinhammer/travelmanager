@@ -52,6 +52,11 @@ Each names its entry in `docs/decisions.md`. Do not break one without a new deci
 - **No password confirmation, anywhere.** Do not reintroduce
   `#[PasswordConfirmationRequired]`.
 - **The global pipeline flag is `pipeline_enabled`**, never `enabled` (core's key).
+- **Refresh re-reads the data, never checks the mailbox**; it sits in the
+  navigation header on a wide window and in each view's toolbar on a phone.
+- **Toolbar controls sit in the same arrangement in every view** (display
+  controls, then actions); narrow layouts swap worded controls for icons.
+- **Create buttons are "New X" with a Plus icon**, never "Create X" or a typed "+".
 
 ## Pipeline (compact)
 
