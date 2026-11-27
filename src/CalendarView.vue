@@ -31,7 +31,7 @@ import {
 import { hasPossibleDuplicate } from './bookings'
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
-import { calendarMonth, detailHref, isOpen, openDetail } from './navigation'
+import { calendarMonth, calendarShowAll, detailHref, isOpen, openDetail } from './navigation'
 import { allTripRows, bookings, tripColors } from './store'
 
 /**
@@ -65,7 +65,7 @@ const month = calendarMonth
  * travel you are doing — on a list they merely sit there, whereas here they would
  * take lanes from the bookings that matter. Off by default, one click away.
  */
-const showAll = ref(false)
+const showAll = calendarShowAll
 // The narrow layout's icon button names the action a click takes, not the state.
 const showAllLabel = computed((): string => showAll.value
 	? t('travelmanager', 'Hide archived & discarded')

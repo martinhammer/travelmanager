@@ -32,6 +32,13 @@ export const route = ref<Route>(parseRoute(window.location.hash))
 export const calendarMonth = ref(monthOf())
 
 /**
+ * The calendar's "Show archived & discarded" switch, here for the same reason:
+ * it went back to off on every visit to another view. Off by default, and not in
+ * the hash either.
+ */
+export const calendarShowAll = ref(false)
+
+/**
  * Each list's filters and sort order, here for the same reason as
  * calendarMonth: refs in the view went back to their defaults on every visit to
  * another view.
