@@ -23,6 +23,9 @@ one-line form of each is in `CLAUDE.md`. Add new entries here, dated.
 - A mailbox connection is verified, and goes only where it was checked
 - Background jobs run in system context
 - No password confirmation, anywhere — by decision
+- Refresh re-reads, and sits in the navigation
+- Toolbar controls on narrow widths
+- Create buttons are "New X" with a Plus icon
 
 These resolve the brief's V1–V10. Several **override** the original brief; the
 code follows the overrides.
@@ -766,3 +769,66 @@ code follows the overrides.
   ever comes back: a marked method returns **403** outside the ~30-minute sudo
   window, so the frontend must `await confirmPassword()` first, and the package
   must be ^6 (v5 pins Vue 2 / `@nextcloud/vue ^8`).
+- **Refresh re-reads, and sits in the navigation** (2026-11-27). One Refresh
+  button serves all four views (`RefreshButton.vue`).
+  - **It re-reads bookings, trips and messages (`reload()`), and does not check
+    the mailbox.** That is where it differs from Mail, whose button syncs the
+    mailbox. Here a fetched email becomes a booking only once its model task
+    finishes, so checking the mailbox on a click would not show a new booking
+    any sooner. A read on demand exists only as the "Read mailbox now" debugging
+    tool in the personal settings (`POST /api/dev/ingest`, not paced); putting
+    it in the main UI would make it a product feature that needs pacing against
+    the 15-minute background job. What the button fixes is that "refresh in a
+    moment to see the result" (after a retry) used to mean reloading the page.
+  - **Wide window: the navigation's header row, as in Mail** (`#search` slot,
+    `tertiary-no-background`, spinner while loading). **Phone: each view's
+    toolbar**, after the sort menu (on the calendar, after the archive toggle;
+    see "Toolbar controls on narrow widths"). The
+    switch is `useIsMobile()`, because the reason to move is the navigation
+    becoming a closed drawer, not the content getting narrow. So between 1024px
+    and the grid's compact step the sort menu can be in the toolbar while Refresh
+    is still in the navigation, which is correct: the navigation is visible.
+  - **The header row holds the icon alone for now.** A manual booking (e.g.
+    accommodation "staying with a friend", which fits a trip but has no
+    confirmation email) may later bring an "Add booking" button, and that row is
+    where it would go, beside Refresh, as Mail pairs "New message" with it.
+    **Search** may come too (2026-11-27), and belongs in the same row: the slot
+    is named `search` for it, and `@nextcloud/vue` 9.14's
+    `NcAppNavigationSearch` (`src/components/NcAppNavigationSearch/`) is a
+    search field with an `actions` slot beside it. That slot is where Refresh
+    (and an "Add booking") would move, and the component hides it while the
+    field has focus, so the field gets the full width as you type. Neither is
+    decided; see `docs/backlog.md`.
+- **Toolbar controls on narrow widths** (2026-11-27).
+  - **The same arrangement in every view: display controls, then actions.**
+    Lists: sort menu, Refresh, then Trips' "New trip". Calendar: the archive
+    toggle, then Refresh. The point is consistency between views rather than
+    this particular order; check it whenever a control is added or moves
+    between layouts.
+  - **The calendar's "Show archived & discarded" is a worded switch while the
+    calendar is wider than 640px and an icon button at 640px or less** (the
+    calendar's existing compact step, measured on the calendar, like the lists'
+    sort menu on the grid). The icon shows the current state:
+    `ArchiveOffOutline` while archived and discarded items are hidden,
+    `ArchiveEyeOutline` while they are shown. The name says what a click does
+    ("Show / Hide archived & discarded", `aria-label` and `title`), and there
+    is **no `aria-pressed`**: with a changing name a screen reader would say
+    "Hide …, pressed". The plain eye pair (as another app of ours uses) was
+    considered and dropped because it says nothing about the archive;
+    `ArchiveEyeOutline` has no "off" twin, so the pair is two icons of the
+    archive family. The earlier reason for a switch ("its state reads directly
+    instead of being inferred from a button's variant") still holds where there
+    is room, which is why the switch stays on wide calendars.
+  - **On a phone the month heading uses short month names, with the year in
+    full** ("Nov 2026", `getMonthNamesShort()`, at the 420px step). With full
+    names the toolbar's first line was about 7px short of holding the archive
+    toggle and Refresh (about 77px free against 84px needed on a ~411px phone),
+    so they wrapped onto a line of their own. Short names free about 50px.
+    Rejected: a smaller gap (fits by about 1px, breaks with any longer month
+    name or font), a two-digit year ("Nov 26" reads as a day, and saves too
+    little), moving the icons to the summary line (Refresh would then sit
+    elsewhere on the calendar than in the lists).
+- **Create buttons are "New X" with a Plus icon** (2026-11-27). "Create trip"
+  became "New trip", with `Plus.vue` in the icon slot and no typed "+". Nextcloud's
+  apps do the same (Notes "New note", Contacts "New contact"; Deck "Add …"), and
+  it matches the dialog it opens, already titled "New trip".

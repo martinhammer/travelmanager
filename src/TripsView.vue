@@ -2,9 +2,12 @@
 import { computed, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import PlusIcon from 'vue-material-design-icons/Plus.vue'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
 import { t } from '@nextcloud/l10n'
 import { openTripEditor } from './dialogs'
 import GridSortMenu from './GridSortMenu.vue'
+import RefreshButton from './RefreshButton.vue'
 import { formatSpan, nextSortDirection, sortMarker } from './grid'
 import { travelSortLabel, tripLabel, tripTypeLabel, typeName } from './labels'
 import { isOpen, openDetail, route, tripsList } from './navigation'
@@ -57,6 +60,9 @@ const filters: { key: string, label: string }[] = [
 // Creating a trip is the one dialog raised from here rather than from a trip's
 // detail panel — there is no trip yet to open one for.
 const onNewTrip = () => openTripEditor(null)
+
+// On a phone the navigation is a closed drawer, so Refresh moves here.
+const isMobile = useIsMobile()
 </script>
 
 <template>
@@ -70,8 +76,16 @@ const onNewTrip = () => openTripEditor(null)
 				:direction="direction"
 				:describe="headingTitle('travel')"
 				@select="onSortColumn($event as TripSort)" />
+			<!-- Display controls first (sort), then actions (Refresh, and on Trips
+			     "New trip"); grid.css keeps the group together at the end. -->
+			<RefreshButton v-if="isMobile" />
+			<!-- "New X" with a Plus icon, as Notes' "New note" and Contacts' "New
+			     contact"; it also matches the dialog it opens, titled "New trip". -->
 			<NcButton variant="primary" @click="onNewTrip">
-				{{ t('travelmanager', 'Create trip') }}
+				<template #icon>
+					<PlusIcon :size="20" />
+				</template>
+				{{ t('travelmanager', 'New trip') }}
 			</NcButton>
 		</div>
 		<div class="tm-chips">

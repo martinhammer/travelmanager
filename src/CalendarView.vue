@@ -2,11 +2,15 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
+import ArchiveEyeOutlineIcon from 'vue-material-design-icons/ArchiveEyeOutline.vue'
+import ArchiveOffOutlineIcon from 'vue-material-design-icons/ArchiveOffOutline.vue'
 import ChevronLeftIcon from 'vue-material-design-icons/ChevronLeft.vue'
 import CalendarTodayIcon from 'vue-material-design-icons/CalendarToday.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
-import { getDayNamesMin, getFirstDay, getMonthNames, t } from '@nextcloud/l10n'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
+import { getDayNamesMin, getFirstDay, getMonthNames, getMonthNamesShort, t } from '@nextcloud/l10n'
 import CalendarBar from './CalendarBar.vue'
+import RefreshButton from './RefreshButton.vue'
 import type { CalendarItem, LaneMetrics } from './calendar'
 import {
 	DEFAULT_MAX_LANES,
@@ -27,7 +31,7 @@ import {
 import { hasPossibleDuplicate } from './bookings'
 import { localDate } from './grid'
 import { bookingLabel, tripLabel } from './labels'
-import { calendarMonth, detailHref, isOpen, openDetail } from './navigation'
+import { calendarMonth, calendarShowAll, detailHref, isOpen, openDetail } from './navigation'
 import { allTripRows, bookings, tripColors } from './store'
 
 /**
@@ -50,6 +54,9 @@ import { allTripRows, bookings, tripColors } from './store'
 const firstDay = getFirstDay()
 const weekdays = weekdayLabels(getDayNamesMin(), firstDay)
 const monthNames = getMonthNames()
+// A phone's heading: with the full names the toolbar's first line is a few
+// pixels short of holding the archive toggle and Refresh (calendar.css).
+const monthNamesShort = getMonthNamesShort()
 
 const month = calendarMonth
 
@@ -58,7 +65,11 @@ const month = calendarMonth
  * travel you are doing — on a list they merely sit there, whereas here they would
  * take lanes from the bookings that matter. Off by default, one click away.
  */
-const showAll = ref(false)
+const showAll = calendarShowAll
+// The narrow layout's icon button names the action a click takes, not the state.
+const showAllLabel = computed((): string => showAll.value
+	? t('travelmanager', 'Hide archived & discarded')
+	: t('travelmanager', 'Show archived & discarded'))
 
 // Recomputed rather than stored, so "today" is right if the page is left open
 // across midnight and the user pages back to this month.
@@ -148,6 +159,7 @@ const layouts = computed(() => layoutMonth(
 const summary = computed(() => monthSummary(items.value, month.value))
 
 const monthLabel = computed(() => `${monthNames[month.value.month - 1]} ${month.value.year}`)
+const monthLabelShort = computed(() => `${monthNamesShort[month.value.month - 1]} ${month.value.year}`)
 
 // Paging resets the expansions: they are about one crowded week on one screen,
 // and carrying them to a different month would silently un-cap it.
@@ -186,6 +198,9 @@ const onOpenDuplicate = (): void => {
 		onOpen(item)
 	}
 }
+
+// On a phone the navigation is a closed drawer, so Refresh moves here.
+const isMobile = useIsMobile()
 </script>
 
 <template>
@@ -195,14 +210,23 @@ const onOpenDuplicate = (): void => {
 			     it follow. -->
 			<div class="tm-cal-nav">
 				<h2 class="tm-toolbar-heading tm-cal-month">
-					<span>{{ monthLabel }}</span>
+					<span class="tm-cal-month-long">{{ monthLabel }}</span>
 					<!-- Every month name of this locale, stacked underneath and hidden:
 					     the heading then sizes to the widest one it can ever hold, so the
 					     buttons after it stay put as you page. A fixed width cannot do
 					     this — month names differ wildly by locale, and by font. -->
 					<span v-for="name in monthNames"
 						:key="name"
-						class="tm-cal-month-ghost"
+						class="tm-cal-month-long tm-cal-month-ghost"
+						aria-hidden="true">{{ `${name} ${month.year}` }}</span>
+					<!-- The same again with short names, shown instead on a phone
+					     (calendar.css): one set at a time is displayed, so only that
+					     set sizes the heading. The year stays in full — "Nov 26" would
+					     read as a day. -->
+					<span class="tm-cal-month-short">{{ monthLabelShort }}</span>
+					<span v-for="(name, i) in monthNamesShort"
+						:key="`short-${i}`"
+						class="tm-cal-month-short tm-cal-month-ghost"
 						aria-hidden="true">{{ `${name} ${month.year}` }}</span>
 				</h2>
 				<NcButton variant="secondary"
@@ -233,12 +257,35 @@ const onOpenDuplicate = (): void => {
 					{{ t('travelmanager', 'Today') }}
 				</NcButton>
 			</div>
-			<!-- A switch, not a button: this turns a persistent condition on and off
-			     rather than performing an action, and its state has to be readable
-			     without inferring it from a button's variant. -->
-			<NcCheckboxRadioSwitch v-model="showAll" type="switch">
-				{{ t('travelmanager', 'Show archived & discarded') }}
-			</NcCheckboxRadioSwitch>
+			<!-- Wrapped with Refresh (phone only) so the toolbar still has two ends:
+			     a third child would put the switch in the middle of the row. -->
+			<div class="tm-cal-end">
+				<!-- The same choice twice; calendar.css shows one by the calendar's
+				     width (decision "Toolbar controls on narrow widths"). Wide: the
+				     worded switch, whose state reads without inferring it. Narrow
+				     (≤ 640px, where the sort headings become an icon in the lists): an
+				     icon button whose icon shows the current state and whose name says
+				     what a click does.
+				     No aria-pressed: with a name that changes, a screen reader would
+				     announce "Hide …, pressed", which contradicts itself. -->
+				<span class="tm-cal-show-switch">
+					<NcCheckboxRadioSwitch v-model="showAll" type="switch">
+						{{ t('travelmanager', 'Show archived & discarded') }}
+					</NcCheckboxRadioSwitch>
+				</span>
+				<span class="tm-cal-show-toggle">
+					<NcButton variant="tertiary"
+						:aria-label="showAllLabel"
+						:title="showAllLabel"
+						@click="showAll = !showAll">
+						<template #icon>
+							<ArchiveEyeOutlineIcon v-if="showAll" :size="20" />
+							<ArchiveOffOutlineIcon v-else :size="20" />
+						</template>
+					</NcButton>
+				</span>
+				<RefreshButton v-if="isMobile" />
+			</div>
 		</div>
 
 		<!-- Scoped to the month on screen, which is the one count the navigation's

@@ -586,6 +586,16 @@
 	margin-inline-start: auto;
 }
 
+/* Refresh sits in the toolbar on a phone only (RefreshButton.vue), just after
+   the sort menu: display controls first, then actions. Whichever of the two is
+   first *on screen* takes the auto margin that pushes the group to the end.
+   While the menu is hidden that is Refresh; in the compact grid the menu has it
+   and Refresh gives its own up (below), since two auto margins would split the
+   free space and strand one of them mid-row. */
+.tm-toolbar > .tm-refresh {
+	margin-inline-start: auto;
+}
+
 /* The marker sits in the menu item's icon slot, which is a clickable-area
    square; centred there it lines up down the menu like an icon would. */
 .tm-sort-menu-marker {
@@ -605,6 +615,10 @@
 
 	.tm-sort-menu {
 		display: inline-flex;
+	}
+
+	.tm-toolbar > .tm-sort-menu + .tm-refresh {
+		margin-inline-start: 0;
 	}
 
 	/* The two lines of a card read as one item; the column gap stays. */

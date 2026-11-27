@@ -137,7 +137,12 @@ and the wording lives in `labels.ts`.
   `NcCheckboxRadioSwitch type="switch"` in the toolbar reveals them — a switch
   rather than a button because it turns a persistent condition on and off rather
   than performing an action, and its state then reads directly instead of having
-  to be inferred from a button's variant.
+  to be inferred from a button's variant. **At the 640px compact step it becomes
+  an icon button** (`.tm-cal-show-switch` / `.tm-cal-show-toggle`, both bound to
+  `showAll`): `ArchiveOffOutline` while hidden, `ArchiveEyeOutline` while shown,
+  named for the action ("Show / Hide archived & discarded"), no `aria-pressed`.
+  It shares `.tm-cal-end` with Refresh (phone only), toggle first. Decision:
+  "Toolbar controls on narrow widths".
 - **The month summary is scoped to the month on screen** ("2 trips · 5 bookings ·
   1 draft"), which is the one count the navigation's global counters cannot give.
   The draft count is a **button** that opens the earliest draft in the month, so
@@ -202,11 +207,20 @@ and the wording lives in `labels.ts`.
   deliberate for now; put it in the route if month links ever need sharing
   (2026-11-13, review item 23).
 - **On a phone the toolbar still fits on one line** (`@container tm-cal
-  (max-width: 420px)`): the month heading steps down to 1.25rem and **Today**
-  shows only its `CalendarToday` icon. The button always carries the icon and an
+  (max-width: 420px)`): the month heading steps down to 1.25rem and to **short
+  month names with the full year** (`getMonthNamesShort()`; the heading holds a
+  long and a short set, label plus ghosts, and shows one with `display`), and
+  **Today** shows only its `CalendarToday` icon. That leaves room for the
+  archive toggle and Refresh at the end of the line. The button always carries the icon and an
   `aria-label`; on a wide calendar `calendar.css` hides the icon and restores
   NcButton's text-only padding, so the desktop look is unchanged. The ghost months
   stay at every width.
 - **Coarse pointers get 24px bars** (`@media (pointer: coarse)`: bar 24px, gap
   3px, week floor 134px = four lanes), because 20px is under WCAG 2.2's 24px
   target size. `CalendarView` reads the variables back, so no script changes.
+- **Size-dependent variables go on `.tm-cal-grid`, not on `.tm-cal`.** `.tm-cal`
+  is the `tm-cal` container, and a container query never matches its own
+  container, so `--tm-cal-week-min: 106px` set on `.tm-cal` inside
+  `@container tm-cal (max-width: 640px)` never applied until it moved to the
+  grid (2026-11-27). The coarse-pointer 134px is repeated as
+  `.tm-cal .tm-cal-grid` so touch screens keep it on a narrow calendar.

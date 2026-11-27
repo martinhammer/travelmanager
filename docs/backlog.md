@@ -11,6 +11,26 @@ start. One line per item: date, the skill it concerns, what to do.
 
 ## Next steps
 
+- 2026-11-27 · Manual booking: possibly an "Add booking" for bookings that have
+  no confirmation email (accommodation "staying with a friend"). Undecided. If
+  built, its button goes in the navigation header beside Refresh, which today
+  sits there alone (see "Refresh re-reads, and sits in the navigation" in
+  `docs/decisions.md`); on a phone it would need a toolbar home like Refresh's.
+- 2026-11-27 · Search: possibly a search across bookings, trips and messages.
+  Undecided. If built, use `NcAppNavigationSearch` in the navigation's `#search`
+  slot and move Refresh (and any "Add booking") into its `actions` slot, which
+  it hides while the field has focus. Settle first what a search does in each
+  view (filter the list on screen, or jump to a record) and where it goes on a
+  phone, where the navigation is a closed drawer.
+- 2026-11-27 · Calendar heading order: the month heading is always
+  `${month} ${year}`, which is wrong for locales that put the year first
+  (Japanese, Hungarian). Format it with `Intl.DateTimeFormat` (`month: 'long'` /
+  `'short'`, `year: 'numeric'`) in the user's locale, ghost copies included.
+- 2026-11-27 · Refresh follow-ups, not planned: a "check mailbox now" action in
+  the main UI (today only the unpaced `dev/ingest` debugging tool; it would need
+  pacing against the background job), refreshing on its
+  own when the tab becomes visible again, and an `r` shortcut as in Mail.
+
 - ⏳ **Next step:** run flights **end-to-end** for one user against a live
   mailbox + Task Processing provider (the path is all wired — ingestion →
   schedule → listener → draft; use "Read mailbox now" + the activity log to watch

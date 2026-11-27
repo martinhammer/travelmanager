@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import ContentDuplicateIcon from 'vue-material-design-icons/ContentDuplicate.vue'
+import { useIsMobile } from '@nextcloud/vue/composables/useIsMobile'
 import { t } from '@nextcloud/l10n'
 import {
 	type BookingSort,
@@ -14,6 +15,7 @@ import {
 	sortBookings,
 } from './bookings'
 import GridSortMenu from './GridSortMenu.vue'
+import RefreshButton from './RefreshButton.vue'
 import { formatTimestamp, nextSortDirection, sortMarker } from './grid'
 import { bookingStatusLabel, reviewStateLabel, travelSortLabel, typeName } from './labels'
 import { bookingsList, isOpen, openDetail, route } from './navigation'
@@ -105,6 +107,9 @@ const filters: { key: string, label: string }[] = [
 	// settle" is the answer people want right after "the drafts".
 	{ key: 'duplicates', label: t('travelmanager', 'Possible duplicates') },
 ]
+
+// On a phone the navigation is a closed drawer, so Refresh moves here.
+const isMobile = useIsMobile()
 </script>
 
 <template>
@@ -120,6 +125,9 @@ const filters: { key: string, label: string }[] = [
 				:direction="direction"
 				:describe="headingTitle('travel')"
 				@select="onSortColumn($event as BookingSort)" />
+			<!-- Display controls first (sort), then actions (Refresh, and on Trips
+			     "New trip"); grid.css keeps the group together at the end. -->
+			<RefreshButton v-if="isMobile" />
 		</div>
 		<div class="tm-chips">
 			<NcButton v-for="chip in filters"
