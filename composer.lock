@@ -216,16 +216,16 @@
         },
         {
             "name": "bytestream/horde-imap-client",
-            "version": "v2.34.4",
+            "version": "v2.34.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bytestream/Imap_Client.git",
-                "reference": "4f7ae680088e6a2b426144e29880573cae4e8e93"
+                "reference": "cbb30f679b9edc9bbe0654c0cdcd879baa879fbb"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bytestream/Imap_Client/zipball/4f7ae680088e6a2b426144e29880573cae4e8e93",
-                "reference": "4f7ae680088e6a2b426144e29880573cae4e8e93",
+                "url": "https://api.github.com/repos/bytestream/Imap_Client/zipball/cbb30f679b9edc9bbe0654c0cdcd879baa879fbb",
+                "reference": "cbb30f679b9edc9bbe0654c0cdcd879baa879fbb",
                 "shasum": ""
             },
             "require": {
@@ -267,9 +267,9 @@
             "description": "Horde IMAP client library",
             "homepage": "https://www.horde.org/libraries/Horde_Imap_Client",
             "support": {
-                "source": "https://github.com/bytestream/Imap_Client/tree/v2.34.4"
+                "source": "https://github.com/bytestream/Imap_Client/tree/v2.34.5"
             },
-            "time": "2026-10-23T13:18:52+00:00"
+            "time": "2026-11-19T15:40:49+00:00"
         },
         {
             "name": "bytestream/horde-listheaders",
@@ -1125,8 +1125,7 @@
                 "issues": "https://github.com/nextcloud-deps/ocp/issues",
                 "source": "https://github.com/nextcloud-deps/ocp/tree/stable33"
             },
-            "time": "2026-11-18T05:00:44+00:00",
-            "published-time": "2026-11-18T05:00:49+00:00"
+            "time": "2026-11-18T05:00:44+00:00"
         },
         {
             "name": "psr/clock",
@@ -1345,5 +1344,5 @@
         "php": "8.2",
         "ext-gd": "8.2.0"
     },
-    "plugin-api-version": "2.11.0"
+    "plugin-api-version": "2.9.0"
 }
