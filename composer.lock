@@ -1024,16 +1024,16 @@
         },
         {
             "name": "prinsfrank/pdfparser",
-            "version": "v4.3.0",
+            "version": "v4.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/PrinsFrank/pdfparser.git",
-                "reference": "441e0669b61e4028ba34c030d6625770c8f7e1ad"
+                "reference": "5dd1606a69a453919af363e92b1a446cb861edc7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/PrinsFrank/pdfparser/zipball/441e0669b61e4028ba34c030d6625770c8f7e1ad",
-                "reference": "441e0669b61e4028ba34c030d6625770c8f7e1ad",
+                "url": "https://api.github.com/repos/PrinsFrank/pdfparser/zipball/5dd1606a69a453919af363e92b1a446cb861edc7",
+                "reference": "5dd1606a69a453919af363e92b1a446cb861edc7",
                 "shasum": ""
             },
             "require": {
@@ -1047,8 +1047,9 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.65",
-                "phpstan/phpstan": "2.3.3",
+                "phpstan/phpstan": "2.3.5",
                 "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.1",
                 "phpstan/phpstan-strict-rules": "^2",
                 "phpunit/phpunit": "^11.5",
                 "prinsfrank/phpstan-doc-code-analyzer": "^0.0.3",
@@ -1067,7 +1068,7 @@
             "description": "PHP library to Read and extract text & images from PDFs - Fast & Low memory - Built from scratch",
             "support": {
                 "issues": "https://github.com/PrinsFrank/pdfparser/issues",
-                "source": "https://github.com/PrinsFrank/pdfparser/tree/v4.3.0"
+                "source": "https://github.com/PrinsFrank/pdfparser/tree/v4.4.0"
             },
             "funding": [
                 {
@@ -1075,7 +1076,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-05T14:33:46+00:00"
+            "time": "2026-11-19T17:05:41+00:00"
         }
     ],
     "packages-dev": [
